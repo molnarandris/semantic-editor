@@ -168,6 +168,105 @@ Build in this order; each milestone ends with `cargo test` and `cargo clippy` cl
 7. **CeTZ diagrams (later).** Diagram block with CeTZ source, cached render (memory + disk), split-view edit with debounce.
    - Done when: editing prose next to 20 diagrams triggers zero diagram recompiles.
 
+## Wishlist after M7 (not started)
+
+Requested 2026-11-06. Grouped into proposed milestones; open questions marked **Q**.
+
+**Shared design problem.** Every block compiles as its own document, so Typst counters
+and labels do not cross blocks: every heading would be "1", and `@label` fails in a
+block that does not contain the label.
+
+Chosen approach: **counter state chained through blocks** (no whole-document compile).
+
+- Every block has a *start state* (values of the tracked counters) and an *end state*.
+  A counter-sensitive block's snippet begins with `#counter(..).update(..)` for its
+  start state and ends with a `#context metadata(..)` reporting the end state, which the
+  bridge reads from the compiled document. End state of block k = start state of k+1.
+- Tracked counters: `heading`, `math.equation`, and those the header uses (custom
+  `counter("…")`, figure kinds), found by asking the header or scanning it.
+- Only blocks that read or change counters (headings, labelled equations, theorems,
+  raw Typst, blocks with references) get the prefix and suffix. Plain paragraphs keep
+  their snippet unchanged, so they stay cached and never recompile.
+- The start state is part of a block's render key. After an edit, recompile that
+  block; if its end state changed, recompile the next counter-sensitive block, and so
+  on. Stop as soon as an end state comes out unchanged. Inserting a heading at the top
+  recompiles the later headings and theorems (a few ms each), nothing else.
+- References: the target block also reports how a reference to each of its labels reads
+  (e.g. "Theorem 2.1", formatted by the header's own rules). A block that references it
+  emits that text as a link and recompiles only when the text changes.
+- Whatever the header says (numbering patterns, theorem definitions, shared counters)
+  applies without the editor understanding it.
+- Limits: anything that needs the whole document at once (outline, "last page",
+  forward-looking `query`) is not exact in the editor; export is a normal full compile.
+  A test compares the chained numbers against a full-document compile.
+
+### M8 — Cleanup and diagram editor (items 7, 8)
+
+- **Remove the source pane** (F9, header toggle, `source_view.rs`). It was temporary.
+- **Diagram/raw editing side by side**: source on the left, live render on the right.
+  Proposed: an `adw::Dialog` (or window) with a GtkSourceView and a preview picture fed
+  by the same worker. Simpler than doing it in-page, since the block can be anywhere on
+  the page. Effort: small.
+
+### M9 — Document header and numbering (items 1, 4)
+
+- **Editable header**: the document preamble (set/show rules, imports, theorem
+  definitions). Revealed by scrolling past the top with resistance (rubber band): extra
+  scroll at offset 0 accumulates and only opens a banner past a threshold, with a
+  spring animation (`adw::SpringAnimation`). Also a menu entry. Stored in `.sem`;
+  prepended to every block snippet and to the export. Effort: medium (the overscroll
+  gesture is custom; GTK has none built in).
+- **Title, authors, date**: structured fields in the header banner (title, authors,
+  date, maybe keywords/abstract), stored in `.sem`. The serializer emits them as
+  `#set document(title: …, author: (…), date: …)`, which is the metadata (PDF info).
+  What appears on the page is up to the header: the default header shows the title
+  block (`#title()` plus an author line); the user can restyle or remove it. In the
+  editor the title block is a rendered, non-editable block at the top of the page;
+  clicking it opens the header banner at that field.
+- **Numbered headings**: number shown, not editable. With the shared design above the
+  number is part of the render but has no node, so the caret and hit-testing skip it.
+  Effort: medium (mostly the full-document introspection pass).
+
+### M10 — Labels and references (items 2, 3, 6)
+
+- **Labels** on headings, display equations (numbered when labelled) and theorems:
+  `label: Option<String>` on those blocks. Shown as a pill (drawn by the widget, in the
+  right margin, not part of the Typst render). `<` inside math is "less than", so
+  labels get a visible slot instead of a shortcut: while the caret is in a labelable
+  block, a faint "+ label" pill shows in the right margin (where the equation number
+  goes). → at the last position of the block moves the caret onto the pill; typing
+  there edits the label in place, → / Enter leave it. Clicking the pill works too.
+  Existing labels always show as pills.
+- **References**: `@` in text opens a completion popover at the caret listing labels
+  (with their kind and number), filtered as you type. New inline node `Ref(label)`,
+  an atom for the caret (Backspace selects, then deletes). Dangling refs are flagged.
+- **Navigation**: clicking a reference scrolls to its target and puts the caret there;
+  Plain click follows the link (the caret reaches a reference with the arrow keys
+  instead); Alt+Left goes back.
+- Effort: medium–large (model node, popover, label table, resolution).
+
+### M11 — Theorem-like environments (item 5)
+
+- Theorem, lemma, definition, proof, … as a container block holding paragraphs and
+  equations (the model is a flat block list today, so nesting is the main change:
+  cursor paths, ops, Enter/Backspace at the edges, Escape leaves the environment).
+- The whole environment compiles as **one** render unit (`#theorem[para \ para $ … $]`),
+  so the header's border and "Theorem 2.1 (Title)." come out exactly as in the export.
+  Spans still map glyphs to nodes, so the caret works inside. Editing inside recompiles
+  the theorem (small). "Theorem 2.1" and the proof's ∎ have no node, so they are not
+  editable; the optional title is an editable field.
+- Theorems are defined in the header by the user's own functions (packages maybe later),
+  some sharing counters. The editor knows only a list of environment names → header
+  function (e.g. `theorem`, `lemma`, `proof`), and emits `#theorem[…]` / `#theorem(title)[…]`.
+  The rendered "Theorem 2.1." and the border come from that function. The counters come
+  from the chained state above.
+- The editor **detects the environments from the header** (which the user edits): the
+  functions it defines, e.g. via the header's `#let`s, checked by compiling the header
+  and keeping those that take a body. The list updates when the header changes; nothing
+  to declare separately. Environments whose definition disappears keep their content
+  and show an error marker.
+- Effort: large; the biggest item.
+
 ## Risks, fallbacks, open questions
 
 The main risk is caret precision inside math, because Typst frames carry spans on glyphs but not the math tree's boxes.

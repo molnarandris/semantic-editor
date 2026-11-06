@@ -1,5 +1,9 @@
 # Implementation plan
 
+This file is the running record of what was built and how (per milestone, plus
+follow-ups between milestones). `spec.md` holds the goals and the wishlist of
+upcoming milestones (M8+). Both are updated with every change.
+
 Pinned: Typst **0.15.1** (`typst`, `typst-layout`, `typst-render`, `typst-pdf`, `typst-kit`),
 gtk4-rs 0.11, libadwaita 0.9, sourceview5 0.11. Rust 2024 edition.
 
@@ -125,6 +129,17 @@ Implementation notes (done; spans were fine-grained enough, no marker boxes):
 - Tests: the acceptance sequence key by key, every intermediate state compiles, and a
   keystroke fuzz test (invariants, caret validity, undo to start).
 
+Follow-ups after M5 (done):
+
+- Paired brackets `( [ {` … `) ] }` matched within a row are emitted literally so
+  Typst stretches them; unpaired ones stay as names. Glyph boxes grow to the ink
+  bounds, so stretched delimiters and big operators get their real height for the
+  caret and highlights.
+- Headings: typing `=`…`======` + space at the start of a paragraph makes it a heading
+  of that level (as in Typst); Ctrl+1…6 set the level, Ctrl+0 makes it a paragraph.
+  Backspace at the start of a heading first turns it into a paragraph, the next press
+  joins with the block before. The status hint mentions `= ` + space.
+
 ## M6 — Files and export
 
 `.sem` JSON, NodeIds regenerated on load, `.typ` and PDF export, sourceview5 pane,
@@ -158,6 +173,19 @@ Implementation notes (done):
   `win.export-typ` Ctrl+Shift+E, `win.source-pane` F9, close Ctrl+W. The app starts
   with an empty document; the M3 sample is in the menu ("Open Sample Document").
   `HANDLES_OPEN`: files passed on the command line open in their own windows.
+
+Follow-ups after M6 (done):
+
+- Source pane: GTK draws a text view's cursor only when focused, so a small
+  `sourceview5::View` subclass draws a caret bar at the mirrored position otherwise.
+  (The source pane is to be removed in M8.)
+- Block textures are drawn one texture pixel per device pixel, snapped to the device
+  pixel grid relative to the surface: fractional placement made GTK resample and
+  soften the glyphs.
+- Zoom: Ctrl+wheel, touchpad pinch, Ctrl+plus / Ctrl+minus (handled in the widget;
+  Ctrl+0 stays "make paragraph"), and menu entries incl. Reset Zoom (`win.zoom-in`, `win.zoom-out`, `win.zoom-reset`). Default 1.75×, range
+  0.75×–5×, step 1.1×. Blocks re-render at the new scale (scale is in the render key);
+  until then the old texture is scaled with linear sampling.
 
 ## M7 — CeTZ diagrams
 
