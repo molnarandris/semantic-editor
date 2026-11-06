@@ -130,4 +130,27 @@ Implementation notes (done; spans were fine-grained enough, no marker boxes):
 `.sem` JSON, NodeIds regenerated on load, `.typ` and PDF export, sourceview5 pane,
 GActions + accelerators. Test: save → load → export identical Typst.
 
+Implementation notes (done):
+
+- `app::file`: `{ "version": 1, "typst": "0.15.1", "blocks": [...] }`, pretty-printed.
+  Load regenerates ids and normalizes; newer format versions are refused. Tests:
+  save → load → export gives identical Typst and an identical file; export compiles
+  to PDF.
+- `app::window`: one `Window` per document (state kept alive by a thread-local list,
+  closures hold weak refs). Unsaved changes = blocks differ from the last saved/loaded
+  ones (so undoing back to the saved state is clean); title shows `•`, closing / opening
+  asks Save / Discard / Cancel (`adw::AlertDialog`). File dialogs are `gtk::FileDialog`
+  through the portal, IO is async (`gio::File` futures).
+- PDF: `typst_bridge::compile_pdf` (own world) on `gio::spawn_blocking`. `.typ`: the
+  serializer output. Errors and success show as toasts.
+- Source pane: `adw::OverlaySplitView` with a read-only `sourceview5::View` (F9 or the
+  header button). It follows the caret: the source cursor sits at the caret's position
+  and the innermost structure is tinted (`serialize_document_mapped`). No Typst syntax
+  definition in GtkSourceView 5.22, so plain monospace text for now.
+- Actions: `app.new` Ctrl+N (new window), `app.quit` Ctrl+Q, `win.open` Ctrl+O,
+  `win.save` Ctrl+S, `win.save-as` Ctrl+Shift+S, `win.export-pdf` Ctrl+E,
+  `win.export-typ` Ctrl+Shift+E, `win.source-pane` F9, close Ctrl+W. The app starts
+  with an empty document; the M3 sample is in the menu ("Open Sample Document").
+  `HANDLES_OPEN`: files passed on the command line open in their own windows.
+
 Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing.

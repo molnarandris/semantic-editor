@@ -296,6 +296,7 @@ impl SemEditor {
         self.sync_views();
         self.submit_blocks(true);
         self.obj().queue_resize();
+        self.obj().emit_by_name::<()>("caret-moved", &[]);
     }
 
     fn setup_input(&self) {

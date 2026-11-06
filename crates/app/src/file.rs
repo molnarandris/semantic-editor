@@ -1,0 +1,89 @@
+//! `.sem` files: JSON with a format version, the Typst version the document
+//! was written with, and the blocks. Node ids are not stored; they are
+//! regenerated on load.
+
+use model::{BlockNode, Document};
+use serde::{Deserialize, Serialize};
+
+/// Version of the file format written by this build.
+pub const FORMAT_VERSION: u32 = 1;
+
+#[derive(Serialize)]
+struct SemFileOut<'a> {
+    version: u32,
+    typst: &'a str,
+    blocks: &'a [BlockNode],
+}
+
+#[derive(Deserialize)]
+struct SemFileIn {
+    version: u32,
+    #[allow(dead_code)]
+    typst: String,
+    blocks: Vec<BlockNode>,
+}
+
+/// The file contents for a document (pretty-printed, ends with a newline).
+pub fn to_json(doc: &Document) -> String {
+    let file = SemFileOut {
+        version: FORMAT_VERSION,
+        typst: typst_bridge::TYPST_VERSION,
+        blocks: &doc.blocks,
+    };
+    let mut out = serde_json::to_string_pretty(&file).expect("documents always serialize");
+    out.push('\n');
+    out
+}
+
+/// Parse a `.sem` file. The document gets fresh node ids and its structural
+/// invariants restored.
+pub fn from_json(text: &str) -> Result<Document, String> {
+    let file: SemFileIn =
+        serde_json::from_str(text).map_err(|e| format!("not a valid .sem file: {e}"))?;
+    if file.version > FORMAT_VERSION {
+        return Err(format!(
+            "file format version {} is newer than this app supports ({FORMAT_VERSION})",
+            file.version
+        ));
+    }
+    let mut doc = Document::empty();
+    doc.blocks = file.blocks;
+    doc.regenerate_ids();
+    doc.check_invariants()?;
+    Ok(doc)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sample;
+    use typst_bridge::{compile_pdf, serialize_document};
+
+    /// The milestone's acceptance check: save → load → export gives the
+    /// same Typst, and saving again gives the same file.
+    #[test]
+    fn save_load_export_roundtrip() {
+        let doc = sample::document();
+        let saved = to_json(&doc);
+        let loaded = from_json(&saved).unwrap();
+        assert_eq!(serialize_document(&loaded), serialize_document(&doc));
+        assert_eq!(to_json(&loaded), saved);
+        assert!(saved.contains("\"version\": 1"));
+        assert!(saved.contains(&format!("\"typst\": \"{}\"", typst_bridge::TYPST_VERSION)));
+    }
+
+    #[test]
+    fn exported_typst_compiles_to_pdf() {
+        let pdf = compile_pdf(&serialize_document(&sample::document())).unwrap();
+        assert!(pdf.starts_with(b"%PDF-"));
+    }
+
+    #[test]
+    fn bad_files_are_rejected() {
+        assert!(from_json("{").is_err());
+        assert!(from_json(r#"{"version": 99, "typst": "x", "blocks": []}"#).is_err());
+        // An empty document gets its one paragraph back.
+        let doc = from_json(r#"{"version": 1, "typst": "0.15.1", "blocks": []}"#).unwrap();
+        assert_eq!(doc.blocks.len(), 1);
+    }
+}

@@ -1,9 +1,13 @@
-//! Application shell: window, header bar, status bar, files, export.
+//! Application shell: windows, actions and shortcuts, files, export.
 
+mod file;
 mod sample;
+mod window;
 
 use adw::prelude::*;
-use editor_widget::SemEditor;
+use gtk::gio;
+
+use window::Window;
 
 /// Set by the Flatpak manifest (`.Devel` builds); falls back to the release ID.
 const APP_ID: &str = match option_env!("APP_ID") {
@@ -12,99 +16,63 @@ const APP_ID: &str = match option_env!("APP_ID") {
 };
 
 fn main() -> gtk::glib::ExitCode {
-    let app = adw::Application::builder().application_id(APP_ID).build();
-    app.connect_activate(build_window);
+    let app = adw::Application::builder()
+        .application_id(APP_ID)
+        .flags(gio::ApplicationFlags::HANDLES_OPEN)
+        .build();
+    app.connect_startup(setup_actions);
+    app.connect_activate(|app| {
+        let window = Window::new(app);
+        window.present();
+        if let Ok(path) = std::env::var("SEM_SCREENSHOT") {
+            screenshot_and_quit(app, &window.window, path);
+        }
+    });
+    app.connect_open(|app, files, _| {
+        for file in files {
+            let window = Window::new(app);
+            window.open_file(file.clone());
+            window.present();
+        }
+    });
     app.run()
 }
 
-fn build_window(app: &adw::Application) {
-    let header = adw::HeaderBar::builder()
-        .title_widget(&adw::WindowTitle::new("notes.sem", "Semantic Editor"))
-        .build();
-
-    let editor = SemEditor::new();
-    editor.set_document(sample::document());
-    let scroller = gtk::ScrolledWindow::builder()
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .vexpand(true)
-        .child(&editor)
-        .build();
-
-    let status = status_bar(&editor);
-
-    let content = adw::ToolbarView::new();
-    content.add_top_bar(&header);
-    content.set_content(Some(&scroller));
-    content.add_bottom_bar(&status);
-
-    let window = adw::ApplicationWindow::builder()
-        .application(app)
-        .title("notes.sem — Semantic Editor")
-        .default_width(900)
-        .default_height(760)
-        .content(&content)
-        .build();
-    if APP_ID.ends_with(".Devel") {
-        window.add_css_class("devel");
-    }
-    window.present();
-    editor.grab_focus();
-
-    if let Ok(path) = std::env::var("SEM_SCREENSHOT") {
-        screenshot_and_quit(app, &window, path);
-    }
-}
-
-/// Breadcrumb of the caret (each entry selects its structure) and a key hint.
-fn status_bar(editor: &SemEditor) -> gtk::Box {
-    let bar = gtk::Box::builder()
-        .orientation(gtk::Orientation::Horizontal)
-        .margin_start(6)
-        .margin_end(12)
-        .margin_top(2)
-        .margin_bottom(2)
-        .build();
-    let crumbs = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    let hint = gtk::Label::builder()
-        .hexpand(true)
-        .xalign(1.0)
-        .css_classes(["caption", "dim-label"])
-        .build();
-    bar.append(&crumbs);
-    bar.append(&hint);
-
-    let update = move |editor: &SemEditor| {
-        while let Some(child) = crumbs.first_child() {
-            crumbs.remove(&child);
+fn setup_actions(app: &adw::Application) {
+    let new = gio::SimpleAction::new("new", None);
+    let weak = app.downgrade();
+    new.connect_activate(move |_, _| {
+        if let Some(app) = weak.upgrade() {
+            Window::new(&app).present();
         }
-        for (i, crumb) in editor.breadcrumb().into_iter().enumerate() {
-            if i > 0 {
-                let sep = gtk::Label::builder()
-                    .label("›")
-                    .css_classes(["caption", "dim-label"])
-                    .build();
-                crumbs.append(&sep);
+    });
+    app.add_action(&new);
+
+    let quit = gio::SimpleAction::new("quit", None);
+    let weak = app.downgrade();
+    quit.connect_activate(move |_, _| {
+        if let Some(app) = weak.upgrade() {
+            // Each window asks about unsaved changes on its own.
+            for window in app.windows() {
+                window.close();
             }
-            let button = gtk::Button::builder()
-                .label(crumb.label)
-                .css_classes(["flat", "caption"])
-                .focusable(false)
-                .tooltip_text("Select")
-                .build();
-            let weak = editor.downgrade();
-            button.connect_clicked(move |_| {
-                if let Some(editor) = weak.upgrade() {
-                    editor.select_crumb(&crumb);
-                    editor.grab_focus();
-                }
-            });
-            crumbs.append(&button);
         }
-        hint.set_label(editor.hint());
-    };
-    update(editor);
-    editor.connect_caret_moved(update);
-    bar
+    });
+    app.add_action(&quit);
+
+    for (action, accels) in [
+        ("app.new", &["<Control>n"][..]),
+        ("app.quit", &["<Control>q"]),
+        ("win.open", &["<Control>o"]),
+        ("win.save", &["<Control>s"]),
+        ("win.save-as", &["<Control><Shift>s"]),
+        ("win.export-pdf", &["<Control>e"]),
+        ("win.export-typ", &["<Control><Shift>e"]),
+        ("win.source-pane", &["F9"]),
+        ("window.close", &["<Control>w"]),
+    ] {
+        app.set_accels_for_action(action, accels);
+    }
 }
 
 /// Debug aid: save a PNG of the window once the first renders are in, then

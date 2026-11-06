@@ -400,13 +400,24 @@ pub fn serialize_block(block: &BlockNode) -> (String, SpanMap) {
 
 /// The whole document as one Typst file: preamble + blocks.
 pub fn serialize_document(doc: &Document) -> String {
+    serialize_document_mapped(doc).0
+}
+
+/// The whole document as one Typst file, with a span map over all blocks
+/// (for the source pane).
+pub fn serialize_document_mapped(doc: &Document) -> (String, SpanMap) {
     let mut out = String::from(PREAMBLE);
+    let mut map = SpanMap::default();
     for block in &doc.blocks {
         out.push('\n');
-        out.push_str(&serialize_block(block).0);
+        let (snippet, mut block_map) = serialize_block(block);
+        block_map.shift(out.len());
+        map.entries.append(&mut block_map.entries);
+        map.texts.append(&mut block_map.texts);
+        out.push_str(&snippet);
         out.push('\n');
     }
-    out
+    (out, map)
 }
 
 #[cfg(test)]
@@ -573,6 +584,25 @@ mod tests {
         let block = d.display(nodes);
         // `(` pairs with `]`? No: `[` pairs with `)`, `(` with `]`; `{` stays alone.
         assert_eq!(ser(&block), "$ ( [ a ) ] brace.l ( b ) $");
+    }
+
+    #[test]
+    fn document_map_points_into_the_whole_source() {
+        let mut d = Document::empty();
+        let t = d.text("Hi ");
+        let x = d.ident("x");
+        let xid = x.id;
+        let m = d.math(vec![x]);
+        let p = d.paragraph(vec![t, m]);
+        let y = d.ident("y");
+        let yid = y.id;
+        let disp = d.display(vec![y]);
+        d.blocks = vec![p, disp];
+        let (src, map) = serialize_document_mapped(&d);
+        assert_eq!(src, serialize_document(&d));
+        assert_eq!(&src[map.range(xid).unwrap()], "x");
+        assert_eq!(&src[map.range(yid).unwrap()], "y");
+        assert!(src.ends_with("$ y $\n"));
     }
 
     #[test]

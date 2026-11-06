@@ -11,7 +11,7 @@ use std::cell::Ref;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use model::{Crumb, Document};
+use model::{Crumb, CursorPath, Document, NodeId};
 
 glib::wrapper! {
     pub struct SemEditor(ObjectSubclass<imp::SemEditor>)
@@ -37,6 +37,15 @@ impl SemEditor {
 
     pub fn document(&self) -> Ref<'_, Document> {
         Ref::map(self.imp().editor.borrow(), |e| e.doc())
+    }
+
+    pub fn caret(&self) -> CursorPath {
+        self.imp().editor.borrow().caret().clone()
+    }
+
+    /// The innermost structure (or formula) around the caret, if in math.
+    pub fn current_node(&self) -> Option<NodeId> {
+        self.imp().editor.borrow().context_ids().last().copied()
     }
 
     /// Breadcrumb of the caret, e.g. paragraph › math › fraction › numerator.

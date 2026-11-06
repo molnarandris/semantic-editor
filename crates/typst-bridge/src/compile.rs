@@ -58,6 +58,15 @@ pub fn render_page(page: &Page, pixel_per_pt: f64) -> Raster {
     }
 }
 
+/// Compile a whole document (e.g. from `serialize_document`) and export it as
+/// PDF. Uses its own world, so it can run on any thread.
+pub fn compile_pdf(source: &str) -> Result<Vec<u8>, Vec<String>> {
+    let mut world = BridgeWorld::new();
+    let doc = compile(&mut world, source)?;
+    typst_pdf::pdf(&doc, &typst_pdf::PdfOptions::default())
+        .map_err(|errors| errors.iter().map(|e| e.message.to_string()).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
