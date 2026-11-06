@@ -177,11 +177,16 @@ impl Writer {
             if row.nodes.is_empty() {
                 w.out.push_str(SLOT);
             }
+            let paired = paired_delimiters(&row.nodes);
             for (i, node) in row.nodes.iter().enumerate() {
                 if i > 0 {
                     w.out.push(' ');
                 }
-                w.math(node);
+                match (&node.kind, paired[i]) {
+                    // Literal, so Typst scales the pair to its content.
+                    (MathKind::Sym(d), true) => w.node(node.id, |w| w.out.push_str(d)),
+                    _ => w.math(node),
+                }
             }
         });
     }
@@ -229,6 +234,31 @@ impl Writer {
             }
         });
     }
+}
+
+/// Which nodes of a row are brackets that pair up. Typst pairs any literal
+/// opening `( [ {` with the next unpaired closing `) ] }` (so `[a, b)` works)
+/// and scales the pair. Paired brackets are emitted literally; unpaired ones
+/// as names (`paren.l`), which cannot break the grouping around them.
+fn paired_delimiters(nodes: &[MathNode]) -> Vec<bool> {
+    let mut paired = vec![false; nodes.len()];
+    let mut open = vec![];
+    for (i, node) in nodes.iter().enumerate() {
+        let MathKind::Sym(s) = &node.kind else {
+            continue;
+        };
+        match s.as_str() {
+            "(" | "[" | "{" => open.push(i),
+            ")" | "]" | "}" => {
+                if let Some(j) = open.pop() {
+                    paired[i] = true;
+                    paired[j] = true;
+                }
+            }
+            _ => {}
+        }
+    }
+    paired
 }
 
 /// A base that can take `^`/`_` directly: exactly one atom.
@@ -401,7 +431,7 @@ mod tests {
         cases.push((
             "special symbols",
             d.display(syms),
-            "$ comma semi paren.l paren.r bar.v slash amp \\# \\$ → \\@ $",
+            "$ comma semi ( ) bar.v slash amp \\# \\$ → \\@ $",
         ));
 
         let t = d.text("1. Use *bold* and _x_ #code $5 @ref <l> [a] a~b // c -- d -? e/f - g");
@@ -477,6 +507,23 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn paired_brackets_are_literal() {
+        let mut d = Document::empty();
+        let nodes = ["(", "[", "a", ")", "]", "{", "(", "b", ")"]
+            .map(|s| {
+                if s.len() == 1 && s.chars().all(char::is_alphabetic) {
+                    d.ident(s)
+                } else {
+                    d.sym(s)
+                }
+            })
+            .to_vec();
+        let block = d.display(nodes);
+        // `(` pairs with `]`? No: `[` pairs with `)`, `(` with `]`; `{` stays alone.
+        assert_eq!(ser(&block), "$ ( [ a ) ] brace.l ( b ) $");
     }
 
     #[test]

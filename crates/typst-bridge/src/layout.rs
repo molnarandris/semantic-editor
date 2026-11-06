@@ -138,14 +138,24 @@ impl Walker<'_> {
                 }
                 FrameItem::Text(text) => {
                     let metrics = text.font.metrics();
-                    let ascent = metrics.ascender.at(text.size);
-                    let descent = metrics.descender.at(text.size); // negative
+                    // Vertical extent relative to the baseline (y down): the
+                    // font's line metrics, grown to the ink so stretched
+                    // delimiters and big operators get their real height.
+                    let mut top = -metrics.ascender.at(text.size).to_pt();
+                    let mut bottom = -metrics.descender.at(text.size).to_pt();
+                    let ink = text.bbox();
+                    let (y0, y1) = (ink.min.y.to_pt(), ink.max.y.to_pt());
+                    if y0.is_finite() && y1.is_finite() {
+                        top = top.min(y0.min(y1));
+                        bottom = bottom.max(y0.max(y1));
+                    }
+                    let (top, bottom) = (Abs::pt(top), Abs::pt(bottom));
                     let mut x = pos.x;
                     for glyph in &text.glyphs {
                         let advance = glyph.x_advance.at(text.size);
                         let left = x + glyph.x_offset.at(text.size);
-                        let a = Point::new(left, pos.y - ascent).transform(ts);
-                        let b = Point::new(left + advance, pos.y - descent).transform(ts);
+                        let a = Point::new(left, pos.y + top).transform(ts);
+                        let b = Point::new(left + advance, pos.y + bottom).transform(ts);
                         let rect = Rect::from_corners(a, b);
                         x += advance;
                         let (span, delta) = glyph.span;
@@ -342,6 +352,31 @@ mod tests {
         );
         assert!(n.w > 2.0 && n.h > 2.0, "{n:?}");
         assert!(n.bottom() <= dn.y + 1.0);
+    }
+
+    /// Paired brackets grow with their content, as in plain Typst.
+    #[test]
+    fn brackets_scale_around_fractions() {
+        let height_of_open = |tall: bool, open: &str, close: &str| {
+            let mut d = Document::empty();
+            let inner = if tall {
+                let (a, b) = (d.ident("a"), d.ident("b"));
+                d.frac(vec![a], vec![b])
+            } else {
+                d.ident("a")
+            };
+            let (o, c) = (d.sym(open), d.sym(close));
+            let oid = o.id;
+            let block = d.display(vec![o, inner, c]);
+            layout_of(&block).box_of(oid).expect("bracket box").h
+        };
+        for (open, close) in [("(", ")"), ("[", "]"), ("{", "}"), ("[", ")")] {
+            let (small, big) = (
+                height_of_open(false, open, close),
+                height_of_open(true, open, close),
+            );
+            assert!(big > 1.4 * small, "{open}{close}: {small} → {big}");
+        }
     }
 
     #[test]
