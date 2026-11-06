@@ -11,7 +11,8 @@ pub mod world;
 pub use compile::{BLOCK_PAD_PT, Raster, block_document, compile, compile_pdf, render_page};
 pub use layout::{BlockLayout, GlyphBox, RawLayout, Rect, raw_layout};
 pub use serialize::{
-    PREAMBLE, SpanMap, serialize_block, serialize_document, serialize_document_mapped,
+    PREAMBLE, SpanMap, Style, serialize_block, serialize_block_styled, serialize_document,
+    serialize_document_mapped,
 };
 pub use symbols::resolve_symbol;
 pub use worker::{CompileJob, CompileResult, Rendered, Worker};

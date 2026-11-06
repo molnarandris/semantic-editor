@@ -22,7 +22,8 @@ pub const PREAMBLE: &str = "\
 pub const SLOT: &str = "#sem-slot()";
 
 /// Typst's predefined math operators (`typst-library` `math/op.rs`): name,
-/// displayed text, and whether attachments go above/below in display math.
+/// displayed text (`liminf` has a thin space, U+2009), and whether
+/// attachments go above/below in display math.
 ///
 /// They are emitted as `op(#[log])` rather than `log`: the predefined ones
 /// take their text from the library, so their glyphs carry library spans and
@@ -54,8 +55,8 @@ const OPERATORS: &[(&str, &str, bool)] = &[
     ("ker", "ker", false),
     ("lg", "lg", false),
     ("lim", "lim", true),
-    ("liminf", "lim inf", true),
-    ("limsup", "lim sup", true),
+    ("liminf", "lim\u{2009}inf", true),
+    ("limsup", "lim\u{2009}sup", true),
     ("ln", "ln", false),
     ("log", "log", false),
     ("max", "max", true),
@@ -136,9 +137,25 @@ impl SpanMap {
     }
 }
 
+/// How the Typst source is written.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Style {
+    /// For the editor's own renders: every glyph must carry a span inside
+    /// the node it belongs to, so groups are always parenthesized and
+    /// operators spelled `op(#[log])`.
+    Edit,
+    /// For people (export, source pane): brackets only where Typst needs
+    /// them, plain operator names, literal punctuation. Renders the same.
+    Readable,
+}
+
 struct Writer {
     out: String,
     map: SpanMap,
+    style: Style,
+    /// Depth of function-call arguments (`attach(…)`), where a literal comma
+    /// would end the argument.
+    args: usize,
 }
 
 impl Writer {
@@ -223,7 +240,7 @@ impl Writer {
             }
             let paired = paired_delimiters(&row.nodes);
             for (i, node) in row.nodes.iter().enumerate() {
-                if i > 0 {
+                if i > 0 && w.space_between(&row.nodes[i - 1], node, paired[i - 1], paired[i]) {
                     w.out.push(' ');
                 }
                 match (&node.kind, paired[i]) {
@@ -235,34 +252,68 @@ impl Writer {
         });
     }
 
+    /// Whether to put a space between two neighbouring nodes. Spaces between
+    /// atoms do not change Typst's output; the readable style drops them
+    /// only next to brackets and punctuation, where no identifier can form.
+    fn space_between(&self, a: &MathNode, b: &MathNode, a_paired: bool, b_paired: bool) -> bool {
+        if self.style == Style::Edit {
+            return true;
+        }
+        let sym = |n: &MathNode, set: &[&str]| matches!(&n.kind, MathKind::Sym(s) if set.contains(&s.as_str()));
+        let opens = a_paired && sym(a, &["(", "[", "{"]);
+        let closes = b_paired && sym(b, &[")", "]", "}"]);
+        let punct = self.args == 0 && sym(b, &[",", ";"]);
+        // `f(x)`: a single letter is never a function call in Typst math.
+        let applied = b_paired
+            && sym(b, &["("])
+            && matches!(&a.kind, MathKind::Ident(s) if s.chars().count() == 1);
+        !(opens || closes || punct || applied)
+    }
+
+    /// A row as a fraction part or script: bare if it is one atom (readable
+    /// style), else in parentheses, which Typst removes.
+    fn group(&mut self, row: &MathRow) {
+        if self.style == Style::Readable && is_atom(row) {
+            self.row(row);
+        } else {
+            self.out.push('(');
+            self.row(row);
+            self.out.push(')');
+        }
+    }
+
     fn math(&mut self, node: &MathNode) {
         self.node(node.id, |w| match &node.kind {
-            MathKind::Sym(s) => w.out.push_str(&sym_source(s)),
-            MathKind::Ident(s) => w.out.push_str(&ident_source(s)),
+            MathKind::Sym(s) => {
+                let literal =
+                    w.style == Style::Readable && w.args == 0 && matches!(s.as_str(), "," | ";");
+                w.out
+                    .push_str(&if literal { s.clone() } else { sym_source(s) });
+            }
+            MathKind::Ident(s) => w.out.push_str(&ident_source(s, w.style)),
             MathKind::Num(s) => w.out.push_str(&num_source(s)),
             MathKind::Slot => w.out.push_str(SLOT),
             MathKind::Frac { num, den } => {
-                w.out.push('(');
-                w.row(num);
-                w.out.push_str(")/(");
-                w.row(den);
-                w.out.push(')');
+                w.group(num);
+                w.out.push('/');
+                w.group(den);
             }
             MathKind::Scripts { base, sup, sub } => {
-                if is_simple_base(base) {
+                if is_simple_base(base) || w.style == Style::Readable && is_bracket_group(base) {
+                    // A bracketed group takes scripts as a whole and keeps
+                    // its brackets, as `attach` does.
                     w.row(base);
                     if let Some(sup) = sup {
-                        w.out.push_str("^(");
-                        w.row(sup);
-                        w.out.push(')');
+                        w.out.push('^');
+                        w.group(sup);
                     }
                     if let Some(sub) = sub {
-                        w.out.push_str("_(");
-                        w.row(sub);
-                        w.out.push(')');
+                        w.out.push('_');
+                        w.group(sub);
                     }
                 } else {
                     // `(a b)^2` would show the parentheses; attach() does not.
+                    w.args += 1;
                     w.out.push_str("attach(");
                     w.row(base);
                     if let Some(sup) = sup {
@@ -274,6 +325,7 @@ impl Writer {
                         w.row(sub);
                     }
                     w.out.push(')');
+                    w.args -= 1;
                 }
             }
         });
@@ -303,6 +355,49 @@ fn paired_delimiters(nodes: &[MathNode]) -> Vec<bool> {
         }
     }
     paired
+}
+
+/// A row that can stand without parentheses as a fraction part or script:
+/// one number, single-letter or quoted identifier, letter-like symbol, or
+/// slot.
+fn is_atom(row: &MathRow) -> bool {
+    match row.nodes.as_slice() {
+        [] => true, // an empty slot
+        [node] => match &node.kind {
+            MathKind::Num(_) | MathKind::Slot => true,
+            MathKind::Ident(s) => !OPERATORS.iter().any(|(name, ..)| name == s),
+            MathKind::Sym(s) => s.chars().count() == 1 && s.chars().all(char::is_alphanumeric),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+/// A row that is one bracket pair around the rest: `(a b)`, `[0, 1)`.
+fn is_bracket_group(row: &MathRow) -> bool {
+    let n = row.nodes.len();
+    if n < 2 {
+        return false;
+    }
+    // The first bracket must pair with the last one, not close earlier.
+    let mut depth = 0;
+    for (i, node) in row.nodes.iter().enumerate() {
+        match &node.kind {
+            MathKind::Sym(s) if matches!(s.as_str(), "(" | "[" | "{") => depth += 1,
+            MathKind::Sym(s) if matches!(s.as_str(), ")" | "]" | "}") => {
+                depth -= 1;
+                if depth == 0 && i + 1 < n {
+                    return false;
+                }
+            }
+            _ if i == 0 => return false,
+            _ => {}
+        }
+        if depth < 0 {
+            return false;
+        }
+    }
+    depth == 0
 }
 
 /// A base that can take `^`/`_` directly: exactly one atom.
@@ -369,13 +464,18 @@ fn sym_source(s: &str) -> String {
     }
 }
 
-fn ident_source(s: &str) -> String {
+fn ident_source(s: &str, style: Style) -> String {
     let mut chars = s.chars();
     match (chars.next(), chars.next()) {
         (Some(c), None) if c.is_alphabetic() => s.into(),
+        _ if style == Style::Readable && OPERATORS.iter().any(|(name, ..)| *name == s) => s.into(),
         _ => match OPERATORS.iter().find(|(name, ..)| *name == s) {
-            Some((_, text, true)) => format!("op(#[{text}], limits: #true)"),
-            Some((_, text, false)) => format!("op(#[{text}])"),
+            // `liminf`'s thin space is a literal U+2009 in the text, as in
+            // Typst's own definition, so the text stays one run.
+            Some((_, text, limits)) => {
+                let limits = if *limits { ", limits: #true" } else { "" };
+                format!("op(#[{text}]{limits})")
+            }
             None => quoted(s),
         },
     }
@@ -390,27 +490,34 @@ fn num_source(s: &str) -> String {
 
 /// Serialize one block into a standalone snippet and its span map.
 pub fn serialize_block(block: &BlockNode) -> (String, SpanMap) {
+    serialize_block_styled(block, Style::Edit)
+}
+
+/// Serialize one block in the given style.
+pub fn serialize_block_styled(block: &BlockNode, style: Style) -> (String, SpanMap) {
     let mut w = Writer {
         out: String::new(),
         map: SpanMap::default(),
+        style,
+        args: 0,
     };
     w.block(block);
     (w.out, w.map)
 }
 
-/// The whole document as one Typst file: preamble + blocks.
+/// The whole document as one readable Typst file: preamble + blocks.
 pub fn serialize_document(doc: &Document) -> String {
     serialize_document_mapped(doc).0
 }
 
-/// The whole document as one Typst file, with a span map over all blocks
-/// (for the source pane).
+/// The whole document as one readable Typst file, with a span map over all
+/// blocks (for the source pane).
 pub fn serialize_document_mapped(doc: &Document) -> (String, SpanMap) {
     let mut out = String::from(PREAMBLE);
     let mut map = SpanMap::default();
     for block in &doc.blocks {
         out.push('\n');
-        let (snippet, mut block_map) = serialize_block(block);
+        let (snippet, mut block_map) = serialize_block_styled(block, Style::Readable);
         block_map.shift(out.len());
         map.entries.append(&mut block_map.entries);
         map.texts.append(&mut block_map.texts);
@@ -603,6 +710,80 @@ mod tests {
         assert_eq!(&src[map.range(xid).unwrap()], "x");
         assert_eq!(&src[map.range(yid).unwrap()], "y");
         assert!(src.ends_with("$ y $\n"));
+    }
+
+    /// Typed formulas, in the editor's model.
+    fn typed(keys: &str) -> BlockNode {
+        let mut d = Document::empty();
+        let b = d.display(vec![]);
+        d.blocks = vec![b];
+        let mut e = model::Editor::new(d);
+        e.set_symbol_resolver(crate::resolve_symbol);
+        e.insert_text(keys);
+        e.insert_text(" ");
+        e.doc().blocks[0].clone()
+    }
+
+    fn readable(keys: &str) -> String {
+        serialize_block_styled(&typed(keys), Style::Readable).0
+    }
+
+    #[test]
+    fn readable_style() {
+        assert_eq!(readable("1/2"), "$ 1/2 $");
+        assert_eq!(readable("(a+b)/2"), "$ (a + b)/2 $");
+        assert_eq!(readable("S <= (log chi)/(2) + c"), "$ S ≤ (log χ)/2 + c $");
+        assert_eq!(readable("x^2"), "$ x^2 $");
+        assert_eq!(readable("x^(n+1)_i"), "$ x^(n + 1)_i $");
+        assert_eq!(readable("f(x, y)"), "$ f(x, y) $");
+        assert_eq!(readable("sin(x)"), "$ sin (x) $");
+        assert_eq!(readable("lim_(n -> oo) a"), "$ lim_(n → ∞) a $");
+        assert_eq!(readable("(a b)^2"), "$ (a b)^2 $");
+        assert_eq!(readable("/"), "$ #sem-slot()/#sem-slot() $");
+    }
+
+    /// The readable style must render exactly like the edit style: compare
+    /// pixels for many formulas, including every state while typing them.
+    #[test]
+    fn readable_renders_like_edit() {
+        let mut world = BridgeWorld::new();
+        let formulas = [
+            "S <= (log chi)/(2) + c",
+            "a b/c d + 3 1/2 + e^x/2 + 1/2/3",
+            "x^12 + x^1.5 + x_(i j)^2 + x' + f'(x)",
+            "f(x, y) + g (x) + [a, b) + {1; 2}",
+            "lim_(n -> oo) a_n + max_(x in A) f + liminf x",
+            "(a+b)^2 + (x, y)^2_1 + sum_(i=1)^n i",
+            "alpha/beta + oo/2 + (-1)/2 + -1/2 + 2/(-x)",
+            "e^(-x^2/2) + sqrt + \\foo + 1.5/2.5",
+            "| x | + (a | b) + a, b; c",
+            "/ + x^ + (/)/ + ^/_",
+        ];
+        let render = |world: &mut BridgeWorld, snippet: &str| {
+            let (src, _) = block_document(snippet, 400.0);
+            let doc = compile(world, &src).unwrap_or_else(|e| panic!("{e:?}\n{src}"));
+            crate::render_page(&doc.pages()[0], 2.0).data
+        };
+        for keys in formulas {
+            let mut d = Document::empty();
+            let b = d.display(vec![]);
+            d.blocks = vec![b];
+            let mut e = model::Editor::new(d);
+            e.set_symbol_resolver(crate::resolve_symbol);
+            for c in keys.chars() {
+                e.insert_text(&c.to_string());
+                let block = &e.doc().blocks[0];
+                let edit = serialize_block_styled(block, Style::Edit).0;
+                let read = serialize_block_styled(block, Style::Readable).0;
+                if edit == read {
+                    continue;
+                }
+                assert!(
+                    render(&mut world, &edit) == render(&mut world, &read),
+                    "renders differ after {c:?} in {keys:?}:\n  edit:     {edit}\n  readable: {read}"
+                );
+            }
+        }
     }
 
     #[test]

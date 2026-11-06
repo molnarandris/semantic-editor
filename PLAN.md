@@ -141,6 +141,12 @@ Implementation notes (done):
   ones (so undoing back to the saved state is clean); title shows `•`, closing / opening
   asks Save / Discard / Cancel (`adw::AlertDialog`). File dialogs are `gtk::FileDialog`
   through the portal, IO is async (`gio::File` futures).
+- Two serializer styles. `Style::Edit` (per-block renders) keeps every glyph's span in
+  its node: always-parenthesized groups, `op(#[log])`. `Style::Readable` (export,
+  source pane): `1/2`, `(a + b)/2`, `x^2`, `x^(n + 1)`, `(a b)^2`, plain `log`, literal
+  `,`/`;` (not inside `attach` args), `f(x)` for single letters. A test renders both
+  styles for many formulas and every typing state and requires identical pixels (this
+  caught `liminf`: Typst's text has a U+2009 thin space).
 - PDF: `typst_bridge::compile_pdf` (own world) on `gio::spawn_blocking`. `.typ`: the
   serializer output. Errors and success show as toasts.
 - Source pane: `adw::OverlaySplitView` with a read-only `sourceview5::View` (F9 or the

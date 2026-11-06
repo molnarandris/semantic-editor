@@ -383,7 +383,7 @@ mod tests {
     /// must still map back to the node.
     #[test]
     fn operators_have_boxes() {
-        for name in ["log", "lim", "sin", "max"] {
+        for name in ["log", "lim", "sin", "max", "liminf"] {
             let mut d = Document::empty();
             let (x, op) = (d.ident("x"), d.ident(name));
             let (xid, oid) = (x.id, op.id);
