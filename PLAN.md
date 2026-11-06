@@ -86,6 +86,8 @@ Implementation notes (done):
   the nearest stop; ↑/↓/Home/End use the same lines with a sticky goal column.
 - No debounce: the worker already drops superseded jobs and a paragraph compiles in a
   few ms. Until the new render arrives the caret uses the previous layout.
+- Spaces Typst would collapse (doubled, leading a paragraph) are never stored: typing
+  skips them, and deletes and joins remove the extra one. The caret blinks without a timeout.
 - Not yet: selection, typing inside math (formulas are passed over as one step), editing
   raw Typst blocks in the canvas, preedit display for input methods.
 

@@ -42,6 +42,12 @@ struct TextPos<'a> {
     len: usize,
 }
 
+impl TextPos<'_> {
+    fn chars(&self) -> Vec<char> {
+        text_of(&self.inlines[self.inline]).chars().collect()
+    }
+}
+
 impl Default for Editor {
     fn default() -> Self {
         Self::new(Document::new())
@@ -157,15 +163,30 @@ impl Editor {
     }
 
     /// Insert typed text at the caret (text inlines only for now).
+    ///
+    /// Typst collapses runs of spaces and drops spaces at the start of a
+    /// paragraph, so such spaces are not inserted at all: the model only
+    /// holds text that is visible.
     pub fn insert_text(&mut self, s: &str) -> bool {
-        let s: String = s
-            .chars()
-            .map(|c| if c == '\n' || c == '\t' { ' ' } else { c })
-            .filter(|c| !c.is_control())
-            .collect();
         let Some(pos) = self.text_pos() else {
             return false;
         };
+        let chars = pos.chars();
+        let mut space_before = pos.offset == 0 && pos.inline == 0
+            || pos.offset > 0 && chars[pos.offset - 1].is_whitespace();
+        let mut out = String::new();
+        for c in s.chars() {
+            let c = if c.is_whitespace() { ' ' } else { c };
+            if c.is_control() || c == ' ' && space_before {
+                continue;
+            }
+            space_before = c == ' ';
+            out.push(c);
+        }
+        if chars.get(pos.offset).is_some_and(|c| c.is_whitespace()) && out.ends_with(' ') {
+            out.pop();
+        }
+        let s = out;
         if s.is_empty() {
             return false;
         }
@@ -191,17 +212,8 @@ impl Editor {
             return self.backspace_block();
         };
         let block_id = pos.block.id;
-        let id = pos.inlines[pos.inline].id;
         if pos.offset > 0 {
-            let after = CursorPath {
-                offset: pos.offset - 1,
-                ..self.caret.clone()
-            };
-            let op = Op::Delete {
-                seq: Seq::Text(id),
-                index: pos.offset - 1,
-                count: 1,
-            };
+            let (op, after) = self.delete_char(&pos, pos.offset - 1);
             return self.commit(vec![op], after, Last::Deleting);
         }
         if pos.inline >= 2 {
@@ -226,6 +238,32 @@ impl Editor {
         let caret = self.doc.block_end(b - 1);
         self.set_caret(caret);
         true
+    }
+
+    /// Delete char `k` of the caret's text; also a space that would end up
+    /// doubled or leading the paragraph. Returns the op and the new caret.
+    fn delete_char(&self, pos: &TextPos, k: usize) -> (Op, CursorPath) {
+        let chars = pos.chars();
+        let ws = |i: usize| chars.get(i).is_some_and(|c| c.is_whitespace());
+        let leading = k == 0 && pos.inline == 0 && ws(1);
+        let doubled = k > 0 && ws(k - 1) && ws(k + 1);
+        let (index, count) = if doubled {
+            (k - 1, 2)
+        } else if leading {
+            (0, 2)
+        } else {
+            (k, 1)
+        };
+        let op = Op::Delete {
+            seq: Seq::Text(pos.inlines[pos.inline].id),
+            index,
+            count,
+        };
+        let after = CursorPath {
+            offset: index,
+            ..self.caret.clone()
+        };
+        (op, after)
     }
 
     /// Backspace at the start of a display-math or raw block: an empty
@@ -253,14 +291,8 @@ impl Editor {
             return false;
         };
         let block_id = pos.block.id;
-        let id = pos.inlines[pos.inline].id;
         if pos.offset < pos.len {
-            let op = Op::Delete {
-                seq: Seq::Text(id),
-                index: pos.offset,
-                count: 1,
-            };
-            let after = self.caret.clone();
+            let (op, after) = self.delete_char(&pos, pos.offset);
             return self.commit(vec![op], after, Last::Deleting);
         }
         if pos.inline + 2 < pos.inlines.len() {
@@ -451,6 +483,16 @@ fn text_of(inline: &InlineNode) -> &str {
     }
 }
 
+/// The text to append to `head` when joining it with `tail`, without
+/// doubling a space at the seam or leading the paragraph with one.
+fn joined_tail(head: &str, tail: &str, head_starts_block: bool) -> String {
+    if head.ends_with(char::is_whitespace) || head.is_empty() && head_starts_block {
+        tail.trim_start().into()
+    } else {
+        tail.into()
+    }
+}
+
 /// Remove formula `m` of a paragraph and join the texts on either side.
 fn remove_formula(block: crate::NodeId, inlines: &[InlineNode], m: usize) -> (Vec<Op>, CursorPath) {
     let before = &inlines[m - 1];
@@ -465,7 +507,7 @@ fn remove_formula(block: crate::NodeId, inlines: &[InlineNode], m: usize) -> (Ve
         Op::Insert {
             seq: Seq::Text(before.id),
             index: len,
-            items: Items::Text(text_of(after).into()),
+            items: Items::Text(joined_tail(text_of(before), text_of(after), m == 1)),
         },
     ];
     let caret = CursorPath {
@@ -492,7 +534,7 @@ fn join_blocks(doc: &Document, first: usize) -> (Vec<Op>, CursorPath) {
         Op::Insert {
             seq: Seq::Text(last.id),
             index: len,
-            items: Items::Text(text_of(&bi[0]).into()),
+            items: Items::Text(joined_tail(text_of(last), text_of(&bi[0]), ai.len() == 1)),
         },
     ];
     if bi.len() > 1 {
@@ -583,6 +625,42 @@ mod tests {
     }
 
     #[test]
+    fn extra_spaces_are_not_inserted() {
+        let mut e = sample();
+        caret_at(&mut e, 1, 0, 2);
+        e.insert_text(" ");
+        assert!(!e.insert_text(" "), "second space ignored");
+        e.insert_text("x  \t y");
+        assert_eq!(texts(&e)[1], "ef x y");
+        // Before an existing space, a typed space is dropped too.
+        caret_at(&mut e, 1, 0, 2);
+        assert!(!e.insert_text(" "));
+        // No space at the start of a paragraph.
+        caret_at(&mut e, 1, 0, 0);
+        assert!(!e.insert_text(" "));
+        assert_eq!(e.caret().offset, 0);
+    }
+
+    #[test]
+    fn deleting_never_leaves_double_spaces() {
+        let mut e = sample();
+        caret_at(&mut e, 1, 0, 2);
+        e.insert_text(" b c");
+        caret_at(&mut e, 1, 0, 4); // after "b"
+        e.backspace();
+        assert_eq!(texts(&e)[1], "ef c");
+        assert_eq!(e.caret().offset, 2);
+        caret_at(&mut e, 1, 0, 0);
+        e.delete();
+        e.delete();
+        assert_eq!(texts(&e)[1], "c", "no leading space");
+        // Removing a formula between two spaces keeps one.
+        caret_at(&mut e, 0, 2, 0);
+        e.backspace();
+        assert_eq!(texts(&e)[0], "ab cd");
+    }
+
+    #[test]
     fn backspace_and_delete_chars() {
         let mut e = sample();
         caret_at(&mut e, 1, 0, 1);
@@ -600,7 +678,7 @@ mod tests {
         let mut e = sample();
         caret_at(&mut e, 0, 2, 0);
         assert!(e.backspace());
-        assert_eq!(texts(&e)[0], "ab  cd");
+        assert_eq!(texts(&e)[0], "ab cd");
         assert_eq!(e.caret().path, vec![Step::Index(0)]);
         assert_eq!(e.caret().offset, 3);
         e.undo();

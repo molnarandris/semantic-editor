@@ -295,9 +295,20 @@ pub fn lines(stops: &[Stop]) -> Vec<Vec<usize>> {
 
 /// The stop of `line` closest to `x`.
 pub fn nearest_in_line<'a>(stops: &'a [Stop], line: &[usize], x: f64) -> Option<&'a Stop> {
+    let dist = |s: &Stop| (s.x - x).abs();
     line.iter()
         .map(|&i| &stops[i])
-        .min_by(|a, b| (a.x - x).abs().total_cmp(&(b.x - x).abs()))
+        .min_by(|a, b| dist(a).total_cmp(&dist(b)))
+}
+
+/// The first or last stop of a line.
+pub fn line_edge<'a>(stops: &'a [Stop], line: &[usize], end: bool) -> Option<&'a Stop> {
+    let stops = line.iter().map(|&i| &stops[i]);
+    if end {
+        stops.max_by(|a, b| a.x.total_cmp(&b.x))
+    } else {
+        stops.min_by(|a, b| a.x.total_cmp(&b.x))
+    }
 }
 
 /// The caret position for a click at `(x, y)` in block coordinates: the
@@ -423,5 +434,8 @@ mod tests {
         let offsets: Vec<_> = s.iter().map(|s| s.cursor.offset).collect();
         assert_eq!(offsets, [0, 1, 2]);
         assert!(s[0].x > 100.0, "centred");
+        let all: Vec<usize> = (0..s.len()).collect();
+        assert_eq!(line_edge(&s, &all, false).unwrap().cursor.offset, 0);
+        assert_eq!(line_edge(&s, &all, true).unwrap().cursor.offset, 2);
     }
 }

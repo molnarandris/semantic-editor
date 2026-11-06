@@ -27,10 +27,9 @@ const PAPER_PAD_PT: f64 = 24.0;
 const BLOCK_SPACING_PT: f64 = 8.0;
 /// Height of a block that is empty or not rendered yet, in pt.
 const MIN_BLOCK_HEIGHT_PT: f64 = 13.0;
-/// Caret width in px, blink half-period, and blinks before it stays on.
+/// Caret width in px and blink half-period.
 const CARET_WIDTH_PX: f64 = 1.5;
 const BLINK_INTERVAL: Duration = Duration::from_millis(600);
-const BLINK_COUNT: u32 = 20;
 
 /// Render state of one block.
 struct BlockView {
@@ -80,7 +79,6 @@ pub struct SemEditor {
 
     im: OnceCell<gtk::IMMulticontext>,
     caret_on: Cell<bool>,
-    blinks_left: Cell<u32>,
     blink: RefCell<Option<glib::SourceId>>,
     /// Column kept while moving up and down, in pt.
     goal_x: Cell<Option<f64>>,
@@ -534,8 +532,10 @@ impl SemEditor {
             caret::nearest_in_line(stops, line, x).map(|s| s.cursor.clone())
         };
         match cmd {
-            Command::LineStart => pick(&stops, &lines[line], f64::NEG_INFINITY),
-            Command::LineEnd => pick(&stops, &lines[line], f64::INFINITY),
+            Command::LineStart | Command::LineEnd => {
+                let end = matches!(cmd, Command::LineEnd);
+                caret::line_edge(&stops, &lines[line], end).map(|s| s.cursor.clone())
+            }
             Command::Up | Command::Down => {
                 let x = self.goal_x.get().unwrap_or(current.x);
                 self.goal_x.set(Some(x));
@@ -596,21 +596,12 @@ impl SemEditor {
     fn restart_blink(&self) {
         self.stop_blink();
         self.caret_on.set(true);
-        self.blinks_left.set(BLINK_COUNT);
         let weak = self.obj().downgrade();
         let id = glib::timeout_add_local(BLINK_INTERVAL, move || {
             let Some(obj) = weak.upgrade() else {
                 return glib::ControlFlow::Break;
             };
             let imp = obj.imp();
-            let left = imp.blinks_left.get();
-            if left == 0 {
-                imp.caret_on.set(true);
-                obj.queue_draw();
-                imp.blink.borrow_mut().take();
-                return glib::ControlFlow::Break;
-            }
-            imp.blinks_left.set(left - 1);
             imp.caret_on.set(!imp.caret_on.get());
             obj.queue_draw();
             glib::ControlFlow::Continue
