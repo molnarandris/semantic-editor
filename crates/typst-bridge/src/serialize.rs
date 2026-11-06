@@ -451,6 +451,34 @@ mod tests {
         }
     }
 
+    /// Every state while typing formulas key by key compiles, so editing
+    /// never shows an error in between.
+    #[test]
+    fn every_typing_state_compiles() {
+        let mut world = BridgeWorld::new();
+        let sessions = [
+            "S <= (log chi)/(2) + c",
+            "\\alpha^2_i/x + \\foo ' , ; | [ ] { } & ~~ := \\",
+            "(a+b)^2 / ( ) _ ^ 3.14.15 é ∑ #$",
+            "e^(-x^2/2) ! != -> <-> 1/2/3",
+        ];
+        let mut d = Document::empty();
+        let p = d.paragraph(vec![]);
+        d.blocks = vec![p];
+        for keys in sessions {
+            let mut e = model::Editor::new(d.clone());
+            e.insert_text("text $");
+            for c in keys.chars() {
+                e.insert_text(&c.to_string());
+                let block = &e.doc().blocks[0];
+                let (src, _) = block_document(&ser(block), 300.0);
+                if let Err(err) = compile(&mut world, &src) {
+                    panic!("after {c:?} in {keys:?}: {err:?}\n{src}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn span_map_ranges() {
         let mut d = Document::empty();

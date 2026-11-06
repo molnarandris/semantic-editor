@@ -97,6 +97,30 @@ Structural keys per the table, slots, symbol shortcut table, breadcrumb, structu
 highlight. If glyph spans turn out too coarse, use the marker-box fallback from the spec
 (serializer wraps nodes in labelled boxes, layout reads their frames).
 
+Implementation notes (done; spans were fine-grained enough, no marker boxes):
+
+- Input follows Typst where possible. Letters form one identifier until a space or
+  another key ends the word; finished words in the symbol table become symbols (`chi` →
+  χ, `\alpha` → α, TeX names only with `\`). Digits merge into numbers. Operator pairs
+  combine (`<=` → ≤, `->` → →).
+- `/` takes the selection, a `( … )` group (dropping the parens, like Typst) or the
+  previous operand as numerator; with none, an empty fraction. `^`/`_` likewise
+  (a group keeps its parens as base). `(` typed into an empty slot only opens a group;
+  its `)` leaves the structure. So `S <= (log chi)/(2) + c` types as written.
+- ←/→ walk `Document::positions` (every caret position in reading order; structures
+  are entered and left). ↑/↓ go numerator ↔ denominator and base ↔ scripts in the
+  innermost structure, otherwise by line. Tab / Shift+Tab: next / previous empty slot.
+- Backspace after a structure or inline formula selects it, the second press deletes.
+  In an empty slot it removes the slot and unwraps (fraction → the other part, scripts
+  → base). Escape leaves the structure, then the formula; `$` leaves the formula, and
+  `$$` turns an empty inline formula into a display block.
+- Widget: caret stops for every row (left edge of each node, middle of an empty
+  slot); clicks weigh distance to each row so numerator and denominator are reachable.
+  The formula and innermost structure are tinted, the selection filled. Status bar:
+  clickable breadcrumb (selects that structure) and a key hint.
+- Tests: the acceptance sequence key by key, every intermediate state compiles, and a
+  keystroke fuzz test (invariants, caret validity, undo to start).
+
 ## M6 — Files and export
 
 `.sem` JSON, NodeIds regenerated on load, `.typ` and PDF export, sourceview5 pane,

@@ -175,6 +175,41 @@ impl Document {
         }
     }
 
+    /// Every caret position of a block in reading order: the chars of each
+    /// text, and in math rows each position between nodes, with the rows of
+    /// a structure visited right after the position before it. ←/→ step
+    /// through this list.
+    pub fn positions(&self, block: &BlockNode) -> Vec<CursorPath> {
+        let mut out = vec![];
+        let at = |path: Vec<Step>, offset| CursorPath {
+            block: block.id,
+            path,
+            offset,
+        };
+        match &block.kind {
+            Block::Paragraph(inlines) | Block::Heading { inlines, .. } => {
+                for (i, inline) in inlines.iter().enumerate() {
+                    match &inline.kind {
+                        Inline::Text(s) => {
+                            for k in 0..=s.chars().count() {
+                                out.push(at(vec![Step::Index(i)], k));
+                            }
+                        }
+                        Inline::Math(row) => {
+                            row_positions(block.id, vec![Step::Index(i)], row, &mut out)
+                        }
+                    }
+                }
+            }
+            Block::DisplayMath(row) => row_positions(block.id, vec![], row, &mut out),
+            Block::RawTypst(s) => {
+                out.push(at(vec![], 0));
+                out.push(at(vec![], s.chars().count()));
+            }
+        }
+        out
+    }
+
     /// Labels for the status bar, e.g. paragraph › math › fraction › numerator.
     pub fn breadcrumb(&self, cursor: &CursorPath) -> Vec<Crumb> {
         let Some(block) = self.block(cursor.block) else {
@@ -224,6 +259,26 @@ impl Document {
         }
         crumbs
     }
+}
+
+fn row_positions(block: NodeId, path: Vec<Step>, row: &MathRow, out: &mut Vec<CursorPath>) {
+    for (k, node) in row.nodes.iter().enumerate() {
+        out.push(CursorPath {
+            block,
+            path: path.clone(),
+            offset: k,
+        });
+        for (step, child) in node.children() {
+            let mut p = path.clone();
+            p.extend([Step::Index(k), step]);
+            row_positions(block, p, child, out);
+        }
+    }
+    out.push(CursorPath {
+        block,
+        path,
+        offset: row.nodes.len(),
+    });
 }
 
 fn walk_row<'a>(row: &'a MathRow, path: &[Step]) -> Result<Target<'a>, usize> {

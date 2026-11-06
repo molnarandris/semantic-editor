@@ -30,15 +30,7 @@ fn build_window(app: &adw::Application) {
         .child(&editor)
         .build();
 
-    let status = gtk::Label::builder()
-        .label("paragraph")
-        .xalign(0.0)
-        .margin_start(12)
-        .margin_end(12)
-        .margin_top(6)
-        .margin_bottom(6)
-        .css_classes(["caption", "dim-label"])
-        .build();
+    let status = status_bar(&editor);
 
     let content = adw::ToolbarView::new();
     content.add_top_bar(&header);
@@ -61,6 +53,58 @@ fn build_window(app: &adw::Application) {
     if let Ok(path) = std::env::var("SEM_SCREENSHOT") {
         screenshot_and_quit(app, &window, path);
     }
+}
+
+/// Breadcrumb of the caret (each entry selects its structure) and a key hint.
+fn status_bar(editor: &SemEditor) -> gtk::Box {
+    let bar = gtk::Box::builder()
+        .orientation(gtk::Orientation::Horizontal)
+        .margin_start(6)
+        .margin_end(12)
+        .margin_top(2)
+        .margin_bottom(2)
+        .build();
+    let crumbs = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    let hint = gtk::Label::builder()
+        .hexpand(true)
+        .xalign(1.0)
+        .css_classes(["caption", "dim-label"])
+        .build();
+    bar.append(&crumbs);
+    bar.append(&hint);
+
+    let update = move |editor: &SemEditor| {
+        while let Some(child) = crumbs.first_child() {
+            crumbs.remove(&child);
+        }
+        for (i, crumb) in editor.breadcrumb().into_iter().enumerate() {
+            if i > 0 {
+                let sep = gtk::Label::builder()
+                    .label("›")
+                    .css_classes(["caption", "dim-label"])
+                    .build();
+                crumbs.append(&sep);
+            }
+            let button = gtk::Button::builder()
+                .label(crumb.label)
+                .css_classes(["flat", "caption"])
+                .focusable(false)
+                .tooltip_text("Select")
+                .build();
+            let weak = editor.downgrade();
+            button.connect_clicked(move |_| {
+                if let Some(editor) = weak.upgrade() {
+                    editor.select_crumb(&crumb);
+                    editor.grab_focus();
+                }
+            });
+            crumbs.append(&button);
+        }
+        hint.set_label(editor.hint());
+    };
+    update(editor);
+    editor.connect_caret_moved(update);
+    bar
 }
 
 /// Debug aid: save a PNG of the window once the first renders are in, then

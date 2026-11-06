@@ -273,3 +273,57 @@ fn random_ops_roundtrip_and_keep_cursors_valid() {
         }
     }
 }
+
+/// Random keystrokes through the editor: invariants hold and the caret stays
+/// valid after every command, and undoing everything restores the start.
+#[test]
+fn random_keystrokes_keep_the_document_sound() {
+    let mut rng = Rng(0x5eed_cafe);
+    let keys = [
+        "a", "x", "chi", " ", "2", ".", "+", "<", "=", "-", ">", "/", "^", "_", "(", ")", "$",
+        "\\al", "é ", "\\",
+    ];
+    for round in 0..150 {
+        let doc = random_doc(&mut rng);
+        let start = doc.blocks.clone();
+        let mut e = Editor::new(doc);
+        for _ in 0..40 {
+            match rng.below(14) {
+                0..=5 => {
+                    e.insert_text(keys[rng.below(keys.len())]);
+                }
+                6 => {
+                    e.backspace();
+                }
+                7 => {
+                    e.delete();
+                }
+                8 => {
+                    e.move_left();
+                }
+                9 => {
+                    e.move_right();
+                }
+                10 => {
+                    e.escape();
+                }
+                11 => {
+                    e.enter();
+                }
+                12 => {
+                    e.next_slot(rng.below(2) == 0);
+                }
+                _ => {
+                    if let Some(c) = e.vertical_target(rng.below(2) == 0) {
+                        e.set_caret(c);
+                    }
+                }
+            }
+            e.doc().check_invariants().unwrap();
+            assert!(e.doc().is_valid(e.caret()), "round {round}: bad caret");
+            let _ = (e.selected_ids(), e.context_ids(), e.hint());
+        }
+        while e.undo() {}
+        assert_eq!(e.doc().blocks, start, "round {round}: undo all");
+    }
+}

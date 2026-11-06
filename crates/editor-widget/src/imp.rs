@@ -3,9 +3,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
+use gtk::glib::subclass::Signal;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use gtk::{gdk, glib, graphene};
+use gtk::{gdk, glib, graphene, gsk};
 use model::{CursorPath, Document, Editor, NodeId};
 use typst_bridge::{
     BLOCK_PAD_PT, BlockLayout, CompileJob, CompileResult, Raster, Worker, serialize_block,
@@ -119,6 +120,12 @@ impl ObjectImpl for SemEditor {
         })
     }
 
+    fn signals() -> &'static [Signal] {
+        static SIGNALS: OnceLock<Vec<Signal>> = OnceLock::new();
+        // Emitted after every command: caret, selection or document changed.
+        SIGNALS.get_or_init(|| vec![Signal::builder("caret-moved").build()])
+    }
+
     fn set_property(&self, _id: usize, value: &glib::Value, pspec: &glib::ParamSpec) {
         match pspec.name() {
             "hadjustment" => self.set_adjustment(&self.hadjustment, value.get().unwrap()),
@@ -215,6 +222,9 @@ impl WidgetImpl for SemEditor {
             (self.content_height() - 2.0 * TOP_MARGIN_PX + 2.0 * pad) as f32,
         );
         snapshot.append_color(&gdk::RGBA::WHITE, &paper);
+        if obj.has_focus() {
+            self.snapshot_highlights(snapshot, x0, scroll);
+        }
 
         let mut y = TOP_MARGIN_PX - scroll;
         for view in self.views.borrow().iter() {
@@ -267,6 +277,9 @@ enum Command {
     Enter,
     Undo,
     Redo,
+    Escape,
+    NextSlot,
+    PrevSlot,
 }
 
 impl SemEditor {
@@ -287,8 +300,8 @@ impl SemEditor {
         im.connect_commit(move |_, text| {
             if let Some(obj) = weak.upgrade() {
                 let imp = obj.imp();
-                let changed = imp.editor.borrow_mut().insert_text(text);
-                imp.after_command(changed, true);
+                imp.editor.borrow_mut().insert_text(text);
+                imp.after_command(true);
             }
         });
 
@@ -343,7 +356,7 @@ impl SemEditor {
                 if let Some(cursor) = imp.locate(x, y) {
                     imp.editor.borrow_mut().set_caret(cursor);
                     imp.goal_x.set(None);
-                    imp.after_command(false, false);
+                    imp.after_command(false);
                 }
             }
         });
@@ -357,7 +370,9 @@ impl SemEditor {
         if !vertical {
             self.goal_x.set(None);
         }
-        let changed = {
+        // Whether a command changed anything is not needed: the view syncs
+        // by comparing sources.
+        let _ = {
             let mut ed = self.editor.borrow_mut();
             match cmd {
                 Command::Left => {
@@ -373,6 +388,9 @@ impl SemEditor {
                 Command::Enter => ed.enter(),
                 Command::Undo => ed.undo(),
                 Command::Redo => ed.redo(),
+                Command::Escape => ed.escape(),
+                Command::NextSlot => ed.next_slot(false),
+                Command::PrevSlot => ed.next_slot(true),
                 Command::DocStart => {
                     let c = ed.doc().block_start(0);
                     ed.set_caret(c);
@@ -383,7 +401,19 @@ impl SemEditor {
                     ed.set_caret(c);
                     false
                 }
-                Command::Up | Command::Down | Command::LineStart | Command::LineEnd => {
+                Command::Up | Command::Down => {
+                    let target = ed.vertical_target(matches!(cmd, Command::Down));
+                    drop(ed);
+                    let next = match target {
+                        Some(t) => Some(self.column_in_row(t)),
+                        None => self.geometric_move(cmd),
+                    };
+                    if let Some(c) = next {
+                        self.editor.borrow_mut().set_caret(c);
+                    }
+                    false
+                }
+                Command::LineStart | Command::LineEnd => {
                     drop(ed);
                     if let Some(c) = self.geometric_move(cmd) {
                         self.editor.borrow_mut().set_caret(c);
@@ -392,24 +422,86 @@ impl SemEditor {
                 }
             }
         };
-        // Undo/redo may change blocks too, so treat them as edits.
-        let edit = changed || matches!(cmd, Command::Undo | Command::Redo);
-        self.after_command(edit, true);
+        self.after_command(true);
     }
 
-    /// Bring the view in line with the model after a command.
-    fn after_command(&self, doc_changed: bool, reveal: bool) {
-        if doc_changed {
-            self.sync_views();
-            self.submit_blocks(false);
-            self.obj().queue_resize();
-        }
+    /// Bring the view in line with the model after a command. Any command
+    /// may change the document (moving the caret finishes a word, `chi` →
+    /// χ); only blocks whose source changed are recompiled.
+    fn after_command(&self, reveal: bool) {
+        self.sync_views();
+        self.submit_blocks(false);
+        self.obj().queue_resize();
         if reveal {
             self.reveal.set(true);
             self.reveal_caret();
         }
         self.update_im_location();
         self.restart_blink();
+        self.obj().emit_by_name::<()>("caret-moved", &[]);
+    }
+
+    /// Select the structure of breadcrumb entry `path_len`.
+    pub(crate) fn select_crumb(&self, path_len: usize) {
+        let changed = self.editor.borrow_mut().select_crumb(path_len);
+        if changed {
+            self.after_command(false);
+        }
+    }
+
+    /// The caret target `t` (offset 0 of some row) moved to the column of
+    /// the caret.
+    fn column_in_row(&self, t: CursorPath) -> CursorPath {
+        let Some((index, current)) = self.caret_stop() else {
+            return t;
+        };
+        let x = self.goal_x.get().unwrap_or(current.x);
+        self.goal_x.set(Some(x));
+        let stops = self.block_stops(index);
+        caret::nearest_in_row(&stops, &t.path, x).map_or(t, |s| s.cursor.clone())
+    }
+
+    /// Current structure and selection, drawn under the text.
+    fn snapshot_highlights(&self, snapshot: &gtk::Snapshot, x0: f64, scroll: f64) {
+        let ed = self.editor.borrow();
+        let (context, selected) = (ed.context_ids(), ed.selected_ids());
+        if context.is_empty() && selected.is_empty() {
+            return;
+        }
+        let Some(index) = ed.doc().block_index(ed.caret().block) else {
+            return;
+        };
+        let Some(&top) = self.block_tops().get(index) else {
+            return;
+        };
+        let views = self.views.borrow();
+        let Some(layout) = views.get(index).and_then(|v| v.layout.as_ref()) else {
+            return;
+        };
+        let rect = |id: NodeId, pad: f64| {
+            layout.box_of(id).map(|r| {
+                graphene::Rect::new(
+                    (x0 + r.x * ZOOM - pad) as f32,
+                    (top + r.y * ZOOM - scroll - pad) as f32,
+                    (r.w * ZOOM + 2.0 * pad) as f32,
+                    (r.h * ZOOM + 2.0 * pad) as f32,
+                )
+            })
+        };
+        let blue = |a: f32| gdk::RGBA::new(0.21, 0.52, 0.89, a);
+        if let Some(r) = context.first().and_then(|&id| rect(id, 2.0)) {
+            snapshot.append_color(&blue(0.07), &r);
+        }
+        if context.len() > 1
+            && let Some(r) = context.last().and_then(|&id| rect(id, 1.5))
+        {
+            snapshot.append_color(&blue(0.08), &r);
+            let outline = gsk::RoundedRect::from_rect(r, 2.0);
+            snapshot.append_border(&outline, &[1.0; 4], &[blue(0.55); 4]);
+        }
+        for r in selected.iter().filter_map(|&id| rect(id, 1.0)) {
+            snapshot.append_color(&blue(0.3), &r);
+        }
     }
 
     /// Match the views to the document's blocks, keeping renders by id.
@@ -720,6 +812,10 @@ fn command_for(key: gdk::Key, state: gdk::ModifierType) -> Option<Command> {
         Key::BackSpace => Command::Backspace,
         Key::Delete | Key::KP_Delete => Command::Delete,
         Key::Return | Key::KP_Enter | Key::ISO_Enter => Command::Enter,
+        Key::Escape => Command::Escape,
+        Key::ISO_Left_Tab => Command::PrevSlot,
+        Key::Tab | Key::KP_Tab if shift => Command::PrevSlot,
+        Key::Tab | Key::KP_Tab => Command::NextSlot,
         _ if ctrl => match key.to_lower() {
             Key::z if shift => Command::Redo,
             Key::z => Command::Undo,

@@ -3,11 +3,11 @@
 //!
 //! Text positions come from glyph clusters (a ligature's width is split
 //! evenly between its chars). Positions without a glyph (collapsed or
-//! trailing spaces) are placed after the previous one. Formulas inside a
-//! paragraph contribute the positions just before and after them; display
-//! formulas their top-level positions.
+//! trailing spaces) are placed after the previous one. Math rows put a
+//! position at the left edge of each node and after the last one, and the
+//! middle of an empty slot; positions in a row span the row's height.
 
-use model::{Block, BlockNode, CursorPath, Inline, Step};
+use model::{Block, BlockNode, CursorPath, Inline, MathRow, Step};
 use typst_bridge::{BlockLayout, Rect};
 
 /// Advance used for chars that produced no glyph, in pt (≈ a space at 11 pt).
@@ -27,6 +27,8 @@ pub struct Stop {
     pub bottom: f64,
     /// Baseline of the line, used to group stops into lines.
     pub line: f64,
+    /// 0 in text, 1 in a formula's top row, +1 per structure level.
+    pub depth: usize,
 }
 
 /// All caret positions of a block, in document order.
@@ -37,30 +39,8 @@ pub fn stops(block: &BlockNode, layout: Option<&BlockLayout>) -> Vec<Stop> {
             inline_stops(block, inlines, l)
         }
         (Some(l), Block::DisplayMath(row)) => {
-            let row_box = l.box_of(row.id);
-            let (top, bottom) = row_box.map_or((0.0, l.height), |r| (r.y, r.bottom()));
             let mut v = vec![];
-            for (k, node) in row.nodes.iter().enumerate() {
-                if let Some(r) = l.box_of(node.id) {
-                    v.push(stop(block, vec![], k, r.x, top, bottom, l.baseline));
-                    if k + 1 == row.nodes.len() {
-                        v.push(stop(
-                            block,
-                            vec![],
-                            k + 1,
-                            r.right(),
-                            top,
-                            bottom,
-                            l.baseline,
-                        ));
-                    }
-                }
-            }
-            if row.nodes.is_empty()
-                && let Some(r) = row_box
-            {
-                v.push(stop(block, vec![], 0, r.x, top, bottom, l.baseline));
-            }
+            row_stops(block, vec![], row, l, l.baseline, 1, &mut v);
             v
         }
         (Some(l), Block::RawTypst(text)) => {
@@ -88,6 +68,7 @@ pub fn stops(block: &BlockNode, layout: Option<&BlockLayout>) -> Vec<Stop> {
             top: EMPTY_TOP_PT,
             bottom: EMPTY_BOTTOM_PT,
             line: baseline,
+            depth: 0,
         });
     }
     out
@@ -112,7 +93,47 @@ fn stop(
         top,
         bottom,
         line,
+        depth: 0,
     }
+}
+
+/// Stops of a math row and, recursively, of the rows inside its nodes.
+fn row_stops(
+    block: &BlockNode,
+    path: Vec<Step>,
+    row: &MathRow,
+    l: &BlockLayout,
+    line: f64,
+    depth: usize,
+    out: &mut Vec<Stop>,
+) {
+    let Some(rb) = l.box_of(row.id) else {
+        return;
+    };
+    let (top, bottom) = (rb.y, rb.bottom());
+    let at = |path: Vec<Step>, offset, x| Stop {
+        depth,
+        ..stop(block, path, offset, x, top, bottom, line)
+    };
+    if row.nodes.is_empty() {
+        out.push(at(path, 0, rb.x + rb.w / 2.0));
+        return;
+    }
+    let mut right = rb.x;
+    for (k, node) in row.nodes.iter().enumerate() {
+        let r = l.box_of(node.id);
+        let x = r.map_or(right, |r| r.x);
+        out.push(at(path.clone(), k, x));
+        if let Some(r) = r {
+            right = r.right();
+        }
+        for (step, child) in node.children() {
+            let mut p = path.clone();
+            p.extend([Step::Index(k), step]);
+            row_stops(block, p, child, l, line, depth + 1, out);
+        }
+    }
+    out.push(at(path, row.nodes.len(), right));
 }
 
 fn inline_stops(block: &BlockNode, inlines: &[model::InlineNode], l: &BlockLayout) -> Vec<Stop> {
@@ -124,6 +145,9 @@ fn inline_stops(block: &BlockNode, inlines: &[model::InlineNode], l: &BlockLayou
             Inline::Math(_) => vec![],
         })
         .collect();
+
+    // Per formula: the stops inside it.
+    let mut inner: Vec<Vec<Stop>> = vec![vec![]; inlines.len()];
 
     for (i, inline) in inlines.iter().enumerate() {
         let path = vec![Step::Index(i)];
@@ -168,11 +192,12 @@ fn inline_stops(block: &BlockNode, inlines: &[model::InlineNode], l: &BlockLayou
                     }
                 }
             }
-            Inline::Math(_) => {
+            Inline::Math(row) => {
                 let Some(r) = l.box_of(inline.id) else {
                     continue;
                 };
                 let line = line_near(l, r);
+                row_stops(block, path.clone(), row, l, line, 1, &mut inner[i]);
                 if i > 0 {
                     let offset = per[i - 1].len().saturating_sub(1);
                     let s = stop(
@@ -206,7 +231,8 @@ fn inline_stops(block: &BlockNode, inlines: &[model::InlineNode], l: &BlockLayou
 
     // Fill positions without a glyph from their neighbours.
     let mut out = vec![];
-    for slots in per {
+    for (slots, inner) in per.into_iter().zip(inner) {
+        out.extend(inner);
         let mut filled: Vec<Option<Stop>> = slots.clone();
         for k in 1..filled.len() {
             if filled[k].is_none()
@@ -293,9 +319,14 @@ pub fn lines(stops: &[Stop]) -> Vec<Vec<usize>> {
     out
 }
 
-/// The stop of `line` closest to `x`.
+/// Penalty in pt per nesting level, so ties go to the outer position: for
+/// line moves (prefer staying out of formulas) and for clicks (only ties).
+const DEPTH_PT: f64 = 0.5;
+const CLICK_DEPTH_PT: f64 = 0.01;
+
+/// The stop of `line` closest to `x` (preferring shallower positions).
 pub fn nearest_in_line<'a>(stops: &'a [Stop], line: &[usize], x: f64) -> Option<&'a Stop> {
-    let dist = |s: &Stop| (s.x - x).abs();
+    let dist = |s: &Stop| (s.x - x).abs() + DEPTH_PT * s.depth as f64;
     line.iter()
         .map(|&i| &stops[i])
         .min_by(|a, b| dist(a).total_cmp(&dist(b)))
@@ -331,7 +362,23 @@ pub fn hit(stops: &[Stop], x: f64, y: f64) -> Option<&Stop> {
         let (ka, kb) = (key(a), key(b));
         ka.0.total_cmp(&kb.0).then(ka.1.total_cmp(&kb.1))
     })?;
-    nearest_in_line(stops, line, x)
+    // In a line, nested rows (numerator over denominator) share x ranges, so
+    // the vertical distance to each position's own row counts too.
+    let dist = |s: &Stop| {
+        let dy = (s.top - y).max(y - s.bottom).max(0.0);
+        (s.x - x).abs() + 2.0 * dy + CLICK_DEPTH_PT * s.depth as f64
+    };
+    line.iter()
+        .map(|&i| &stops[i])
+        .min_by(|a, b| dist(a).total_cmp(&dist(b)))
+}
+
+/// The stop for `path` nearest to `x` (↑/↓ into a given row).
+pub fn nearest_in_row<'a>(stops: &'a [Stop], path: &[Step], x: f64) -> Option<&'a Stop> {
+    stops
+        .iter()
+        .filter(|s| s.cursor.path == path)
+        .min_by(|a, b| (a.x - x).abs().total_cmp(&(b.x - x).abs()))
 }
 
 #[cfg(test)]
@@ -411,11 +458,40 @@ mod tests {
             .collect();
         let want: Vec<_> = (0..=5)
             .map(|k| (vec![Step::Index(0)], k))
+            .chain([(vec![Step::Index(1)], 0), (vec![Step::Index(1)], 1)])
             .chain([(vec![Step::Index(2)], 0)])
             .collect();
         assert_eq!(offsets, want);
-        let xs: Vec<_> = s.iter().map(|s| s.x).collect();
+        let xs: Vec<_> = s.iter().filter(|s| s.depth == 0).map(|s| s.x).collect();
         assert!(xs.windows(2).all(|w| w[0] <= w[1] + 0.01), "{xs:?}");
+    }
+
+    #[test]
+    fn clicks_reach_numerator_and_denominator() {
+        let mut d = Document::empty();
+        let (a, b, c) = (d.ident("a"), d.ident("b"), d.ident("c"));
+        let f = d.frac(vec![a, b], vec![c]);
+        let disp = d.display(vec![f]);
+        let l = layout_of(&disp, 300.0);
+        let s = stops(&disp, Some(&l));
+        let model::Block::DisplayMath(row) = &disp.kind else {
+            unreachable!()
+        };
+        let model::MathKind::Frac { num, den } = &row.nodes[0].kind else {
+            unreachable!()
+        };
+        for rowid in [num.id, den.id] {
+            let r = l.box_of(rowid).unwrap();
+            let hit = hit(&s, r.x + r.w * 0.3, r.y + r.h / 2.0).unwrap();
+            let want = if rowid == num.id {
+                Step::Num
+            } else {
+                Step::Den
+            };
+            assert_eq!(hit.cursor.path, vec![Step::Index(0), want]);
+        }
+        // Every position of the block has a stop.
+        assert_eq!(s.len(), 2 + 3 + 2);
     }
 
     #[test]
