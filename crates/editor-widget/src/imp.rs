@@ -42,6 +42,8 @@ struct BlockView {
     /// Generation of the result currently shown.
     shown: u64,
     texture: Option<gdk::Texture>,
+    /// Device pixels per point the texture was rendered at.
+    texture_ppp: f64,
     layout: Option<BlockLayout>,
     /// Message of the last failed compile; the last good render stays.
     error: Option<String>,
@@ -55,6 +57,7 @@ impl BlockView {
             submitted: 0,
             shown: 0,
             texture: None,
+            texture_ppp: 1.0,
             layout: None,
             error: None,
         }
@@ -229,20 +232,25 @@ impl WidgetImpl for SemEditor {
             self.snapshot_highlights(snapshot, x0, scroll);
         }
 
+        let snap = self.pixel_snapper();
         let mut y = TOP_MARGIN_PX - scroll;
         for view in self.views.borrow().iter() {
             let h = view.height_pt() * ZOOM;
             if y + h >= 0.0 && y <= height {
-                if let (Some(texture), Some(layout)) = (&view.texture, &view.layout) {
+                if let Some(texture) = &view.texture {
                     // The raster has a transparent pad around the content.
+                    // Draw it one texture pixel per device pixel, on the
+                    // pixel grid: any resampling blurs the thin glyphs.
                     let pad = BLOCK_PAD_PT * ZOOM;
+                    let (px, py) = snap(x0 - pad, y - pad);
+                    let per_px = ZOOM / view.texture_ppp;
                     let rect = graphene::Rect::new(
-                        (x0 - pad) as f32,
-                        (y - pad) as f32,
-                        (layout.width * ZOOM + 2.0 * pad) as f32,
-                        (layout.height * ZOOM + 2.0 * pad) as f32,
+                        px as f32,
+                        py as f32,
+                        (texture.width() as f64 * per_px) as f32,
+                        (texture.height() as f64 * per_px) as f32,
                     );
-                    snapshot.append_texture(texture, &rect);
+                    snapshot.append_scaled_texture(texture, gsk::ScalingFilter::Nearest, &rect);
                 }
                 if view.error.is_some() {
                     let marker =
@@ -526,6 +534,24 @@ impl SemEditor {
             .collect();
     }
 
+    /// Rounds widget coordinates to the nearest device pixel, taking the
+    /// widget's position in the window surface into account (fractional
+    /// scaling).
+    fn pixel_snapper(&self) -> impl Fn(f64, f64) -> (f64, f64) + use<> {
+        let obj = self.obj();
+        let scale = self.device_scale();
+        let origin = obj.native().and_then(|native| {
+            let (sx, sy) = native.surface_transform();
+            obj.compute_point(&native, &graphene::Point::new(0.0, 0.0))
+                .map(|p| (p.x() as f64 + sx, p.y() as f64 + sy))
+        });
+        let (ox, oy) = origin.unwrap_or((0.0, 0.0));
+        move |x, y| {
+            let snap = |v: f64, o: f64| ((v + o) * scale).round() / scale - o;
+            (snap(x, ox), snap(y, oy))
+        }
+    }
+
     fn device_scale(&self) -> f64 {
         let obj = self.obj();
         obj.native()
@@ -758,6 +784,7 @@ impl SemEditor {
             match result.outcome {
                 Ok(rendered) => {
                     view.texture = Some(texture(rendered.raster));
+                    view.texture_ppp = rendered.pixel_per_pt;
                     view.layout = Some(rendered.layout);
                     view.error = None;
                 }
