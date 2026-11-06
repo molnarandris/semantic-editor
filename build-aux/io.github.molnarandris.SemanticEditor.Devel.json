@@ -1,0 +1,45 @@
+{
+    "id": "io.github.molnarandris.SemanticEditor.Devel",
+    "runtime": "org.gnome.Platform",
+    "runtime-version": "51",
+    "sdk": "org.gnome.Sdk",
+    "sdk-extensions": ["org.freedesktop.Sdk.Extension.rust-stable"],
+    "command": "semantic-editor",
+    "finish-args": [
+        "--share=ipc",
+        "--socket=fallback-x11",
+        "--socket=wayland",
+        "--device=dri"
+    ],
+    "build-options": {
+        "append-path": "/usr/lib/sdk/rust-stable/bin",
+        "build-args": ["--share=network"],
+        "env": {
+            "CARGO_HOME": "/run/build/semantic-editor/cargo",
+            "RUST_BACKTRACE": "1",
+            "APP_ID": "io.github.molnarandris.SemanticEditor.Devel"
+        }
+    },
+    "modules": [
+        {
+            "name": "semantic-editor",
+            "buildsystem": "simple",
+            "build-commands": [
+                "cargo build --release --bin semantic-editor",
+                "install -Dm755 target/release/semantic-editor /app/bin/semantic-editor",
+                "install -Dm644 data/io.github.molnarandris.SemanticEditor.desktop /app/share/applications/${FLATPAK_ID}.desktop",
+                "sed -i \"s/^Icon=.*/Icon=${FLATPAK_ID}/\" /app/share/applications/${FLATPAK_ID}.desktop",
+                "install -Dm644 data/io.github.molnarandris.SemanticEditor.metainfo.xml /app/share/metainfo/${FLATPAK_ID}.metainfo.xml",
+                "sed -i \"s/<id>.*<\\/id>/<id>${FLATPAK_ID}<\\/id>/; s/<launchable type=\\\"desktop-id\\\">.*</<launchable type=\\\"desktop-id\\\">${FLATPAK_ID}.desktop</\" /app/share/metainfo/${FLATPAK_ID}.metainfo.xml",
+                "install -Dm644 data/icons/io.github.molnarandris.SemanticEditor.svg /app/share/icons/hicolor/scalable/apps/${FLATPAK_ID}.svg"
+            ],
+            "sources": [
+                {
+                    "type": "dir",
+                    "path": "..",
+                    "skip": ["target", "build-dir", ".flatpak-builder", ".flatpak", "repo"]
+                }
+            ]
+        }
+    ]
+}

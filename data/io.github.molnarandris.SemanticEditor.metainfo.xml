@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.molnarandris.SemanticEditor</id>
+  <name>Semantic Editor</name>
+  <summary>Structural editor for math-heavy notes</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <developer id="io.github.molnarandris">
+    <name>András Molnár</name>
+  </developer>
+  <description>
+    <p>A TeXmacs-style semantic editor: a tree-based document rendered by Typst,
+    edited directly on the rendered page with a structural caret inside formulas.</p>
+  </description>
+  <url type="homepage">https://github.com/molnarandris/semantic-editor</url>
+  <launchable type="desktop-id">io.github.molnarandris.SemanticEditor.desktop</launchable>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-11-06"/>
+  </releases>
+</component>

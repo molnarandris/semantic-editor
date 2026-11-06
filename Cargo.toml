@@ -1,0 +1,22 @@
+[workspace]
+resolver = "3"
+members = ["crates/model", "crates/typst-bridge", "crates/editor-widget", "crates/app"]
+
+[workspace.package]
+edition = "2024"
+license = "GPL-3.0-or-later"
+version = "0.1.0"
+
+[workspace.dependencies]
+model = { path = "crates/model" }
+typst-bridge = { path = "crates/typst-bridge" }
+editor-widget = { path = "crates/editor-widget" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+typst = "=0.15.1"
+typst-layout = "=0.15.1"
+typst-render = "=0.15.1"
+typst-pdf = "=0.15.1"
+typst-kit = { version = "=0.15.1", default-features = false, features = ["embedded-fonts"] }
+gtk = { package = "gtk4", version = "0.11", features = ["v4_18"] }
+adw = { package = "libadwaita", version = "0.9", features = ["v1_8"] }

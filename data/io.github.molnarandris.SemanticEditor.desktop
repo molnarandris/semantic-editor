@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Semantic Editor
+Comment=Structural editor for math-heavy notes, typeset by Typst
+Exec=semantic-editor %f
+Icon=io.github.molnarandris.SemanticEditor
+Terminal=false
+Type=Application
+Categories=Science;Math;
+Keywords=Typst;math;notes;TeXmacs;
+StartupNotify=true

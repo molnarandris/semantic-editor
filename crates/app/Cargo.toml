@@ -1,0 +1,11 @@
+[package]
+name = "semantic-editor"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+gtk = { workspace = true }
+adw = { workspace = true }
+model = { workspace = true }
+editor-widget = { workspace = true }
