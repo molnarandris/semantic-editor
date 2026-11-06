@@ -1,7 +1,9 @@
 //! `SemEditor`: a custom GTK widget that shows a [`Document`] as a stack of
-//! Typst-rendered block textures and (later) draws the caret and highlights
-//! on top. Compiles run on a background thread; the widget never blocks.
+//! Typst-rendered block textures, draws the caret on top and turns input
+//! into editing commands of the model. Compiles run on a background thread;
+//! the widget never blocks.
 
+mod caret;
 mod imp;
 
 use std::cell::Ref;
@@ -33,6 +35,6 @@ impl SemEditor {
     }
 
     pub fn document(&self) -> Ref<'_, Document> {
-        self.imp().doc.borrow()
+        Ref::map(self.imp().editor.borrow(), |e| e.doc())
     }
 }

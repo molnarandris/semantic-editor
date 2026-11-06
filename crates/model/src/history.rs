@@ -38,6 +38,27 @@ impl History {
         Ok(())
     }
 
+    /// Apply an edit and merge it into the last transaction (consecutive
+    /// keystrokes). Falls back to a new transaction if there is none.
+    pub fn apply_merged(
+        &mut self,
+        doc: &mut Document,
+        ops: Vec<Op>,
+        after: CursorPath,
+    ) -> Result<(), OpError> {
+        let Some(last) = self.undo.last_mut() else {
+            let before = after.clone();
+            return self.apply(doc, ops, before, after);
+        };
+        let mut inverse = doc.apply_all(ops)?;
+        // Undo the newer edit first.
+        inverse.append(&mut last.ops);
+        last.ops = inverse;
+        last.after = after;
+        self.redo.clear();
+        Ok(())
+    }
+
     /// Undo the last transaction; returns the caret to restore.
     pub fn undo(&mut self, doc: &mut Document) -> Option<CursorPath> {
         let txn = self.undo.pop()?;

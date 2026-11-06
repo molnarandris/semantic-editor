@@ -1,13 +1,17 @@
 use std::cell::{Cell, OnceCell, RefCell};
+use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, glib, graphene};
-use model::{Document, NodeId};
+use model::{CursorPath, Document, Editor, NodeId};
 use typst_bridge::{
     BLOCK_PAD_PT, BlockLayout, CompileJob, CompileResult, Raster, Worker, serialize_block,
 };
+
+use crate::caret::{self, Stop};
 
 /// Logical pixels per typographic point at 100 % zoom.
 const ZOOM: f64 = 1.5;
@@ -23,6 +27,10 @@ const PAPER_PAD_PT: f64 = 24.0;
 const BLOCK_SPACING_PT: f64 = 8.0;
 /// Height of a block that is empty or not rendered yet, in pt.
 const MIN_BLOCK_HEIGHT_PT: f64 = 13.0;
+/// Caret width in px, blink half-period, and blinks before it stays on.
+const CARET_WIDTH_PX: f64 = 1.5;
+const BLINK_INTERVAL: Duration = Duration::from_millis(600);
+const BLINK_COUNT: u32 = 20;
 
 /// Render state of one block.
 struct BlockView {
@@ -40,6 +48,18 @@ struct BlockView {
 }
 
 impl BlockView {
+    fn new(id: NodeId) -> Self {
+        Self {
+            id,
+            snippet: String::new(),
+            submitted: 0,
+            shown: 0,
+            texture: None,
+            layout: None,
+            error: None,
+        }
+    }
+
     fn height_pt(&self) -> f64 {
         self.layout
             .as_ref()
@@ -50,13 +70,22 @@ impl BlockView {
 
 #[derive(Default)]
 pub struct SemEditor {
-    pub(crate) doc: RefCell<Document>,
+    pub(crate) editor: RefCell<Editor>,
     views: RefCell<Vec<BlockView>>,
     worker: OnceCell<Worker>,
     generation: Cell<u64>,
     /// Page width and pixels per point the current renders were requested at.
     page_width_pt: Cell<f64>,
     pixel_per_pt: Cell<f64>,
+
+    im: OnceCell<gtk::IMMulticontext>,
+    caret_on: Cell<bool>,
+    blinks_left: Cell<u32>,
+    blink: RefCell<Option<glib::SourceId>>,
+    /// Column kept while moving up and down, in pt.
+    goal_x: Cell<Option<f64>>,
+    /// Scroll the caret into view when its block is rendered.
+    reveal: Cell<bool>,
 
     hadjustment: RefCell<Option<gtk::Adjustment>>,
     vadjustment: RefCell<Option<gtk::Adjustment>>,
@@ -119,7 +148,9 @@ impl ObjectImpl for SemEditor {
         self.parent_constructed();
         let obj = self.obj();
         obj.set_focusable(true);
+        obj.set_focus_on_click(true);
         obj.set_overflow(gtk::Overflow::Hidden);
+        obj.set_cursor_from_name(Some("text"));
 
         // Results arrive on the compile thread; hop to the main loop.
         let weak = glib::SendWeakRef::from(obj.downgrade());
@@ -134,6 +165,14 @@ impl ObjectImpl for SemEditor {
         let _ = self.worker.set(worker);
 
         obj.connect_scale_factor_notify(|obj| obj.queue_allocate());
+        self.setup_input();
+    }
+
+    fn dispose(&self) {
+        if let Some(im) = self.im.get() {
+            im.set_client_widget(None::<&gtk::Widget>);
+        }
+        self.stop_blink();
     }
 }
 
@@ -165,11 +204,7 @@ impl WidgetImpl for SemEditor {
     fn snapshot(&self, snapshot: &gtk::Snapshot) {
         let obj = self.obj();
         let (width, height) = (obj.width() as f64, obj.height() as f64);
-        let scroll = self
-            .vadjustment
-            .borrow()
-            .as_ref()
-            .map_or(0.0, |a| a.value());
+        let scroll = self.scroll();
         let page_px = self.page_width_pt.get() * ZOOM;
         let x0 = self.page_x(width);
         let pad = PAPER_PAD_PT * ZOOM;
@@ -206,30 +241,190 @@ impl WidgetImpl for SemEditor {
             }
             y += h + BLOCK_SPACING_PT * ZOOM;
         }
+
+        if obj.has_focus()
+            && self.caret_on.get()
+            && let Some(r) = self.caret_rect()
+        {
+            snapshot.append_color(&gdk::RGBA::new(0.1, 0.1, 0.12, 1.0), &r);
+        }
     }
 }
 
 impl ScrollableImpl for SemEditor {}
 
+/// Editing commands that keys map to.
+#[derive(Clone, Copy, Debug)]
+enum Command {
+    Left,
+    Right,
+    Up,
+    Down,
+    LineStart,
+    LineEnd,
+    DocStart,
+    DocEnd,
+    Backspace,
+    Delete,
+    Enter,
+    Undo,
+    Redo,
+}
+
 impl SemEditor {
     pub(crate) fn set_document(&self, doc: Document) {
-        let views = doc
-            .blocks
-            .iter()
-            .map(|b| BlockView {
-                id: b.id,
-                snippet: String::new(),
-                submitted: 0,
-                shown: 0,
-                texture: None,
-                layout: None,
-                error: None,
-            })
-            .collect();
-        *self.doc.borrow_mut() = doc;
-        *self.views.borrow_mut() = views;
+        *self.editor.borrow_mut() = Editor::new(doc);
+        self.views.borrow_mut().clear();
+        self.sync_views();
         self.submit_blocks(true);
         self.obj().queue_resize();
+    }
+
+    fn setup_input(&self) {
+        let obj = self.obj();
+
+        let im = gtk::IMMulticontext::new();
+        im.set_client_widget(Some(&*obj));
+        let weak = obj.downgrade();
+        im.connect_commit(move |_, text| {
+            if let Some(obj) = weak.upgrade() {
+                let imp = obj.imp();
+                let changed = imp.editor.borrow_mut().insert_text(text);
+                imp.after_command(changed, true);
+            }
+        });
+
+        let keys = gtk::EventControllerKey::new();
+        keys.set_im_context(Some(&im));
+        let weak = obj.downgrade();
+        keys.connect_key_pressed(move |_, key, _, state| {
+            let Some(obj) = weak.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            match command_for(key, state) {
+                Some(cmd) => {
+                    obj.imp().run(cmd);
+                    glib::Propagation::Stop
+                }
+                None => glib::Propagation::Proceed,
+            }
+        });
+        obj.add_controller(keys);
+
+        let focus = gtk::EventControllerFocus::new();
+        let weak = obj.downgrade();
+        focus.connect_enter(move |_| {
+            if let Some(obj) = weak.upgrade() {
+                let imp = obj.imp();
+                if let Some(im) = imp.im.get() {
+                    im.focus_in();
+                }
+                imp.restart_blink();
+            }
+        });
+        let weak = obj.downgrade();
+        focus.connect_leave(move |_| {
+            if let Some(obj) = weak.upgrade() {
+                let imp = obj.imp();
+                if let Some(im) = imp.im.get() {
+                    im.focus_out();
+                }
+                imp.stop_blink();
+                obj.queue_draw();
+            }
+        });
+        obj.add_controller(focus);
+
+        let click = gtk::GestureClick::new();
+        click.set_button(gdk::BUTTON_PRIMARY);
+        let weak = obj.downgrade();
+        click.connect_pressed(move |_, _, x, y| {
+            if let Some(obj) = weak.upgrade() {
+                obj.grab_focus();
+                let imp = obj.imp();
+                if let Some(cursor) = imp.locate(x, y) {
+                    imp.editor.borrow_mut().set_caret(cursor);
+                    imp.goal_x.set(None);
+                    imp.after_command(false, false);
+                }
+            }
+        });
+        obj.add_controller(click);
+
+        let _ = self.im.set(im);
+    }
+
+    fn run(&self, cmd: Command) {
+        let vertical = matches!(cmd, Command::Up | Command::Down);
+        if !vertical {
+            self.goal_x.set(None);
+        }
+        let changed = {
+            let mut ed = self.editor.borrow_mut();
+            match cmd {
+                Command::Left => {
+                    ed.move_left();
+                    false
+                }
+                Command::Right => {
+                    ed.move_right();
+                    false
+                }
+                Command::Backspace => ed.backspace(),
+                Command::Delete => ed.delete(),
+                Command::Enter => ed.enter(),
+                Command::Undo => ed.undo(),
+                Command::Redo => ed.redo(),
+                Command::DocStart => {
+                    let c = ed.doc().block_start(0);
+                    ed.set_caret(c);
+                    false
+                }
+                Command::DocEnd => {
+                    let c = ed.doc().block_end(ed.doc().blocks.len() - 1);
+                    ed.set_caret(c);
+                    false
+                }
+                Command::Up | Command::Down | Command::LineStart | Command::LineEnd => {
+                    drop(ed);
+                    if let Some(c) = self.geometric_move(cmd) {
+                        self.editor.borrow_mut().set_caret(c);
+                    }
+                    false
+                }
+            }
+        };
+        // Undo/redo may change blocks too, so treat them as edits.
+        let edit = changed || matches!(cmd, Command::Undo | Command::Redo);
+        self.after_command(edit, true);
+    }
+
+    /// Bring the view in line with the model after a command.
+    fn after_command(&self, doc_changed: bool, reveal: bool) {
+        if doc_changed {
+            self.sync_views();
+            self.submit_blocks(false);
+            self.obj().queue_resize();
+        }
+        if reveal {
+            self.reveal.set(true);
+            self.reveal_caret();
+        }
+        self.update_im_location();
+        self.restart_blink();
+    }
+
+    /// Match the views to the document's blocks, keeping renders by id.
+    fn sync_views(&self) {
+        let ed = self.editor.borrow();
+        let mut views = self.views.borrow_mut();
+        let mut old: HashMap<NodeId, BlockView> = views.drain(..).map(|v| (v.id, v)).collect();
+        *views = ed
+            .doc()
+            .blocks
+            .iter()
+            .map(|b| old.remove(&b.id).unwrap_or_else(|| BlockView::new(b.id)))
+            .collect();
     }
 
     fn device_scale(&self) -> f64 {
@@ -237,6 +432,13 @@ impl SemEditor {
         obj.native()
             .and_then(|n| n.surface())
             .map_or(obj.scale_factor() as f64, |s| s.scale())
+    }
+
+    fn scroll(&self) -> f64 {
+        self.vadjustment
+            .borrow()
+            .as_ref()
+            .map_or(0.0, |a| a.value())
     }
 
     /// Left edge of the text column in widget coordinates.
@@ -253,15 +455,185 @@ impl SemEditor {
         blocks + 2.0 * TOP_MARGIN_PX
     }
 
+    /// Top of every block in content coordinates (px, unscrolled).
+    fn block_tops(&self) -> Vec<f64> {
+        let mut y = TOP_MARGIN_PX;
+        self.views
+            .borrow()
+            .iter()
+            .map(|v| {
+                let top = y;
+                y += (v.height_pt() + BLOCK_SPACING_PT) * ZOOM;
+                top
+            })
+            .collect()
+    }
+
+    /// Caret stops of block `index`.
+    fn block_stops(&self, index: usize) -> Vec<Stop> {
+        let ed = self.editor.borrow();
+        let views = self.views.borrow();
+        match (ed.doc().blocks.get(index), views.get(index)) {
+            (Some(block), Some(view)) => caret::stops(block, view.layout.as_ref()),
+            _ => vec![],
+        }
+    }
+
+    /// Block index and stop of the caret.
+    fn caret_stop(&self) -> Option<(usize, Stop)> {
+        let caret = self.editor.borrow().caret().clone();
+        let index = self.editor.borrow().doc().block_index(caret.block)?;
+        let stops = self.block_stops(index);
+        let stop = caret::find(&stops, &caret)?.clone();
+        Some((index, stop))
+    }
+
+    /// The caret in widget coordinates.
+    fn caret_rect(&self) -> Option<graphene::Rect> {
+        let (index, stop) = self.caret_stop()?;
+        let top = *self.block_tops().get(index)?;
+        let x0 = self.page_x(self.obj().width() as f64);
+        let x = (x0 + stop.x * ZOOM - CARET_WIDTH_PX / 2.0).round();
+        let y = top + stop.top * ZOOM - self.scroll();
+        let h = ((stop.bottom - stop.top) * ZOOM).max(8.0);
+        Some(graphene::Rect::new(
+            x as f32,
+            y as f32,
+            CARET_WIDTH_PX as f32,
+            h as f32,
+        ))
+    }
+
+    /// The caret position for a click at widget coordinates.
+    fn locate(&self, x: f64, y: f64) -> Option<CursorPath> {
+        let cy = y + self.scroll();
+        let tops = self.block_tops();
+        // The gap below a block belongs to it.
+        let index = tops.iter().rposition(|&t| t <= cy).unwrap_or(0);
+        let top = *tops.get(index)?;
+        let bx = (x - self.page_x(self.obj().width() as f64)) / ZOOM;
+        let by = (cy - top) / ZOOM;
+        let stops = self.block_stops(index);
+        caret::hit(&stops, bx, by).map(|s| s.cursor.clone())
+    }
+
+    /// Up/down to the neighbouring line (across blocks), line start/end.
+    fn geometric_move(&self, cmd: Command) -> Option<CursorPath> {
+        let (index, current) = self.caret_stop()?;
+        let stops = self.block_stops(index);
+        let lines = caret::lines(&stops);
+        let line = lines
+            .iter()
+            .position(|l| l.iter().any(|&i| stops[i].cursor == current.cursor))
+            .or_else(|| {
+                lines
+                    .iter()
+                    .position(|l| (stops[l[0]].line - current.line).abs() < 2.0)
+            })?;
+        let pick = |stops: &[Stop], line: &[usize], x: f64| {
+            caret::nearest_in_line(stops, line, x).map(|s| s.cursor.clone())
+        };
+        match cmd {
+            Command::LineStart => pick(&stops, &lines[line], f64::NEG_INFINITY),
+            Command::LineEnd => pick(&stops, &lines[line], f64::INFINITY),
+            Command::Up | Command::Down => {
+                let x = self.goal_x.get().unwrap_or(current.x);
+                self.goal_x.set(Some(x));
+                let down = matches!(cmd, Command::Down);
+                let target = if down { line + 1 } else { line.wrapping_sub(1) };
+                if let Some(l) = lines.get(target) {
+                    return pick(&stops, l, x);
+                }
+                let count = self.views.borrow().len();
+                let next = if down {
+                    index + 1
+                } else {
+                    index.checked_sub(1)?
+                };
+                if next >= count {
+                    return None;
+                }
+                let stops = self.block_stops(next);
+                let lines = caret::lines(&stops);
+                let l = if down { lines.first() } else { lines.last() }?;
+                pick(&stops, l, x)
+            }
+            _ => None,
+        }
+    }
+
+    /// Scroll so the caret is visible.
+    fn reveal_caret(&self) {
+        let Some(r) = self.caret_rect() else {
+            return;
+        };
+        let Some(adj) = self.vadjustment.borrow().clone() else {
+            return;
+        };
+        let margin = 24.0;
+        let (top, bottom) = (r.y() as f64 - margin, (r.y() + r.height()) as f64 + margin);
+        let page = adj.page_size();
+        let value = adj.value();
+        if top < 0.0 {
+            adj.set_value(value + top);
+        } else if bottom > page {
+            adj.set_value(value + bottom - page);
+        }
+    }
+
+    fn update_im_location(&self) {
+        if let (Some(im), Some(r)) = (self.im.get(), self.caret_rect()) {
+            let rect = gdk::Rectangle::new(
+                r.x() as i32,
+                r.y() as i32,
+                r.width().ceil() as i32,
+                r.height() as i32,
+            );
+            im.set_cursor_location(&rect);
+        }
+    }
+
+    fn restart_blink(&self) {
+        self.stop_blink();
+        self.caret_on.set(true);
+        self.blinks_left.set(BLINK_COUNT);
+        let weak = self.obj().downgrade();
+        let id = glib::timeout_add_local(BLINK_INTERVAL, move || {
+            let Some(obj) = weak.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            let imp = obj.imp();
+            let left = imp.blinks_left.get();
+            if left == 0 {
+                imp.caret_on.set(true);
+                obj.queue_draw();
+                imp.blink.borrow_mut().take();
+                return glib::ControlFlow::Break;
+            }
+            imp.blinks_left.set(left - 1);
+            imp.caret_on.set(!imp.caret_on.get());
+            obj.queue_draw();
+            glib::ControlFlow::Continue
+        });
+        *self.blink.borrow_mut() = Some(id);
+        self.obj().queue_draw();
+    }
+
+    fn stop_blink(&self) {
+        if let Some(id) = self.blink.borrow_mut().take() {
+            id.remove();
+        }
+    }
+
     /// Submit compile jobs for blocks whose source changed, or for all
     /// blocks if `force` (render settings changed).
     fn submit_blocks(&self, force: bool) {
         if self.page_width_pt.get() <= 0.0 {
             return; // Not allocated yet; size_allocate will submit.
         }
-        let doc = self.doc.borrow();
+        let ed = self.editor.borrow();
         let mut views = self.views.borrow_mut();
-        for (block, view) in doc.blocks.iter().zip(views.iter_mut()) {
+        for (block, view) in ed.doc().blocks.iter().zip(views.iter_mut()) {
             let (snippet, map) = serialize_block(block);
             if !force && snippet == view.snippet {
                 continue;
@@ -303,6 +675,12 @@ impl SemEditor {
         let obj = self.obj();
         obj.queue_resize();
         obj.queue_draw();
+        if self.editor.borrow().caret().block == result.block {
+            if self.reveal.take() {
+                self.reveal_caret();
+            }
+            self.update_im_location();
+        }
     }
 
     fn set_adjustment(
@@ -331,6 +709,34 @@ impl SemEditor {
             h.configure(0.0, 0.0, width, 0.1 * width, 0.9 * width, width);
         }
     }
+}
+
+/// The command for a key press, if any. Printable keys go through the input
+/// method and arrive as commits instead.
+fn command_for(key: gdk::Key, state: gdk::ModifierType) -> Option<Command> {
+    let ctrl = state.contains(gdk::ModifierType::CONTROL_MASK);
+    let shift = state.contains(gdk::ModifierType::SHIFT_MASK);
+    use gdk::Key;
+    Some(match key {
+        Key::Left | Key::KP_Left => Command::Left,
+        Key::Right | Key::KP_Right => Command::Right,
+        Key::Up | Key::KP_Up => Command::Up,
+        Key::Down | Key::KP_Down => Command::Down,
+        Key::Home | Key::KP_Home if ctrl => Command::DocStart,
+        Key::End | Key::KP_End if ctrl => Command::DocEnd,
+        Key::Home | Key::KP_Home => Command::LineStart,
+        Key::End | Key::KP_End => Command::LineEnd,
+        Key::BackSpace => Command::Backspace,
+        Key::Delete | Key::KP_Delete => Command::Delete,
+        Key::Return | Key::KP_Enter | Key::ISO_Enter => Command::Enter,
+        _ if ctrl => match key.to_lower() {
+            Key::z if shift => Command::Redo,
+            Key::z => Command::Undo,
+            Key::y => Command::Redo,
+            _ => return None,
+        },
+        _ => return None,
+    })
 }
 
 /// Wraps a shared raster so GLib can borrow its pixels without a copy.

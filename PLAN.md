@@ -73,8 +73,21 @@ Implementation notes (done):
 ## M4 — Prose editing
 
 Text caret from glyph boxes (per-cluster x positions), click → nearest char, typing via
-`IMMulticontext`, Backspace, Enter (split), arrows, undo. Text blocks still re-render
-through Typst on every edit (debounced 50 ms).
+`IMMulticontext`, Backspace, Enter (split), arrows, undo.
+
+Implementation notes (done):
+
+- `model::Editor` owns document + caret + history and turns commands (insert text,
+  Backspace, Delete, Enter, ←/→, undo/redo) into ops. Typing and single-char deletes
+  merge into one undo step per word (`History::apply_merged`).
+- `editor-widget::caret` (no GTK): every caret position of a block ("stops") with x and
+  line from the layout. Ligatures are split evenly; chars without a glyph (collapsed or
+  trailing spaces) are placed after their neighbour. Clicks pick the nearest line, then
+  the nearest stop; ↑/↓/Home/End use the same lines with a sticky goal column.
+- No debounce: the worker already drops superseded jobs and a paragraph compiles in a
+  few ms. Until the new render arrives the caret uses the previous layout.
+- Not yet: selection, typing inside math (formulas are passed over as one step), editing
+  raw Typst blocks in the canvas, preedit display for input methods.
 
 ## M5 — Math editing
 
