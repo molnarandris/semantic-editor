@@ -13,6 +13,7 @@ use model::{BlockNode, CursorPath, Document, Target};
 use sourceview5::prelude::*;
 use typst_bridge::{SpanMap, compile_pdf, serialize_document, serialize_document_mapped};
 
+use crate::source_view::CaretView;
 use crate::{file, sample};
 
 thread_local! {
@@ -27,7 +28,7 @@ pub struct Window {
     title: adw::WindowTitle,
     toasts: adw::ToastOverlay,
     split: adw::OverlaySplitView,
-    source: sourceview5::View,
+    source: CaretView,
     file: RefCell<Option<gio::File>>,
     /// The blocks as last saved or loaded, to tell if there are changes.
     saved: RefCell<Vec<BlockNode>>,
@@ -438,10 +439,12 @@ impl Window {
             );
             buffer.apply_tag_by_name("current", &a, &b);
         }
-        if let Some(byte) = caret_byte(&doc, &map, &self.editor.caret()) {
-            buffer.place_cursor(&buffer.iter_at_offset(chars(byte)));
+        let caret = caret_byte(&doc, &map, &self.editor.caret()).map(chars);
+        if let Some(offset) = caret {
+            buffer.place_cursor(&buffer.iter_at_offset(offset));
             self.source.scroll_mark_onscreen(&buffer.get_insert());
         }
+        self.source.set_caret(caret);
     }
 }
 
@@ -503,7 +506,7 @@ fn main_menu() -> gio::Menu {
 }
 
 /// Read-only view of the generated Typst source.
-fn source_view() -> sourceview5::View {
+fn source_view() -> CaretView {
     let buffer = sourceview5::Buffer::new(None);
     if let Some(lang) = sourceview5::LanguageManager::default().language("typst") {
         buffer.set_language(Some(&lang));
@@ -528,7 +531,7 @@ fn source_view() -> sourceview5::View {
         .background_rgba(&gdk::RGBA::new(0.21, 0.52, 0.89, 0.22))
         .build();
     buffer.tag_table().add(&tag);
-    let view = sourceview5::View::with_buffer(&buffer);
+    let view = CaretView::new(&buffer);
     view.set_editable(false);
     view.set_cursor_visible(true);
     view.set_monospace(true);

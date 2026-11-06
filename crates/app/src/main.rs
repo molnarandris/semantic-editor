@@ -2,6 +2,7 @@
 
 mod file;
 mod sample;
+mod source_view;
 mod window;
 
 use adw::prelude::*;
