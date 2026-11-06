@@ -1,5 +1,6 @@
 use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -8,7 +9,7 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, glib, graphene, gsk};
 use model::{CursorPath, Document, Editor, NodeId};
-use typst_bridge::{BLOCK_PAD_PT, BlockLayout, CompileJob, CompileResult, Raster, Worker};
+use typst_bridge::{BLOCK_PAD_PT, BlockLayout, CompileJob, CompileResult, Raster, SpanMap, Worker};
 
 use crate::caret::{self, Stop};
 use crate::jobs;
@@ -38,8 +39,10 @@ const BLINK_INTERVAL: Duration = Duration::from_millis(600);
 /// Render state of one block.
 struct BlockView {
     id: NodeId,
-    /// Snippet of the last submitted job, to skip redundant compiles.
+    /// Snippet and span map of the last submitted job, to skip redundant
+    /// compiles.
     snippet: String,
+    map: SpanMap,
     /// Generation of the last submitted job.
     submitted: u64,
     /// Generation of the result currently shown.
@@ -50,6 +53,8 @@ struct BlockView {
     layout: Option<BlockLayout>,
     /// Message of the last failed compile; the last good render stays.
     error: Option<String>,
+    /// Caret stops from the block and its layout; reset when either changes.
+    stops: OnceCell<Rc<[Stop]>>,
 }
 
 impl BlockView {
@@ -57,12 +62,14 @@ impl BlockView {
         Self {
             id,
             snippet: String::new(),
+            map: SpanMap::default(),
             submitted: 0,
             shown: 0,
             texture: None,
             texture_ppp: 1.0,
             layout: None,
             error: None,
+            stops: OnceCell::new(),
         }
     }
 
@@ -447,76 +454,61 @@ impl SemEditor {
     }
 
     fn run(&self, cmd: Command) {
-        let vertical = matches!(cmd, Command::Up | Command::Down);
-        if !vertical {
+        if !matches!(cmd, Command::Up | Command::Down) {
             self.goal_x.set(None);
         }
-        // Whether a command changed anything is not needed: the view syncs
-        // by comparing sources.
-        let _ = {
-            let mut ed = self.editor.borrow_mut();
-            match cmd {
-                Command::Left => {
-                    ed.move_left();
-                    false
-                }
-                Command::Right => {
-                    ed.move_right();
-                    false
-                }
-                Command::Backspace => ed.backspace(),
-                Command::Delete => ed.delete(),
-                Command::Enter => {
-                    let caret = ed.caret().block;
-                    if ed.block_source(caret).is_some() {
-                        drop(ed);
-                        self.request_source_edit();
-                        return;
-                    }
-                    ed.enter()
-                }
-                Command::Undo => ed.undo(),
-                Command::Redo => ed.redo(),
-                Command::Escape => ed.escape(),
-                Command::NextSlot => ed.next_slot(false),
-                Command::Heading(level) => ed.set_heading(level),
-                Command::Zoom(steps) => {
-                    drop(ed);
-                    self.zoom_by(steps);
-                    return;
-                }
-                Command::PrevSlot => ed.next_slot(true),
-                Command::DocStart => {
-                    let c = ed.doc().block_start(0);
+        // Commands report whether they changed anything, but the view syncs
+        // by comparing sources anyway, so the results are not needed.
+        let mut ed = self.editor.borrow_mut();
+        match cmd {
+            Command::Left => _ = ed.move_left(),
+            Command::Right => _ = ed.move_right(),
+            Command::Backspace => _ = ed.backspace(),
+            Command::Delete => _ = ed.delete(),
+            Command::Enter if ed.block_source(ed.caret().block).is_some() => {
+                drop(ed);
+                self.request_source_edit();
+                return;
+            }
+            Command::Enter => _ = ed.enter(),
+            Command::Undo => _ = ed.undo(),
+            Command::Redo => _ = ed.redo(),
+            Command::Escape => _ = ed.escape(),
+            Command::NextSlot => _ = ed.next_slot(false),
+            Command::PrevSlot => _ = ed.next_slot(true),
+            Command::Heading(level) => _ = ed.set_heading(level),
+            Command::DocStart => {
+                let c = ed.doc().block_start(0);
+                ed.set_caret(c);
+            }
+            Command::DocEnd => {
+                let c = ed.doc().block_end(ed.doc().blocks.len() - 1);
+                ed.set_caret(c);
+            }
+            Command::Zoom(steps) => {
+                drop(ed);
+                self.zoom_by(steps);
+                return;
+            }
+            // Moves that need the rendered geometry.
+            Command::Up | Command::Down | Command::LineStart | Command::LineEnd => {
+                let down = matches!(cmd, Command::Down);
+                let target = match cmd {
+                    Command::Up | Command::Down => ed.vertical_target(down),
+                    _ => None,
+                };
+                drop(ed);
+                let next = match target {
+                    Some(t) => Some(self.column_in_row(t)),
+                    None => self.geometric_move(cmd),
+                };
+                ed = self.editor.borrow_mut();
+                if let Some(c) = next {
                     ed.set_caret(c);
-                    false
-                }
-                Command::DocEnd => {
-                    let c = ed.doc().block_end(ed.doc().blocks.len() - 1);
-                    ed.set_caret(c);
-                    false
-                }
-                Command::Up | Command::Down => {
-                    let target = ed.vertical_target(matches!(cmd, Command::Down));
-                    drop(ed);
-                    let next = match target {
-                        Some(t) => Some(self.column_in_row(t)),
-                        None => self.geometric_move(cmd),
-                    };
-                    if let Some(c) = next {
-                        self.editor.borrow_mut().set_caret(c);
-                    }
-                    false
-                }
-                Command::LineStart | Command::LineEnd => {
-                    drop(ed);
-                    if let Some(c) = self.geometric_move(cmd) {
-                        self.editor.borrow_mut().set_caret(c);
-                    }
-                    false
                 }
             }
-        };
+        }
+        drop(ed);
         self.after_command(true);
     }
 
@@ -727,13 +719,16 @@ impl SemEditor {
             .collect()
     }
 
-    /// Caret stops of block `index`.
-    fn block_stops(&self, index: usize) -> Vec<Stop> {
+    /// Caret stops of block `index` (computed once per block and layout).
+    fn block_stops(&self, index: usize) -> Rc<[Stop]> {
         let ed = self.editor.borrow();
         let views = self.views.borrow();
         match (ed.doc().blocks.get(index), views.get(index)) {
-            (Some(block), Some(view)) => caret::stops(block, view.layout.as_ref()),
-            _ => vec![],
+            (Some(block), Some(view)) => view
+                .stops
+                .get_or_init(|| caret::stops(block, view.layout.as_ref()).into())
+                .clone(),
+            _ => Rc::from([]),
         }
     }
 
@@ -887,7 +882,7 @@ impl SemEditor {
         let ed = self.editor.borrow();
         let mut views = self.views.borrow_mut();
         let jobs = {
-            let submitted: Vec<&str> = views.iter().map(|v| v.snippet.as_str()).collect();
+            let submitted: Vec<_> = views.iter().map(|v| (v.snippet.as_str(), &v.map)).collect();
             jobs::stale_blocks(&ed.doc().blocks, &submitted, force)
         };
         for job in jobs {
@@ -895,7 +890,11 @@ impl SemEditor {
             let generation = self.generation.get() + 1;
             self.generation.set(generation);
             view.snippet = job.snippet.clone();
+            view.map = job.map.clone();
             view.submitted = generation;
+            // The block changed; its stops follow the new tree right away
+            // (against the old layout until the new one arrives).
+            view.stops = OnceCell::new();
             self.worker.get().expect("worker").submit(CompileJob {
                 block: block.id,
                 generation,
@@ -918,6 +917,7 @@ impl SemEditor {
                 return; // Older than what is on screen.
             }
             view.shown = result.generation;
+            view.stops = OnceCell::new();
             match result.outcome {
                 Ok(rendered) => {
                     view.texture = Some(texture(rendered.raster));

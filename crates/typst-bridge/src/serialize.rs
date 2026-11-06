@@ -18,12 +18,18 @@ pub const PREAMBLE: &str = "\
 #let sem-slot = box.with(width: 0.55em, height: 0.7em, stroke: (paint: luma(160), thickness: 0.5pt, dash: \"densely-dashed\"))
 ";
 
+macro_rules! cetz_version {
+    () => {
+        "0.5.3"
+    };
+}
+
 /// The CeTZ version diagrams are drawn with. Pinned so that documents do not
 /// change when CeTZ releases a new version.
-pub const CETZ_VERSION: &str = "0.5.3";
+pub const CETZ_VERSION: &str = cetz_version!();
 
 /// The import that diagram blocks need.
-pub const CETZ_IMPORT: &str = "#import \"@preview/cetz:0.5.3\"";
+pub const CETZ_IMPORT: &str = concat!("#import \"@preview/cetz:", cetz_version!(), "\"");
 
 /// The Typst source of an empty math row (a visible placeholder box).
 pub const SLOT: &str = "#sem-slot()";

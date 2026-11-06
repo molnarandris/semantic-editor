@@ -1,6 +1,9 @@
-//! Which blocks need a compile: those whose Typst source changed since it
-//! was last submitted. Unchanged blocks, such as diagrams next to edited
-//! prose, are never recompiled. No GTK here, so it can be tested directly.
+//! Which blocks need a compile: those whose Typst source or span map changed
+//! since it was last submitted. Unchanged blocks, such as diagrams next to
+//! edited prose, are never recompiled. A changed map with the same source
+//! (node ids replaced, same text) is a cache hit in the worker, but its
+//! layout must be resolved against the new ids. No GTK here, so it can be
+//! tested directly.
 
 use model::{Block, BlockNode};
 use typst_bridge::{SpanMap, serialize_block};
@@ -13,15 +16,15 @@ pub struct Job {
     pub persist: bool,
 }
 
-/// Jobs for the blocks whose snippet differs from `submitted` (the last
-/// submitted snippet per block, same order), or all with `force`.
-pub fn stale_blocks(blocks: &[BlockNode], submitted: &[&str], force: bool) -> Vec<Job> {
+/// Jobs for the blocks whose snippet or map differs from `submitted` (the
+/// last submitted ones per block, same order), or all with `force`.
+pub fn stale_blocks(blocks: &[BlockNode], submitted: &[(&str, &SpanMap)], force: bool) -> Vec<Job> {
     blocks
         .iter()
         .enumerate()
         .filter_map(|(index, block)| {
             let (snippet, map) = serialize_block(block);
-            if !force && submitted.get(index) == Some(&snippet.as_str()) {
+            if !force && submitted.get(index) == Some(&(snippet.as_str(), &map)) {
                 return None;
             }
             let persist = matches!(block.kind, Block::Diagram(_) | Block::RawTypst(_));
@@ -43,6 +46,20 @@ mod tests {
     use std::time::Duration;
     use typst_bridge::{CompileJob, Worker};
 
+    /// Same text, new node ids: the layout must be resolved again.
+    #[test]
+    fn new_ids_with_same_source_are_stale() {
+        let mut d = Document::empty();
+        let x = d.ident("x");
+        d.blocks = vec![d.display(vec![x])];
+        let (snippet, map) = serialize_block(&d.blocks[0]);
+        let same = [(snippet.as_str(), &map)];
+        assert!(stale_blocks(&d.blocks, &same, false).is_empty());
+        d.regenerate_ids();
+        assert_eq!(serialize_block(&d.blocks[0]).0, snippet);
+        assert_eq!(stale_blocks(&d.blocks, &same, false).len(), 1);
+    }
+
     /// The milestone's acceptance check: editing prose next to 20 diagrams
     /// compiles only the prose.
     #[test]
@@ -58,16 +75,11 @@ mod tests {
 
         let (tx, rx) = mpsc::channel();
         let worker = Worker::spawn(None, move |r| tx.send(r).unwrap());
-        let mut submitted: Vec<String> = vec![];
-        let submit = |editor: &Editor, submitted: &mut Vec<String>| {
-            let shown: Vec<&str> = submitted.iter().map(String::as_str).collect();
+        let mut submitted: Vec<(String, SpanMap)> = vec![];
+        let submit = |editor: &Editor, submitted: &mut Vec<(String, SpanMap)>| {
+            let shown: Vec<_> = submitted.iter().map(|(s, m)| (s.as_str(), m)).collect();
             let jobs = stale_blocks(&editor.doc().blocks, &shown, false);
-            *submitted = editor
-                .doc()
-                .blocks
-                .iter()
-                .map(|b| serialize_block(b).0)
-                .collect();
+            *submitted = editor.doc().blocks.iter().map(serialize_block).collect();
             for job in &jobs {
                 worker.submit(CompileJob {
                     block: editor.doc().blocks[job.index].id,

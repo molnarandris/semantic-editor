@@ -212,4 +212,37 @@ Implementation notes (done):
   a fresh worker serves a persisted render with zero compiles.
 - Tests that compile CeTZ need network on their first run (package download).
 
+## Code review after M7 (2026-11-06)
+
+Overall the layering held up (model stays GTK/Typst-free, all Typst in the bridge, caret
+geometry testable without GTK). Changes made:
+
+- `model::editor` split from one 2,270-line file into `editor/` modules: `mod.rs`
+  (state, commit, selection, status), `input.rs` (typing in text and math),
+  `delete.rs`, `structure.rs` (leaving formulas/blocks, Enter, headings, raw/diagram
+  sources), `motion.rs`, `tests.rs`. Repeated patterns became helpers: `select`,
+  `select_node`, `node_before`, `type_node`, `retype_node_before`.
+- Bug: a block was recompiled only when its snippet text changed. Same text with new
+  node ids left a layout pointing at dead ids (caret unplaceable). The widget now
+  compares the span map too (a worker cache hit, re-resolved against the new ids).
+  Test: `new_ids_with_same_source_are_stale`.
+- Caret stops are cached per block view (reset when the block is resubmitted or a
+  render arrives) instead of rebuilt on every draw, including each caret blink.
+- `SemEditor::run` no longer builds and discards a bool per command.
+- The CeTZ version is written once (`cetz_version!` macro feeds both constants).
+
+Deliberately left for the milestone that needs it:
+
+- `app::window` mixes window, file actions, source pane and block editor. M8 removes
+  the source pane and moves block editing to a dialog; split it then (`files.rs`,
+  `block_editor.rs`).
+- Page geometry (`page_x`, `block_tops`, `content_height`, margins) is spread over
+  `imp.rs`. M9 (header banner) and M10 (label pills in the margin) add to it; introduce
+  a small geometry type then.
+- Every command serializes every block to find stale ones, and `is_dirty` compares all
+  blocks: O(document) per keystroke, fine at current sizes. M9's counter chaining
+  changes what a block's render depends on, so revisit there.
+- `CursorPath` / `RowPos.base` assume blocks are top level. M11 (environments holding
+  blocks) is where nesting gets designed.
+
 Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing.
