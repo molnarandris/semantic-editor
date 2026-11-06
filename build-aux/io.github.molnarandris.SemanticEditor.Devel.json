@@ -15,7 +15,6 @@
         "append-path": "/usr/lib/sdk/rust-stable/bin",
         "build-args": ["--share=network"],
         "env": {
-            "CARGO_HOME": "/run/build/semantic-editor/cargo",
             "RUST_BACKTRACE": "1",
             "APP_ID": "io.github.molnarandris.SemanticEditor.Devel"
         }
@@ -25,7 +24,7 @@
             "name": "semantic-editor",
             "buildsystem": "simple",
             "build-commands": [
-                "cargo build --release --bin semantic-editor",
+                "CARGO_HOME=\"$PWD/target/cargo-home\" cargo build --release --bin semantic-editor",
                 "install -Dm755 target/release/semantic-editor /app/bin/semantic-editor",
                 "install -Dm644 data/io.github.molnarandris.SemanticEditor.desktop /app/share/applications/${FLATPAK_ID}.desktop",
                 "sed -i \"s/^Icon=.*/Icon=${FLATPAK_ID}/\" /app/share/applications/${FLATPAK_ID}.desktop",
