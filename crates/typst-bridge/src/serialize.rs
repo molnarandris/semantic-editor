@@ -21,13 +21,57 @@ pub const PREAMBLE: &str = "\
 /// The Typst source of an empty math row (a visible placeholder box).
 pub const SLOT: &str = "#sem-slot()";
 
-/// Typst's predefined math operators; multi-letter identifiers with these
-/// names are emitted as names, all others are quoted.
-const OPERATORS: &[&str] = &[
-    "arccos", "arcsin", "arctan", "arg", "cos", "cosh", "cot", "coth", "csc", "csch", "ctg", "deg",
-    "det", "dim", "exp", "gcd", "lcm", "hom", "id", "im", "inf", "ker", "lg", "lim", "liminf",
-    "limsup", "ln", "log", "max", "min", "mod", "Pr", "sec", "sech", "sin", "sinc", "sinh", "sup",
-    "tan", "tanh", "tg", "tr",
+/// Typst's predefined math operators (`typst-library` `math/op.rs`): name,
+/// displayed text, and whether attachments go above/below in display math.
+///
+/// They are emitted as `op(#[log])` rather than `log`: the predefined ones
+/// take their text from the library, so their glyphs carry library spans and
+/// could not be mapped back to the node. `op("log")` loses the span too (a
+/// string argument is a value); a markup block keeps it. Same element, same
+/// rendering.
+const OPERATORS: &[(&str, &str, bool)] = &[
+    ("arccos", "arccos", false),
+    ("arcsin", "arcsin", false),
+    ("arctan", "arctan", false),
+    ("arg", "arg", false),
+    ("cos", "cos", false),
+    ("cosh", "cosh", false),
+    ("cot", "cot", false),
+    ("coth", "coth", false),
+    ("csc", "csc", false),
+    ("csch", "csch", false),
+    ("ctg", "ctg", false),
+    ("deg", "deg", false),
+    ("det", "det", true),
+    ("dim", "dim", false),
+    ("exp", "exp", false),
+    ("gcd", "gcd", true),
+    ("lcm", "lcm", true),
+    ("hom", "hom", false),
+    ("id", "id", false),
+    ("im", "im", false),
+    ("inf", "inf", true),
+    ("ker", "ker", false),
+    ("lg", "lg", false),
+    ("lim", "lim", true),
+    ("liminf", "lim inf", true),
+    ("limsup", "lim sup", true),
+    ("ln", "ln", false),
+    ("log", "log", false),
+    ("max", "max", true),
+    ("min", "min", true),
+    ("mod", "mod", false),
+    ("Pr", "Pr", true),
+    ("sec", "sec", false),
+    ("sech", "sech", false),
+    ("sin", "sin", false),
+    ("sinc", "sinc", false),
+    ("sinh", "sinh", false),
+    ("sup", "sup", true),
+    ("tan", "tan", false),
+    ("tanh", "tanh", false),
+    ("tg", "tg", false),
+    ("tr", "tr", false),
 ];
 
 /// Maps node ids to byte ranges of the snippet they were serialized into.
@@ -329,8 +373,11 @@ fn ident_source(s: &str) -> String {
     let mut chars = s.chars();
     match (chars.next(), chars.next()) {
         (Some(c), None) if c.is_alphabetic() => s.into(),
-        _ if OPERATORS.contains(&s) => s.into(),
-        _ => quoted(s),
+        _ => match OPERATORS.iter().find(|(name, ..)| *name == s) {
+            Some((_, text, true)) => format!("op(#[{text}], limits: #true)"),
+            Some((_, text, false)) => format!("op(#[{text}])"),
+            None => quoted(s),
+        },
     }
 }
 
@@ -389,7 +436,7 @@ mod tests {
         cases.push((
             "entropy",
             d.display(vec![s, le, f, plus, c]),
-            "$ S ≤ (log \"chi\")/(2) + c $",
+            "$ S ≤ (op(#[log]) \"chi\")/(2) + c $",
         ));
 
         let x = d.ident("x");

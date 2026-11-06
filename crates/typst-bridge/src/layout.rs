@@ -379,6 +379,21 @@ mod tests {
         }
     }
 
+    /// Operator names (`log`, `lim`) come from Typst's library; their glyphs
+    /// must still map back to the node.
+    #[test]
+    fn operators_have_boxes() {
+        for name in ["log", "lim", "sin", "max"] {
+            let mut d = Document::empty();
+            let (x, op) = (d.ident("x"), d.ident(name));
+            let (xid, oid) = (x.id, op.id);
+            let block = d.display(vec![x, op]);
+            let l = layout_of(&block);
+            let (bx, bo) = (l.box_of(xid).unwrap(), l.box_of(oid).expect(name));
+            assert!(bo.x > bx.right() - 0.1 && bo.w > 5.0, "{name}: {bo:?}");
+        }
+    }
+
     #[test]
     fn text_glyphs_map_to_chars() {
         let mut d = Document::empty();
