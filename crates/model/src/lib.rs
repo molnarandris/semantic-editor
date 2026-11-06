@@ -10,7 +10,7 @@ mod symbols;
 mod tree;
 
 pub use cursor::{Crumb, CursorPath, Step, Target};
-pub use editor::{Editor, Selected, SymbolResolver};
+pub use editor::{DIAGRAM_TEMPLATE, Editor, NewBlock, Selected, SymbolResolver};
 pub use history::History;
 pub use ops::{Items, Op, OpError, Seq};
 pub use selection::{SelRange, Selection};

@@ -52,6 +52,7 @@ pub enum Target<'a> {
         inline: &'a InlineNode,
         text: &'a str,
     },
+    /// A raw Typst or diagram block (source edited as a whole).
     Raw {
         block: &'a BlockNode,
         text: &'a str,
@@ -100,8 +101,10 @@ impl Document {
                 }
             }
             Block::DisplayMath(row) => walk_row(row, path),
-            Block::RawTypst(text) if path.is_empty() => Ok(Target::Raw { block, text }),
-            Block::RawTypst(_) => Err(0),
+            Block::RawTypst(text) | Block::Diagram(text) if path.is_empty() => {
+                Ok(Target::Raw { block, text })
+            }
+            Block::RawTypst(_) | Block::Diagram(_) => Err(0),
         }
     }
 
@@ -202,7 +205,7 @@ impl Document {
                 }
             }
             Block::DisplayMath(row) => row_positions(block.id, vec![], row, &mut out),
-            Block::RawTypst(s) => {
+            Block::RawTypst(s) | Block::Diagram(s) => {
                 out.push(at(vec![], 0));
                 out.push(at(vec![], s.chars().count()));
             }
@@ -238,7 +241,7 @@ impl Document {
                 consumed = 1;
                 row
             }
-            Block::RawTypst(_) => return crumbs,
+            Block::RawTypst(_) | Block::Diagram(_) => return crumbs,
         };
         while let [Step::Index(k), child, rest @ ..] = path {
             let Some(node) = row.nodes.get(*k) else { break };

@@ -28,7 +28,21 @@ enum Last {
     },
     /// Deleting single chars with Backspace or Delete.
     Deleting,
+    /// Editing the source of a raw or diagram block in the side pane.
+    Source(NodeId),
 }
+
+/// A block inserted by [`Editor::insert_block`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NewBlock {
+    Diagram,
+    RawTypst,
+}
+
+/// The source a new diagram starts with.
+pub const DIAGRAM_TEMPLATE: &str = "circle((0, 0), radius: 1)
+line((0, 0), (1, 0), mark: (end: \">\"))
+content((1.4, 0), $x$)";
 
 /// A selected subtree, shown highlighted; Backspace/Delete remove it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -42,6 +56,8 @@ pub enum Selected {
     },
     /// Inline formula number `inline` of a paragraph.
     Formula { block: NodeId, inline: usize },
+    /// A whole raw Typst or diagram block.
+    Block { block: NodeId },
 }
 
 #[derive(Debug)]
@@ -352,6 +368,7 @@ impl Editor {
         let merge = match (self.last, last) {
             (Last::Typing { space: was }, Last::Typing { space: now }) => !was || now,
             (Last::Deleting, Last::Deleting) => true,
+            (Last::Source(a), Last::Source(b)) => a == b,
             _ => false,
         };
         let before = self.caret.clone();
@@ -858,7 +875,12 @@ impl Editor {
             };
             return self.jump(cursor(p.block, vec![Step::Index(i + 1)], 0));
         }
-        let b = p.block_index;
+        self.leave_block(p.block_index)
+    }
+
+    /// Caret to the start of the text block after block `b`, created if the
+    /// next block is not a paragraph or heading.
+    fn leave_block(&mut self, b: usize) -> bool {
         if self
             .doc
             .blocks
@@ -888,6 +910,11 @@ impl Editor {
         self.finish_word();
         if self.selected.take().is_some() {
             return true;
+        }
+        if self.source_block().is_some()
+            && let Some(b) = self.doc.block_index(self.caret.block)
+        {
+            return self.leave_block(b);
         }
         let Some(p) = self.row_pos() else {
             return false;
@@ -926,7 +953,49 @@ impl Editor {
                 let (ops, after) = remove_formula(block, inlines, inline);
                 self.commit(ops, after, Last::Other)
             }
+            Selected::Block { block } => {
+                let Some(b) = self.doc.block_index(block) else {
+                    return false;
+                };
+                let (ops, after) = self.remove_block(b);
+                self.commit(ops, after, Last::Other)
+            }
         }
+    }
+
+    /// Ops that remove block `b`, and the caret after: the end of the block
+    /// before, or the start of the one after. The last block is replaced by
+    /// an empty paragraph.
+    fn remove_block(&mut self, b: usize) -> (Vec<Op>, CursorPath) {
+        if self.doc.blocks.len() == 1 {
+            let para = self.doc.paragraph(vec![]);
+            let after = cursor(para.id, vec![Step::Index(0)], 0);
+            let insert = Op::Insert {
+                seq: Seq::Blocks,
+                index: 1,
+                items: Items::Blocks(vec![para]),
+            };
+            (vec![insert, delete_block(0)], after)
+        } else if b > 0 {
+            (vec![delete_block(b)], self.doc.block_end(b - 1))
+        } else {
+            (vec![delete_block(b)], self.doc.block_start(b + 1))
+        }
+    }
+
+    /// The caret's block, if it is a raw Typst or diagram block.
+    fn source_block(&self) -> Option<NodeId> {
+        match self.doc.resolve(&self.caret)? {
+            Target::Raw { block, .. } => Some(block.id),
+            _ => None,
+        }
+    }
+
+    /// Select the caret's raw/diagram block (first Backspace/Delete).
+    fn select_source_block(&mut self, block: NodeId) -> bool {
+        self.last = Last::Other;
+        self.selected = Some(Selected::Block { block });
+        true
     }
 
     /// Delete the char or node before the caret. Structures and formulas are
@@ -939,8 +1008,11 @@ impl Editor {
         if let Some(p) = self.row_pos() {
             return self.math_backspace(p);
         }
+        if let Some(block) = self.source_block() {
+            return self.select_source_block(block);
+        }
         let Some(pos) = self.text_pos() else {
-            return self.backspace_block();
+            return false;
         };
         let block_id = pos.block.id;
         if pos.offset > 0 {
@@ -1037,20 +1109,7 @@ impl Editor {
         }
         // Display math.
         if p.len == 0 {
-            let (ops, after) = if self.doc.blocks.len() == 1 {
-                let para = self.doc.paragraph(vec![]);
-                let after = cursor(para.id, vec![Step::Index(0)], 0);
-                let insert = Op::Insert {
-                    seq: Seq::Blocks,
-                    index: 1,
-                    items: Items::Blocks(vec![para]),
-                };
-                (vec![insert, delete_block(0)], after)
-            } else if b > 0 {
-                (vec![delete_block(b)], self.doc.block_end(b - 1))
-            } else {
-                (vec![delete_block(b)], self.doc.block_start(b + 1))
-            };
+            let (ops, after) = self.remove_block(b);
             return self.commit(ops, after, Last::Other);
         }
         if b > 0 && is_empty_text_block(&self.doc.blocks[b - 1]) {
@@ -1153,28 +1212,14 @@ impl Editor {
         (op, after)
     }
 
-    /// Backspace at the start of a raw block: an empty paragraph before it
-    /// is removed, otherwise the caret moves back.
-    fn backspace_block(&mut self) -> bool {
-        let Some(b) = self.doc.block_index(self.caret.block) else {
-            return false;
-        };
-        if self.caret.offset > 0 || !self.caret.path.is_empty() || b == 0 {
-            return false;
-        }
-        if is_empty_text_block(&self.doc.blocks[b - 1]) {
-            let after = self.caret.clone();
-            return self.commit(vec![delete_block(b - 1)], after, Last::Other);
-        }
-        let caret = self.doc.block_end(b - 1);
-        self.jump(caret)
-    }
-
     /// Delete the char or node after the caret (structures and formulas:
     /// select first); at the end of a text, join with the next block.
     pub fn delete(&mut self) -> bool {
         if self.selected.is_some() {
             return self.delete_selection();
+        }
+        if let Some(block) = self.source_block() {
+            return self.select_source_block(block);
         }
         if let Some(p) = self.row_pos() {
             self.finish_word();
@@ -1352,6 +1397,57 @@ impl Editor {
         self.commit(vec![op], after, Last::Other)
     }
 
+    /// Insert a diagram or raw Typst block after the caret's block (in place
+    /// of it, if that is an empty paragraph); the caret goes onto it.
+    pub fn insert_block(&mut self, kind: NewBlock) -> bool {
+        self.finish_word();
+        self.selected = None;
+        let Some(b) = self.doc.block_index(self.caret.block) else {
+            return false;
+        };
+        let block = match kind {
+            NewBlock::Diagram => self.doc.diagram(DIAGRAM_TEMPLATE),
+            NewBlock::RawTypst => self.doc.raw(""),
+        };
+        let after = cursor(block.id, vec![], 0);
+        let replace = is_empty_text_block(&self.doc.blocks[b]);
+        let op = Op::Replace {
+            seq: Seq::Blocks,
+            index: if replace { b } else { b + 1 },
+            count: usize::from(replace),
+            items: Items::Blocks(vec![block]),
+        };
+        self.commit(vec![op], after, Last::Other)
+    }
+
+    /// The source of a raw Typst or diagram block.
+    pub fn block_source(&self, block: NodeId) -> Option<&str> {
+        match &self.doc.block(block)?.kind {
+            Block::RawTypst(s) | Block::Diagram(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Replace the source of a raw/diagram block (from the source pane).
+    /// Consecutive edits of one block are one undo step.
+    pub fn set_block_source(&mut self, block: NodeId, source: &str) -> bool {
+        let Some(old) = self.block_source(block) else {
+            return false;
+        };
+        if old == source {
+            return false;
+        }
+        let op = Op::Replace {
+            seq: Seq::Text(block),
+            index: 0,
+            count: old.chars().count(),
+            items: Items::Text(source.into()),
+        };
+        // The caret goes onto the block (its end), as when it was opened.
+        let after = cursor(block, vec![], source.chars().count());
+        self.commit(vec![op], after, Last::Source(block))
+    }
+
     // ----- Moving -----
 
     /// Move the caret one position left, entering and leaving structures.
@@ -1501,6 +1597,7 @@ impl Editor {
                 .and_then(|b| b.kind.inlines())
                 .and_then(|v| v.get(*inline))
                 .map_or(vec![], |i| vec![i.id]),
+            Some(Selected::Block { block }) => vec![*block],
             None => vec![],
         }
     }
@@ -1545,6 +1642,9 @@ impl Editor {
     pub fn hint(&self) -> &'static str {
         match (&self.selected, self.row_pos()) {
             (Some(_), _) => "Backspace → delete selection · Esc → cancel",
+            (None, _) if self.source_block().is_some() => {
+                "Enter → edit source · Backspace → delete · Esc → next paragraph"
+            }
             (None, Some(p)) if p.nested() => "Tab → next slot · Esc → leave structure",
             (None, Some(_)) => "/ fraction · ^ _ scripts · Esc or $ → leave formula",
             (None, None) => "$ → formula · = and space at the start → section",
@@ -1677,7 +1777,7 @@ mod tests {
                     })
                     .collect(),
                 Block::DisplayMath(_) => "$$".into(),
-                Block::RawTypst(s) => s.clone(),
+                Block::RawTypst(s) | Block::Diagram(s) => s.clone(),
             })
             .collect()
     }
@@ -1834,6 +1934,39 @@ mod tests {
         ));
         assert!(e.set_heading(None));
         assert!(!e.set_heading(None));
+    }
+
+    #[test]
+    fn diagram_blocks() {
+        let mut e = sample();
+        caret_at(&mut e, 1, 0, 2);
+        e.backspace();
+        e.backspace();
+        // "ef" is now empty: the diagram takes its place.
+        assert!(e.insert_block(NewBlock::Diagram));
+        let id = e.caret().block;
+        assert_eq!(e.doc().blocks.len(), 4);
+        assert_eq!(e.block_source(id), Some(DIAGRAM_TEMPLATE));
+        // Source edits from the pane are one undo step.
+        e.set_block_source(id, "circle((0, 0))");
+        e.set_block_source(id, "circle((0, 0))\nrect((0, 0), (1, 1))");
+        e.undo();
+        assert_eq!(e.block_source(id), Some(DIAGRAM_TEMPLATE));
+        e.redo();
+        // Escape goes to the next paragraph (here the display formula is
+        // next, so a new paragraph is created).
+        assert!(e.escape());
+        assert_eq!(e.doc().blocks.len(), 5);
+        assert!(matches!(e.doc().blocks[2].kind, Block::Paragraph(_)));
+        // Backspace selects the block, then deletes it.
+        e.set_caret(cursor(id, vec![], 0));
+        assert!(e.backspace());
+        assert_eq!(e.selected_ids(), vec![id]);
+        assert!(e.backspace());
+        assert!(e.doc().block(id).is_none());
+        assert_eq!(e.caret().block, e.doc().blocks[0].id);
+        while e.undo() {}
+        assert_eq!(texts(&e)[1], "ef");
     }
 
     #[test]

@@ -70,6 +70,7 @@ fn setup_actions(app: &adw::Application) {
         ("win.export-pdf", &["<Control>e"]),
         ("win.export-typ", &["<Control><Shift>e"]),
         ("win.source-pane", &["F9"]),
+        ("win.insert-diagram", &["<Control><Shift>d"]),
         ("window.close", &["<Control>w"]),
     ] {
         app.set_accels_for_action(action, accels);

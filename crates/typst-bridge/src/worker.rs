@@ -2,12 +2,17 @@
 //! block jobs in order; a newer job for the same block replaces a queued
 //! older one. Results go to a caller-supplied callback, which the GUI uses to
 //! hop back onto its main loop. This crate knows nothing about GTK.
+//!
+//! Renders are cached in memory by source, width and scale; renders of jobs
+//! marked `persist` (diagrams, raw Typst) also on disk.
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -16,6 +21,7 @@ use model::NodeId;
 
 use crate::TYPST_VERSION;
 use crate::compile::{Raster, block_document, compile, render_page};
+use crate::disk_cache::DiskCache;
 use crate::layout::{BlockLayout, RawLayout, raw_layout};
 use crate::serialize::SpanMap;
 use crate::world::BridgeWorld;
@@ -34,6 +40,8 @@ pub struct CompileJob {
     pub width_pt: f64,
     /// Zoom × device scale factor.
     pub pixel_per_pt: f64,
+    /// Keep the render in the disk cache too (slow blocks).
+    pub persist: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -55,16 +63,32 @@ pub struct CompileResult {
 /// Handle to the compile thread. Dropping it stops the thread.
 pub struct Worker {
     tx: Sender<CompileJob>,
+    compiles: Arc<AtomicUsize>,
 }
 
 impl Worker {
-    pub fn spawn(deliver: impl Fn(CompileResult) + Send + 'static) -> Self {
+    /// Start the compile thread. `disk_cache` is a directory for persisted
+    /// renders (`None`: memory only).
+    pub fn spawn(
+        disk_cache: Option<PathBuf>,
+        deliver: impl Fn(CompileResult) + Send + 'static,
+    ) -> Self {
         let (tx, rx) = mpsc::channel();
+        let compiles = Arc::new(AtomicUsize::new(0));
+        let counter = compiles.clone();
         thread::Builder::new()
             .name("typst-compile".into())
-            .spawn(move || run(rx, deliver))
+            .spawn(move || {
+                let disk = disk_cache.and_then(DiskCache::open);
+                run(rx, disk, counter, deliver)
+            })
             .expect("spawn compile thread");
-        Self { tx }
+        Self { tx, compiles }
+    }
+
+    /// Number of actual compiles so far (cache hits do not count).
+    pub fn compiles(&self) -> usize {
+        self.compiles.load(Ordering::Relaxed)
     }
 
     pub fn submit(&self, job: CompileJob) {
@@ -97,7 +121,12 @@ fn enqueue(queue: &mut VecDeque<CompileJob>, job: CompileJob) {
     }
 }
 
-fn run(rx: Receiver<CompileJob>, deliver: impl Fn(CompileResult)) {
+fn run(
+    rx: Receiver<CompileJob>,
+    disk: Option<DiskCache>,
+    compiles: Arc<AtomicUsize>,
+    deliver: impl Fn(CompileResult),
+) {
     let mut world = BridgeWorld::new();
     let mut cache: HashMap<u64, Cached> = HashMap::new();
     let mut queue = VecDeque::new();
@@ -118,12 +147,30 @@ fn run(rx: Receiver<CompileJob>, deliver: impl Fn(CompileResult)) {
         let key = cache_key(&job);
         let start = Instant::now();
         let mut elapsed = Duration::ZERO;
+        let on_disk = || {
+            let disk = disk.as_ref().filter(|_| job.persist)?;
+            let (raster, raw) = disk.load(key)?;
+            Some((Arc::new(raster), Arc::new(raw)))
+        };
         let outcome = match cache.get(&key) {
             Some(c) => Ok((c.raster.clone(), c.raw.clone())),
             None => {
-                let result = catch_unwind(AssertUnwindSafe(|| compile_job(&mut world, &job)))
-                    .unwrap_or_else(|_| Err(vec!["internal compiler panic".into()]));
-                elapsed = start.elapsed();
+                let result = match on_disk() {
+                    Some(hit) => Ok(hit),
+                    None => {
+                        compiles.fetch_add(1, Ordering::Relaxed);
+                        let result =
+                            catch_unwind(AssertUnwindSafe(|| compile_job(&mut world, &job)))
+                                .unwrap_or_else(|_| Err(vec!["internal compiler panic".into()]));
+                        elapsed = start.elapsed();
+                        if let (Ok((raster, raw)), Some(disk)) = (&result, &disk)
+                            && job.persist
+                        {
+                            disk.store(key, raster, raw);
+                        }
+                        result
+                    }
+                };
                 result.inspect(|(raster, raw)| {
                     if cache.len() >= CACHE_CAPACITY {
                         cache.clear();
@@ -186,7 +233,40 @@ mod tests {
             map: SpanMap::default(),
             width_pt: 200.0,
             pixel_per_pt: 1.0,
+            persist: false,
         }
+    }
+
+    /// Persisted renders survive a new worker (an app restart): no compile.
+    #[test]
+    fn disk_cache_serves_persisted_renders() {
+        let dir = std::env::temp_dir().join(format!("sem-disk-cache-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut d = Document::empty();
+        let g = d.diagram("circle((0, 0))\nline((0, 0), (2, 1))");
+        let (snippet, map) = serialize_block(&g);
+        let job = CompileJob {
+            map,
+            persist: true,
+            ..job(g.id, 1, &snippet)
+        };
+        let mut layouts = vec![];
+        for round in 0..2 {
+            let (tx, rx) = mpsc::channel();
+            let worker = Worker::spawn(Some(dir.clone()), move |r| tx.send(r).unwrap());
+            worker.submit(job.clone());
+            let result = rx.recv_timeout(Duration::from_secs(60)).unwrap();
+            let rendered = result.outcome.expect("diagram renders");
+            assert!(rendered.raster.width > 0);
+            layouts.push(rendered.layout);
+            assert_eq!(
+                worker.compiles(),
+                if round == 0 { 1 } else { 0 },
+                "round {round}"
+            );
+        }
+        assert_eq!(layouts[0], layouts[1]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -206,7 +286,7 @@ mod tests {
     #[test]
     fn worker_compiles_reports_errors_and_caches() {
         let (tx, rx) = mpsc::channel();
-        let worker = Worker::spawn(move |r| tx.send(r).unwrap());
+        let worker = Worker::spawn(None, move |r| tx.send(r).unwrap());
         let mut d = Document::empty();
         let x = d.ident("x");
         let xid = x.id;

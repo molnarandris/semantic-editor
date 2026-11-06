@@ -5,6 +5,7 @@
 
 mod caret;
 mod imp;
+mod jobs;
 
 pub use imp::DEFAULT_ZOOM;
 
@@ -13,7 +14,7 @@ use std::cell::Ref;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use model::{Crumb, CursorPath, Document, NodeId};
+use model::{Crumb, CursorPath, Document, NewBlock, NodeId};
 
 glib::wrapper! {
     pub struct SemEditor(ObjectSubclass<imp::SemEditor>)
@@ -78,6 +79,61 @@ impl SemEditor {
     /// Select the structure a breadcrumb entry stands for.
     pub fn select_crumb(&self, crumb: &Crumb) {
         self.imp().select_crumb(crumb.path_len);
+    }
+
+    /// Insert a diagram or raw Typst block after the caret's block.
+    pub fn insert_block(&self, kind: NewBlock) {
+        let imp = self.imp();
+        if imp.editor.borrow_mut().insert_block(kind) {
+            imp.after_command(true);
+        }
+    }
+
+    /// The source of a raw/diagram block.
+    pub fn block_source(&self, block: NodeId) -> Option<String> {
+        self.imp()
+            .editor
+            .borrow()
+            .block_source(block)
+            .map(Into::into)
+    }
+
+    /// Replace the source of a raw/diagram block and re-render it.
+    pub fn set_block_source(&self, block: NodeId, source: &str) {
+        let imp = self.imp();
+        if imp.editor.borrow_mut().set_block_source(block, source) {
+            imp.after_command(true);
+        }
+    }
+
+    /// The error of a block's last compile, if it failed.
+    pub fn block_error(&self, block: NodeId) -> Option<String> {
+        self.imp().block_error(block)
+    }
+
+    /// A raw/diagram block should be opened for editing (Enter or double
+    /// click on it).
+    pub fn connect_edit_source<F: Fn(&Self, NodeId) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
+        self.connect_local("edit-source", false, move |args| {
+            let obj = args[0].get::<Self>().expect("SemEditor");
+            f(&obj, NodeId(args[1].get::<u64>().expect("block id")));
+            None
+        })
+    }
+
+    /// A block's render or compile error arrived.
+    pub fn connect_block_rendered<F: Fn(&Self, NodeId) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
+        self.connect_local("block-rendered", false, move |args| {
+            let obj = args[0].get::<Self>().expect("SemEditor");
+            f(&obj, NodeId(args[1].get::<u64>().expect("block id")));
+            None
+        })
     }
 
     /// Called after every command (caret, selection or document changed).

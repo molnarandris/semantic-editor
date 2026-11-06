@@ -159,4 +159,29 @@ Implementation notes (done):
   with an empty document; the M3 sample is in the menu ("Open Sample Document").
   `HANDLES_OPEN`: files passed on the command line open in their own windows.
 
+## M7 — CeTZ diagrams
+
+Implementation notes (done):
+
+- Packages: `BridgeWorld` serves package files like the Typst CLI (`typst-kit`
+  `system-packages` + `system-downloader`): package data dir, cache dir, else download
+  from Typst Universe into the cache (in the Flatpak: `~/.var/app/<id>/cache/typst`).
+  The Flatpak has `--share=network` for this. `tiny-skia` (already in the build via
+  `typst-render`) is a direct dependency only for PNG encode/decode.
+- `Block::Diagram(source)`: the body of `cetz.canvas({ import cetz.draw: * … })`,
+  centred. CeTZ pinned to 0.5.3 (`CETZ_VERSION`); block snippets import it, the
+  exported document imports it once at the top.
+- Editing: Insert Diagram (Ctrl+Shift+D) / Insert Raw Typst from the menu; Enter or
+  double click on such a block opens its source in the side panel (editable
+  GtkSourceView, compile error shown below). Edits apply 300 ms after the last key
+  (`Editor::set_block_source`, one undo step per block while editing); the page is the
+  preview. Esc / Done goes back. Backspace/Delete on the block select it, then delete.
+  Escape on the block moves to (or creates) the paragraph after it.
+- Caching: memory as before; jobs flagged `persist` (diagram and raw blocks) also go
+  to a disk cache (PNG + layout JSON per render key, ~/.cache/semantic-editor/renders,
+  oldest pruned beyond 1000 files). `jobs::stale_blocks` decides what to submit (only
+  changed sources). Tests: 20 diagrams next to edited prose → no diagram recompile;
+  a fresh worker serves a persisted render with zero compiles.
+- Tests that compile CeTZ need network on their first run (package download).
+
 Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing.

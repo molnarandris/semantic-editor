@@ -1,4 +1,7 @@
-//! A minimal in-memory Typst [`World`]: one main source, embedded fonts.
+//! A Typst [`World`]: one in-memory main source, embedded fonts, and
+//! packages (`@preview/cetz`, …) served like the Typst CLI does: from the
+//! local package data directory, the cache, or downloaded from Typst
+//! Universe into the cache on first use.
 
 use typst::diag::{FileError, FileResult};
 use typst::foundations::{Bytes, Datetime, Duration};
@@ -6,6 +9,23 @@ use typst::syntax::{FileId, RootedPath, Source, VirtualPath, VirtualRoot};
 use typst::text::{Font, FontBook};
 use typst::utils::LazyHash;
 use typst::{Library, LibraryExt, World};
+use typst_kit::downloader::SystemDownloader;
+use typst_kit::files::{FileLoader, FileStore};
+use typst_kit::packages::SystemPackages;
+
+/// Loads files of packages; the project has no files besides the main one.
+struct PackageFiles {
+    packages: SystemPackages,
+}
+
+impl FileLoader for PackageFiles {
+    fn load(&self, id: FileId) -> FileResult<Bytes> {
+        match id.root() {
+            VirtualRoot::Package(spec) => self.packages.obtain(spec)?.load(id.vpath()),
+            VirtualRoot::Project => Err(FileError::NotFound(id.vpath().get_without_slash().into())),
+        }
+    }
+}
 
 /// Long-lived compilation environment. Fonts and the standard library are
 /// loaded once; the main source is swapped for every compile.
@@ -14,6 +34,7 @@ pub struct BridgeWorld {
     book: LazyHash<FontBook>,
     fonts: Vec<Font>,
     main: Source,
+    files: FileStore<PackageFiles>,
 }
 
 impl BridgeWorld {
@@ -27,6 +48,12 @@ impl BridgeWorld {
             book: LazyHash::new(book),
             fonts,
             main: Source::new(main_id, String::new()),
+            files: FileStore::new(PackageFiles {
+                packages: SystemPackages::new(SystemDownloader::new(concat!(
+                    "semantic-editor/",
+                    env!("CARGO_PKG_VERSION")
+                ))),
+            }),
         }
     }
 
@@ -64,13 +91,16 @@ impl World for BridgeWorld {
         if id == self.main.id() {
             Ok(self.main.clone())
         } else {
-            Err(FileError::NotFound(id.vpath().get_without_slash().into()))
+            self.files.source(id)
         }
     }
 
     fn file(&self, id: FileId) -> FileResult<Bytes> {
-        self.source(id)
-            .map(|s| Bytes::from_string(s.text().to_owned()))
+        if id == self.main.id() {
+            Ok(Bytes::from_string(self.main.text().to_owned()))
+        } else {
+            self.files.file(id)
+        }
     }
 
     fn font(&self, index: usize) -> Option<Font> {

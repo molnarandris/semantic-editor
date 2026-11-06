@@ -17,7 +17,8 @@ typst = "=0.15.1"
 typst-layout = "=0.15.1"
 typst-render = "=0.15.1"
 typst-pdf = "=0.15.1"
-typst-kit = { version = "=0.15.1", default-features = false, features = ["embedded-fonts"] }
+typst-kit = { version = "=0.15.1", default-features = false, features = ["embedded-fonts", "system-packages", "system-downloader"] }
 gtk = { package = "gtk4", version = "0.11", features = ["v4_18"] }
 adw = { package = "libadwaita", version = "0.9", features = ["v1_8"] }
 sourceview5 = "0.11"
+tiny-skia = "0.12"

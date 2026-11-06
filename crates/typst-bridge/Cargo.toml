@@ -11,6 +11,6 @@ typst-layout.workspace = true
 typst-render.workspace = true
 typst-pdf.workspace = true
 typst-kit.workspace = true
-
-[dev-dependencies]
+serde.workspace = true
 serde_json.workspace = true
+tiny-skia.workspace = true

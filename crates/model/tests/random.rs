@@ -103,7 +103,7 @@ fn all_cursors(doc: &Document) -> Vec<CursorPath> {
                 }
             }
             Block::DisplayMath(r) => row(&mut out, b.id, vec![], r),
-            Block::RawTypst(s) => (0..=s.chars().count()).for_each(|o| {
+            Block::RawTypst(s) | Block::Diagram(s) => (0..=s.chars().count()).for_each(|o| {
                 out.push(CursorPath {
                     block: b.id,
                     path: vec![],
@@ -288,7 +288,7 @@ fn random_keystrokes_keep_the_document_sound() {
         let start = doc.blocks.clone();
         let mut e = Editor::new(doc);
         for _ in 0..40 {
-            match rng.below(14) {
+            match rng.below(16) {
                 0..=5 => {
                     e.insert_text(keys[rng.below(keys.len())]);
                 }
@@ -312,6 +312,14 @@ fn random_keystrokes_keep_the_document_sound() {
                 }
                 12 => {
                     e.next_slot(rng.below(2) == 0);
+                }
+                13 => {
+                    let kind = [NewBlock::Diagram, NewBlock::RawTypst][rng.below(2)];
+                    e.insert_block(kind);
+                }
+                14 => {
+                    let block = e.caret().block;
+                    e.set_block_source(block, ["circle((0, 0))", "", "x"][rng.below(3)]);
                 }
                 _ => {
                     if let Some(c) = e.vertical_target(rng.below(2) == 0) {

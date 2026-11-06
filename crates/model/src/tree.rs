@@ -21,10 +21,15 @@ pub struct BlockNode {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Block {
-    Heading { level: u8, inlines: Vec<InlineNode> },
+    Heading {
+        level: u8,
+        inlines: Vec<InlineNode>,
+    },
     Paragraph(Vec<InlineNode>),
     DisplayMath(MathRow),
     RawTypst(String),
+    /// A CeTZ drawing: the body of `cetz.canvas({ import cetz.draw: * … })`.
+    Diagram(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -104,7 +109,7 @@ impl BlockNode {
                     Inline::Text(_) => None,
                 })
                 .collect(),
-            Block::RawTypst(_) => vec![],
+            Block::RawTypst(_) | Block::Diagram(_) => vec![],
         }
     }
 
@@ -118,7 +123,7 @@ impl BlockNode {
                     Inline::Text(_) => None,
                 })
                 .collect(),
-            Block::RawTypst(_) => vec![],
+            Block::RawTypst(_) | Block::Diagram(_) => vec![],
         }
     }
 
@@ -128,6 +133,7 @@ impl BlockNode {
             Block::Paragraph(_) => "paragraph",
             Block::DisplayMath(_) => "display math",
             Block::RawTypst(_) => "raw typst",
+            Block::Diagram(_) => "diagram",
         }
     }
 }
@@ -520,6 +526,13 @@ impl Document {
         BlockNode {
             id: self.fresh_id(),
             kind: Block::RawTypst(s.into()),
+        }
+    }
+
+    pub fn diagram(&mut self, source: &str) -> BlockNode {
+        BlockNode {
+            id: self.fresh_id(),
+            kind: Block::Diagram(source.into()),
         }
     }
 }

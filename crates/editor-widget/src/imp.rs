@@ -8,11 +8,10 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, glib, graphene, gsk};
 use model::{CursorPath, Document, Editor, NodeId};
-use typst_bridge::{
-    BLOCK_PAD_PT, BlockLayout, CompileJob, CompileResult, Raster, Worker, serialize_block,
-};
+use typst_bridge::{BLOCK_PAD_PT, BlockLayout, CompileJob, CompileResult, Raster, Worker};
 
 use crate::caret::{self, Stop};
+use crate::jobs;
 
 /// Logical pixels per typographic point: default, limits, and the factor
 /// of one zoom step.
@@ -134,7 +133,20 @@ impl ObjectImpl for SemEditor {
     fn signals() -> &'static [Signal] {
         static SIGNALS: OnceLock<Vec<Signal>> = OnceLock::new();
         // Emitted after every command: caret, selection or document changed.
-        SIGNALS.get_or_init(|| vec![Signal::builder("caret-moved").build()])
+        SIGNALS.get_or_init(|| {
+            vec![
+                Signal::builder("caret-moved").build(),
+                // A raw/diagram block's source should be opened for editing
+                // (Enter or double click on it). Param: block id.
+                Signal::builder("edit-source")
+                    .param_types([u64::static_type()])
+                    .build(),
+                // A block's render (or error) arrived. Param: block id.
+                Signal::builder("block-rendered")
+                    .param_types([u64::static_type()])
+                    .build(),
+            ]
+        })
     }
 
     fn set_property(&self, _id: usize, value: &glib::Value, pspec: &glib::ParamSpec) {
@@ -171,7 +183,10 @@ impl ObjectImpl for SemEditor {
 
         // Results arrive on the compile thread; hop to the main loop.
         let weak = glib::SendWeakRef::from(obj.downgrade());
-        let worker = Worker::spawn(move |result| {
+        let disk_cache = glib::user_cache_dir()
+            .join("semantic-editor")
+            .join("renders");
+        let worker = Worker::spawn(Some(disk_cache), move |result| {
             let weak = weak.clone();
             glib::MainContext::default().invoke(move || {
                 if let Some(editor) = weak.upgrade() {
@@ -379,7 +394,7 @@ impl SemEditor {
         let click = gtk::GestureClick::new();
         click.set_button(gdk::BUTTON_PRIMARY);
         let weak = obj.downgrade();
-        click.connect_pressed(move |_, _, x, y| {
+        click.connect_pressed(move |_, n_press, x, y| {
             if let Some(obj) = weak.upgrade() {
                 obj.grab_focus();
                 let imp = obj.imp();
@@ -387,6 +402,9 @@ impl SemEditor {
                     imp.editor.borrow_mut().set_caret(cursor);
                     imp.goal_x.set(None);
                     imp.after_command(false);
+                    if n_press == 2 {
+                        imp.request_source_edit();
+                    }
                 }
             }
         });
@@ -448,7 +466,15 @@ impl SemEditor {
                 }
                 Command::Backspace => ed.backspace(),
                 Command::Delete => ed.delete(),
-                Command::Enter => ed.enter(),
+                Command::Enter => {
+                    let caret = ed.caret().block;
+                    if ed.block_source(caret).is_some() {
+                        drop(ed);
+                        self.request_source_edit();
+                        return;
+                    }
+                    ed.enter()
+                }
                 Command::Undo => ed.undo(),
                 Command::Redo => ed.redo(),
                 Command::Escape => ed.escape(),
@@ -497,7 +523,7 @@ impl SemEditor {
     /// Bring the view in line with the model after a command. Any command
     /// may change the document (moving the caret finishes a word, `chi` →
     /// χ); only blocks whose source changed are recompiled.
-    fn after_command(&self, reveal: bool) {
+    pub(crate) fn after_command(&self, reveal: bool) {
         self.sync_views();
         self.submit_blocks(false);
         self.obj().queue_resize();
@@ -508,6 +534,23 @@ impl SemEditor {
         self.update_im_location();
         self.restart_blink();
         self.obj().emit_by_name::<()>("caret-moved", &[]);
+    }
+
+    /// Ask the app to open the caret's raw/diagram block for editing.
+    fn request_source_edit(&self) {
+        let block = self.editor.borrow().caret().block;
+        if self.editor.borrow().block_source(block).is_some() {
+            self.obj().emit_by_name::<()>("edit-source", &[&block.0]);
+        }
+    }
+
+    /// The last compile error of a block, if its last compile failed.
+    pub(crate) fn block_error(&self, block: NodeId) -> Option<String> {
+        self.views
+            .borrow()
+            .iter()
+            .find(|v| v.id == block)
+            .and_then(|v| v.error.clone())
     }
 
     /// Select the structure of breadcrumb entry `path_len`.
@@ -548,8 +591,17 @@ impl SemEditor {
         let Some(layout) = views.get(index).and_then(|v| v.layout.as_ref()) else {
             return;
         };
+        // A whole block (selected diagram) covers its full area.
+        let whole = |id: NodeId| {
+            (views[index].id == id).then_some(typst_bridge::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: layout.width,
+                h: views[index].height_pt(),
+            })
+        };
         let rect = |id: NodeId, pad: f64| {
-            layout.box_of(id).map(|r| {
+            whole(id).or_else(|| layout.box_of(id)).map(|r| {
                 graphene::Rect::new(
                     (x0 + r.x * zoom - pad) as f32,
                     (top + r.y * zoom - scroll - pad) as f32,
@@ -834,22 +886,24 @@ impl SemEditor {
         }
         let ed = self.editor.borrow();
         let mut views = self.views.borrow_mut();
-        for (block, view) in ed.doc().blocks.iter().zip(views.iter_mut()) {
-            let (snippet, map) = serialize_block(block);
-            if !force && snippet == view.snippet {
-                continue;
-            }
+        let jobs = {
+            let submitted: Vec<&str> = views.iter().map(|v| v.snippet.as_str()).collect();
+            jobs::stale_blocks(&ed.doc().blocks, &submitted, force)
+        };
+        for job in jobs {
+            let (block, view) = (&ed.doc().blocks[job.index], &mut views[job.index]);
             let generation = self.generation.get() + 1;
             self.generation.set(generation);
-            view.snippet = snippet.clone();
+            view.snippet = job.snippet.clone();
             view.submitted = generation;
             self.worker.get().expect("worker").submit(CompileJob {
                 block: block.id,
                 generation,
-                snippet,
-                map,
+                snippet: job.snippet,
+                map: job.map,
                 width_pt: self.page_width_pt.get(),
                 pixel_per_pt: self.pixel_per_pt.get(),
+                persist: job.persist,
             });
         }
     }
@@ -877,6 +931,7 @@ impl SemEditor {
         let obj = self.obj();
         obj.queue_resize();
         obj.queue_draw();
+        obj.emit_by_name::<()>("block-rendered", &[&result.block.0]);
         if self.editor.borrow().caret().block == result.block {
             if self.reveal.take() {
                 self.reveal_caret();

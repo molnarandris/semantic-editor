@@ -18,6 +18,13 @@ pub const PREAMBLE: &str = "\
 #let sem-slot = box.with(width: 0.55em, height: 0.7em, stroke: (paint: luma(160), thickness: 0.5pt, dash: \"densely-dashed\"))
 ";
 
+/// The CeTZ version diagrams are drawn with. Pinned so that documents do not
+/// change when CeTZ releases a new version.
+pub const CETZ_VERSION: &str = "0.5.3";
+
+/// The import that diagram blocks need.
+pub const CETZ_IMPORT: &str = "#import \"@preview/cetz:0.5.3\"";
+
 /// The Typst source of an empty math row (a visible placeholder box).
 pub const SLOT: &str = "#sem-slot()";
 
@@ -183,8 +190,35 @@ impl Writer {
                 w.row(row);
                 w.out.push_str(" $");
             }
-            Block::RawTypst(src) => w.out.push_str(src),
+            Block::RawTypst(src) => w.verbatim(block.id, src, ""),
+            Block::Diagram(src) => {
+                if w.style == Style::Edit {
+                    // Standalone block documents import CeTZ themselves; the
+                    // whole document imports it once at the top.
+                    w.out.push_str(CETZ_IMPORT);
+                    w.out.push('\n');
+                }
+                w.out
+                    .push_str("#align(center, cetz.canvas({\n  import cetz.draw: *\n  ");
+                w.verbatim(block.id, src, "  ");
+                w.out.push_str("\n}))");
+            }
         });
+    }
+
+    /// Typst source copied as is, each line after the first indented by
+    /// `indent`; records where every char went (for the source pane).
+    fn verbatim(&mut self, id: NodeId, src: &str, indent: &str) {
+        let mut starts = Vec::with_capacity(src.len() + 1);
+        for c in src.chars() {
+            starts.push(self.out.len());
+            self.out.push(c);
+            if c == '\n' {
+                self.out.push_str(indent);
+            }
+        }
+        starts.push(self.out.len());
+        self.map.texts.push((id, starts));
     }
 
     fn inlines(&mut self, inlines: &[InlineNode], at_line_start: bool) {
@@ -514,6 +548,14 @@ pub fn serialize_document(doc: &Document) -> String {
 /// blocks (for the source pane).
 pub fn serialize_document_mapped(doc: &Document) -> (String, SpanMap) {
     let mut out = String::from(PREAMBLE);
+    if doc
+        .blocks
+        .iter()
+        .any(|b| matches!(b.kind, Block::Diagram(_)))
+    {
+        out.push_str(CETZ_IMPORT);
+        out.push('\n');
+    }
     let mut map = SpanMap::default();
     for block in &doc.blocks {
         out.push('\n');
@@ -784,6 +826,34 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn diagrams_serialize_and_compile() {
+        assert!(CETZ_IMPORT.contains(CETZ_VERSION));
+        let mut d = Document::empty();
+        let t = d.text("Before");
+        let p = d.paragraph(vec![t]);
+        let g = d.diagram("circle((0, 0))\nline((0, 0), (1, 1))");
+        let gid = g.id;
+        d.blocks = vec![p, g.clone()];
+        let (snippet, map) = serialize_block(&g);
+        assert_eq!(
+            snippet,
+            format!(
+                "{CETZ_IMPORT}\n#align(center, cetz.canvas({{\n  import cetz.draw: *\n  \
+                 circle((0, 0))\n  line((0, 0), (1, 1))\n}}))"
+            )
+        );
+        // The source pane can find every char of the drawing code.
+        let at = map.text_byte_of(gid, 15).unwrap();
+        assert_eq!(&snippet[at..at + 4], "line");
+        let doc = serialize_document(&d);
+        assert_eq!(doc.matches(CETZ_IMPORT).count(), 1, "{doc}");
+        let mut world = BridgeWorld::new();
+        let (src, _) = block_document(&snippet, 300.0);
+        compile(&mut world, &src).unwrap();
+        compile(&mut world, &doc).unwrap();
     }
 
     #[test]

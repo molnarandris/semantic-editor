@@ -187,7 +187,9 @@ impl Document {
             Seq::Text(id) => {
                 for block in &mut self.blocks {
                     match &mut block.kind {
-                        Block::RawTypst(s) if block.id == id => return Ok(SeqMut::Text(s)),
+                        Block::RawTypst(s) | Block::Diagram(s) if block.id == id => {
+                            return Ok(SeqMut::Text(s));
+                        }
                         Block::Paragraph(inlines) | Block::Heading { inlines, .. } => {
                             for inline in inlines {
                                 if inline.id == id {

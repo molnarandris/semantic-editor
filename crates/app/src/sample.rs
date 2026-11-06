@@ -102,6 +102,20 @@ pub fn document() -> Document {
     blocks.push(b.0.display(vec![xs, eq, half]));
     blocks.push(b.0.raw("#align(center, text(fill: luma(110), style: \"italic\")[A raw Typst block, emitted verbatim.])"));
 
+    let t = b.t("A diagram block holds CeTZ drawing code; here the state as a chain of tensors:");
+    blocks.push(b.0.paragraph(vec![t]));
+    blocks.push(b.0.diagram(
+        "for i in range(4) {
+  let x = i * 1.6
+  line((x, -0.35), (x, -0.9))
+  circle((x, 0), radius: 0.35, fill: rgb(\"#dbe8fb\"), name: \"A\" + str(i))
+  content((x, 0), $A_#(i + 1)$)
+}
+for i in range(3) {
+  line(\"A\" + str(i) + \".east\", \"A\" + str(i + 1) + \".west\")
+}",
+    ));
+
     for k in 1..=12 {
         let t = b.t(&format!("Scaling check {k}"));
         blocks.push(b.0.heading(2, vec![t]));

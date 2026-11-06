@@ -43,7 +43,7 @@ pub fn stops(block: &BlockNode, layout: Option<&BlockLayout>) -> Vec<Stop> {
             row_stops(block, vec![], row, l, l.baseline, 1, &mut v);
             v
         }
-        (Some(l), Block::RawTypst(text)) => {
+        (Some(l), Block::RawTypst(text) | Block::Diagram(text)) => {
             let n = text.chars().count();
             vec![
                 stop(block, vec![], 0, 0.0, 0.0, l.height, l.baseline),

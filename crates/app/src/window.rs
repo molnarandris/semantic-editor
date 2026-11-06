@@ -2,14 +2,14 @@
 //! and the file actions (open, save, export). File dialogs go through the
 //! portal, so the Flatpak needs no filesystem permissions.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::future::Future;
 use std::rc::Rc;
 
 use adw::prelude::*;
 use editor_widget::SemEditor;
 use gtk::{gdk, gio, glib};
-use model::{BlockNode, CursorPath, Document, Target};
+use model::{Block, BlockNode, CursorPath, Document, NewBlock, NodeId, Target};
 use sourceview5::prelude::*;
 use typst_bridge::{SpanMap, compile_pdf, serialize_document, serialize_document_mapped};
 
@@ -34,7 +34,26 @@ pub struct Window {
     saved: RefCell<Vec<BlockNode>>,
     /// Text currently in the source pane (to skip redundant updates).
     shown_source: RefCell<String>,
+    /// Side panel pages: "document" (Typst source) and "block" (editor).
+    sidebar: gtk::Stack,
+    block: BlockEditor,
 }
+
+/// The side panel page that edits a raw Typst or diagram block's source.
+struct BlockEditor {
+    title: gtk::Label,
+    view: sourceview5::View,
+    error: gtk::Label,
+    /// The block being edited.
+    editing: Cell<Option<NodeId>>,
+    /// Set while the buffer is filled from the model (not a user edit).
+    loading: Cell<bool>,
+    /// Pending debounced apply of the buffer to the model.
+    debounce: RefCell<Option<glib::SourceId>>,
+}
+
+/// Pause after the last keystroke before a source edit is applied.
+const SOURCE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(300);
 
 fn spawn(future: impl Future<Output = ()> + 'static) {
     glib::spawn_future_local(future);
@@ -80,9 +99,13 @@ impl Window {
 
         let source = source_view();
         let source_scroller = gtk::ScrolledWindow::builder().child(&source).build();
+        let (block, block_page) = block_editor();
+        let sidebar = gtk::Stack::new();
+        sidebar.add_named(&source_scroller, Some("document"));
+        sidebar.add_named(&block_page, Some("block"));
         let split = adw::OverlaySplitView::builder()
             .content(&scroller)
-            .sidebar(&source_scroller)
+            .sidebar(&sidebar)
             .sidebar_position(gtk::PackType::End)
             .show_sidebar(false)
             .min_sidebar_width(280.0)
@@ -120,6 +143,8 @@ impl Window {
             file: RefCell::new(None),
             saved: RefCell::new(vec![]),
             shown_source: RefCell::new(String::new()),
+            sidebar,
+            block,
         });
         this.add_actions();
         this.connect_signals();
@@ -145,8 +170,40 @@ impl Window {
             if let Some(this) = weak.upgrade() {
                 this.update_title();
                 this.update_source();
+                this.sync_block_editor();
             }
         });
+        let weak = Rc::downgrade(self);
+        self.editor.connect_edit_source(move |_, block| {
+            if let Some(this) = weak.upgrade() {
+                this.open_block_editor(block);
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.editor.connect_block_rendered(move |_, block| {
+            if let Some(this) = weak.upgrade()
+                && this.block.editing.get() == Some(block)
+            {
+                this.show_block_error();
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.block.view.buffer().connect_changed(move |_| {
+            if let Some(this) = weak.upgrade() {
+                this.schedule_block_apply();
+            }
+        });
+        // Escape in the block editor: back to the page.
+        let keys = gtk::EventControllerKey::new();
+        let weak = Rc::downgrade(self);
+        keys.connect_key_pressed(move |_, key, _, _| match weak.upgrade() {
+            Some(this) if key == gdk::Key::Escape => {
+                this.close_block_editor();
+                glib::Propagation::Stop
+            }
+            _ => glib::Propagation::Proceed,
+        });
+        self.block.view.add_controller(keys);
 
         let weak = Rc::downgrade(self);
         self.window.connect_close_request(move |_| {
@@ -174,7 +231,10 @@ impl Window {
 
     fn add_actions(self: &Rc<Self>) {
         type Handler = fn(Rc<Window>);
-        let actions: [(&str, Handler); 6] = [
+        let actions: [(&str, Handler); 9] = [
+            ("insert-diagram", |w| w.insert_block(NewBlock::Diagram)),
+            ("insert-raw", |w| w.insert_block(NewBlock::RawTypst)),
+            ("close-block-editor", |w| w.close_block_editor()),
             ("open", |w| spawn(async move { w.open().await })),
             ("save", |w| {
                 spawn(async move {
@@ -233,15 +293,134 @@ impl Window {
                 .and_then(|v| v.get::<bool>())
                 .unwrap_or(false);
             action.set_state(&on.to_variant());
+            this.close_block_editor();
             this.split.set_show_sidebar(on);
             this.update_source();
         });
         // The pane can also be closed by the split view itself (narrow window).
         let action = pane.clone();
+        let weak = Rc::downgrade(self);
         self.split.connect_show_sidebar_notify(move |split| {
-            action.set_state(&split.shows_sidebar().to_variant());
+            let showing_document = weak
+                .upgrade()
+                .is_some_and(|this| this.block.editing.get().is_none());
+            if showing_document || !split.shows_sidebar() {
+                action.set_state(&split.shows_sidebar().to_variant());
+            }
         });
         self.window.add_action(&pane);
+    }
+
+    // ----- Diagram and raw Typst blocks -----
+
+    fn insert_block(self: Rc<Self>, kind: NewBlock) {
+        self.editor.insert_block(kind);
+        self.open_block_editor(self.editor.caret().block);
+    }
+
+    /// Show the block's source in the side panel for editing.
+    fn open_block_editor(&self, block: NodeId) {
+        self.apply_block_edit();
+        let Some(source) = self.editor.block_source(block) else {
+            return;
+        };
+        let b = &self.block;
+        b.editing.set(Some(block));
+        let kind = match self.editor.document().block(block).map(|b| &b.kind) {
+            Some(Block::Diagram(_)) => "Diagram (CeTZ drawing code)",
+            _ => "Raw Typst",
+        };
+        b.title.set_label(kind);
+        b.loading.set(true);
+        b.view.buffer().set_text(&source);
+        b.loading.set(false);
+        self.show_block_error();
+        self.sidebar.set_visible_child_name("block");
+        self.split.set_show_sidebar(true);
+        b.view.grab_focus();
+    }
+
+    /// Back to the page: apply pending edits, restore the side panel.
+    fn close_block_editor(&self) {
+        if self.block.editing.get().is_none() {
+            return;
+        }
+        self.apply_block_edit();
+        self.block.editing.set(None);
+        self.sidebar.set_visible_child_name("document");
+        let pane_on = self
+            .window
+            .lookup_action("source-pane")
+            .and_then(|a| a.state())
+            .and_then(|v| v.get::<bool>())
+            .unwrap_or(false);
+        self.split.set_show_sidebar(pane_on);
+        self.update_source();
+        self.editor.grab_focus();
+    }
+
+    fn schedule_block_apply(self: &Rc<Self>) {
+        if self.block.loading.get() || self.block.editing.get().is_none() {
+            return;
+        }
+        if let Some(id) = self.block.debounce.take() {
+            id.remove();
+        }
+        let weak = Rc::downgrade(self);
+        let id = glib::timeout_add_local_once(SOURCE_DEBOUNCE, move || {
+            if let Some(this) = weak.upgrade() {
+                this.block.debounce.take();
+                this.apply_block_edit();
+            }
+        });
+        *self.block.debounce.borrow_mut() = Some(id);
+    }
+
+    /// Put the editor buffer into the model now (cancels the debounce).
+    fn apply_block_edit(&self) {
+        if let Some(id) = self.block.debounce.take() {
+            id.remove();
+        }
+        let Some(block) = self.block.editing.get() else {
+            return;
+        };
+        let buffer = self.block.view.buffer();
+        let (start, end) = buffer.bounds();
+        let text = buffer.text(&start, &end, false);
+        self.editor.set_block_source(block, &text);
+    }
+
+    /// After a command: close the editor if its block is gone (undo), and
+    /// pick up source changes made elsewhere (undo/redo on the page).
+    fn sync_block_editor(&self) {
+        let Some(block) = self.block.editing.get() else {
+            return;
+        };
+        match self.editor.block_source(block) {
+            None => self.close_block_editor(),
+            Some(source)
+                if !self.block.view.has_focus() && self.block.debounce.borrow().is_none() =>
+            {
+                let buffer = self.block.view.buffer();
+                let (start, end) = buffer.bounds();
+                if buffer.text(&start, &end, false) != source {
+                    self.block.loading.set(true);
+                    buffer.set_text(&source);
+                    self.block.loading.set(false);
+                }
+            }
+            Some(_) => {}
+        }
+    }
+
+    fn show_block_error(&self) {
+        let error = self
+            .block
+            .editing
+            .get()
+            .and_then(|b| self.editor.block_error(b));
+        self.block.error.set_visible(error.is_some());
+        self.block.error.set_label(error.as_deref().unwrap_or(""));
     }
 
     // ----- State -----
@@ -436,7 +615,7 @@ impl Window {
     /// Show the document's Typst source with the caret's position and its
     /// innermost structure marked. Only while the pane is open.
     fn update_source(&self) {
-        if !self.split.shows_sidebar() {
+        if !self.split.shows_sidebar() || self.block.editing.get().is_some() {
             return;
         }
         let doc = self.editor.document();
@@ -506,6 +685,73 @@ fn filters(kind: &str, extension: &str) -> gio::ListStore {
     store
 }
 
+/// The side panel page for editing a block's source: title, editor, error.
+fn block_editor() -> (BlockEditor, gtk::Box) {
+    let title = gtk::Label::builder()
+        .xalign(0.0)
+        .hexpand(true)
+        .css_classes(["heading"])
+        .build();
+    let done = gtk::Button::builder()
+        .label("Done")
+        .action_name("win.close-block-editor")
+        .tooltip_text("Back to the Page (Esc)")
+        .build();
+    let header = gtk::Box::builder()
+        .spacing(6)
+        .margin_start(12)
+        .margin_end(6)
+        .margin_top(6)
+        .margin_bottom(6)
+        .build();
+    header.append(&title);
+    header.append(&done);
+
+    let buffer = sourceview5::Buffer::new(None);
+    follow_style_scheme(&buffer);
+    let view = sourceview5::View::with_buffer(&buffer);
+    view.set_monospace(true);
+    view.set_show_line_numbers(true);
+    view.set_auto_indent(true);
+    view.set_tab_width(2);
+    view.set_indent_width(2);
+    view.set_insert_spaces_instead_of_tabs(true);
+    view.set_top_margin(8);
+    view.set_bottom_margin(8);
+    view.set_left_margin(6);
+    let scroller = gtk::ScrolledWindow::builder()
+        .child(&view)
+        .vexpand(true)
+        .build();
+
+    let error = gtk::Label::builder()
+        .xalign(0.0)
+        .wrap(true)
+        .selectable(true)
+        .visible(false)
+        .margin_start(12)
+        .margin_end(12)
+        .margin_top(6)
+        .margin_bottom(6)
+        .css_classes(["error", "caption"])
+        .build();
+
+    let page = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    page.append(&header);
+    page.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    page.append(&scroller);
+    page.append(&error);
+    let editor = BlockEditor {
+        title,
+        view,
+        error,
+        editing: Cell::new(None),
+        loading: Cell::new(false),
+        debounce: RefCell::new(None),
+    };
+    (editor, page)
+}
+
 fn main_menu() -> gio::Menu {
     let menu = gio::Menu::new();
     let file = gio::Menu::new();
@@ -521,18 +767,18 @@ fn main_menu() -> gio::Menu {
     zoom.append(Some("Zoom _Out"), Some("win.zoom-out"));
     zoom.append(Some("_Reset Zoom"), Some("win.zoom-reset"));
     menu.append_section(None, &zoom);
+    let insert = gio::Menu::new();
+    insert.append(Some("Insert _Diagram"), Some("win.insert-diagram"));
+    insert.append(Some("Insert _Raw Typst"), Some("win.insert-raw"));
+    menu.append_section(None, &insert);
     let other = gio::Menu::new();
     other.append(Some("Open S_ample Document"), Some("win.open-sample"));
     menu.append_section(None, &other);
     menu
 }
 
-/// Read-only view of the generated Typst source.
-fn source_view() -> CaretView {
-    let buffer = sourceview5::Buffer::new(None);
-    if let Some(lang) = sourceview5::LanguageManager::default().language("typst") {
-        buffer.set_language(Some(&lang));
-    }
+/// Light or dark source colours, following the system style.
+fn follow_style_scheme(buffer: &sourceview5::Buffer) {
     let style = adw::StyleManager::default();
     let set_scheme = {
         let buffer = buffer.clone();
@@ -548,6 +794,15 @@ fn source_view() -> CaretView {
     };
     set_scheme(&style);
     style.connect_dark_notify(set_scheme);
+}
+
+/// Read-only view of the generated Typst source.
+fn source_view() -> CaretView {
+    let buffer = sourceview5::Buffer::new(None);
+    if let Some(lang) = sourceview5::LanguageManager::default().language("typst") {
+        buffer.set_language(Some(&lang));
+    }
+    follow_style_scheme(&buffer);
     let tag = gtk::TextTag::builder()
         .name("current")
         .background_rgba(&gdk::RGBA::new(0.21, 0.52, 0.89, 0.22))

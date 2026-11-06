@@ -2,6 +2,7 @@
 //! All Typst calls of the application live in this crate.
 
 pub mod compile;
+pub mod disk_cache;
 pub mod layout;
 pub mod serialize;
 pub mod symbols;
@@ -11,8 +12,8 @@ pub mod world;
 pub use compile::{BLOCK_PAD_PT, Raster, block_document, compile, compile_pdf, render_page};
 pub use layout::{BlockLayout, GlyphBox, RawLayout, Rect, raw_layout};
 pub use serialize::{
-    PREAMBLE, SpanMap, Style, serialize_block, serialize_block_styled, serialize_document,
-    serialize_document_mapped,
+    CETZ_IMPORT, CETZ_VERSION, PREAMBLE, SpanMap, Style, serialize_block, serialize_block_styled,
+    serialize_document, serialize_document_mapped,
 };
 pub use symbols::resolve_symbol;
 pub use worker::{CompileJob, CompileResult, Rendered, Worker};

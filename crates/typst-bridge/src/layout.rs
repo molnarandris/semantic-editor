@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use model::NodeId;
+use serde::{Deserialize, Serialize};
 use typst::WorldExt;
 use typst::layout::{Abs, Frame, FrameItem, Point, Transform};
 use typst::syntax::Span;
@@ -19,7 +20,7 @@ use crate::serialize::SpanMap;
 use crate::world::BridgeWorld;
 
 /// An axis-aligned rectangle in points, relative to the block's top left.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Rect {
     pub x: f64,
     pub y: f64,
@@ -104,7 +105,7 @@ impl BlockLayout {
 }
 
 /// A visible item and the source byte it came from.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct Mark {
     offset: usize,
     rect: Rect,
@@ -203,7 +204,7 @@ impl Walker<'_> {
 /// Geometry of a compiled block before mapping to nodes: marks are keyed by
 /// byte offset in the snippet. Independent of node ids, so it can be cached
 /// by source text and resolved against any block's span map.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct RawLayout {
     width: f64,
     height: f64,
