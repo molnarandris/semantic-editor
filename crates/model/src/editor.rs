@@ -417,6 +417,18 @@ impl Editor {
             return false;
         };
         let chars = pos.chars();
+        // `= ` at the start of a paragraph makes it a heading (as in Typst).
+        let level = pos.offset;
+        if s == " "
+            && pos.inline == 0
+            && (1..=6).contains(&level)
+            && chars[..level].iter().all(|&c| c == '=')
+            && matches!(pos.block.kind, Block::Paragraph(_))
+        {
+            let b = pos.block_index;
+            let after = cursor(pos.block.id, vec![Step::Index(0)], 0);
+            return self.retype(b, Some(level as u8), level, after);
+        }
         let mut space_before = pos.offset == 0 && pos.inline == 0
             || pos.offset > 0 && chars[pos.offset - 1].is_whitespace();
         let mut out = String::new();
@@ -935,6 +947,11 @@ impl Editor {
             let (op, after) = self.delete_char(&pos, pos.offset - 1);
             return self.commit(vec![op], after, Last::Deleting);
         }
+        if pos.inline == 0 && matches!(pos.block.kind, Block::Heading { .. }) {
+            // A heading first becomes a paragraph; the next press joins.
+            let (b, after) = (pos.block_index, self.caret.clone());
+            return self.retype(b, None, 0, after);
+        }
         if pos.inline >= 2 {
             let inline = pos.inline - 1;
             self.last = Last::Other;
@@ -1279,6 +1296,62 @@ impl Editor {
         self.commit(ops, after, Last::Other)
     }
 
+    /// Make the caret's paragraph or heading a heading of `level`, or a
+    /// paragraph with `None`. Returns false outside text blocks.
+    pub fn set_heading(&mut self, level: Option<u8>) -> bool {
+        self.finish_word();
+        self.selected = None;
+        let Some(b) = self.doc.block_index(self.caret.block) else {
+            return false;
+        };
+        let current = match &self.doc.blocks[b].kind {
+            Block::Heading { level, .. } => Some(*level),
+            Block::Paragraph(_) => None,
+            _ => return false,
+        };
+        if current == level {
+            return false;
+        }
+        let after = self.caret.clone();
+        self.retype(b, level, 0, after)
+    }
+
+    /// Replace text block `b` by a heading/paragraph with the same inlines
+    /// (and ids), minus the first `strip` chars.
+    fn retype(&mut self, b: usize, level: Option<u8>, strip: usize, after: CursorPath) -> bool {
+        let block = &self.doc.blocks[b];
+        let Some(inlines) = block.kind.inlines() else {
+            return false;
+        };
+        let mut inlines = inlines.clone();
+        if let Some(InlineNode {
+            kind: Inline::Text(t),
+            ..
+        }) = inlines.first_mut()
+        {
+            *t = t
+                .chars()
+                .skip(strip)
+                .collect::<String>()
+                .trim_start()
+                .into();
+        }
+        let kind = match level {
+            Some(level) => Block::Heading {
+                level: level.clamp(1, 6),
+                inlines,
+            },
+            None => Block::Paragraph(inlines),
+        };
+        let op = Op::Replace {
+            seq: Seq::Blocks,
+            index: b,
+            count: 1,
+            items: Items::Blocks(vec![BlockNode { id: block.id, kind }]),
+        };
+        self.commit(vec![op], after, Last::Other)
+    }
+
     // ----- Moving -----
 
     /// Move the caret one position left, entering and leaving structures.
@@ -1474,7 +1547,7 @@ impl Editor {
             (Some(_), _) => "Backspace → delete selection · Esc → cancel",
             (None, Some(p)) if p.nested() => "Tab → next slot · Esc → leave structure",
             (None, Some(_)) => "/ fraction · ^ _ scripts · Esc or $ → leave formula",
-            (None, None) => "$ → formula",
+            (None, None) => "$ → formula · = and space at the start → section",
         }
     }
 }
@@ -1730,6 +1803,37 @@ mod tests {
         e.undo();
         assert_eq!(texts(&e)[..2], ["ab $ cd", "ef"]);
         assert!(e.doc().check_invariants().is_ok());
+    }
+
+    #[test]
+    fn equals_space_makes_headings() {
+        let mut e = sample();
+        caret_at(&mut e, 1, 0, 0);
+        e.insert_text("== ");
+        assert!(matches!(
+            e.doc().blocks[1].kind,
+            Block::Heading { level: 2, .. }
+        ));
+        assert_eq!(texts(&e)[1], "ef");
+        assert_eq!(e.caret().offset, 0);
+        // Backspace at the start: back to a paragraph, then join.
+        e.backspace();
+        assert!(matches!(e.doc().blocks[1].kind, Block::Paragraph(_)));
+        e.backspace();
+        assert_eq!(texts(&e)[0], "ab $ cdef");
+        while e.undo() {}
+        assert_eq!(texts(&e)[1], "ef");
+        // `=` elsewhere is just text; shortcuts set the level.
+        caret_at(&mut e, 1, 0, 1);
+        e.insert_text("= ");
+        assert_eq!(texts(&e)[1], "e= f");
+        assert!(e.set_heading(Some(3)));
+        assert!(matches!(
+            e.doc().blocks[1].kind,
+            Block::Heading { level: 3, .. }
+        ));
+        assert!(e.set_heading(None));
+        assert!(!e.set_heading(None));
     }
 
     #[test]

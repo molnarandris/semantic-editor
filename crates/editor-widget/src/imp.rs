@@ -283,6 +283,8 @@ enum Command {
     Escape,
     NextSlot,
     PrevSlot,
+    /// Ctrl+1…6: heading level; Ctrl+0: paragraph.
+    Heading(Option<u8>),
 }
 
 impl SemEditor {
@@ -395,6 +397,7 @@ impl SemEditor {
                 Command::Redo => ed.redo(),
                 Command::Escape => ed.escape(),
                 Command::NextSlot => ed.next_slot(false),
+                Command::Heading(level) => ed.set_heading(level),
                 Command::PrevSlot => ed.next_slot(true),
                 Command::DocStart => {
                     let c = ed.doc().block_start(0);
@@ -821,6 +824,10 @@ fn command_for(key: gdk::Key, state: gdk::ModifierType) -> Option<Command> {
         Key::ISO_Left_Tab => Command::PrevSlot,
         Key::Tab | Key::KP_Tab if shift => Command::PrevSlot,
         Key::Tab | Key::KP_Tab => Command::NextSlot,
+        _ if ctrl && key.to_unicode().is_some_and(|c| ('0'..='6').contains(&c)) => {
+            let digit = key.to_unicode().and_then(|c| c.to_digit(10)).unwrap_or(0) as u8;
+            Command::Heading((digit > 0).then_some(digit))
+        }
         _ if ctrl => match key.to_lower() {
             Key::z if shift => Command::Redo,
             Key::z => Command::Undo,
