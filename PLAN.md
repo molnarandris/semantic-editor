@@ -102,7 +102,11 @@ Implementation notes (done; spans were fine-grained enough, no marker boxes):
 - Input follows Typst where possible. Letters form one identifier until a space or
   another key ends the word; finished words in the symbol table become symbols (`chi` →
   χ, `\alpha` → α, TeX names only with `\`). Digits merge into numbers. Operator pairs
-  combine (`<=` → ≤, `->` → →).
+  combine (`<=` → ≤, `->` → →). Words are looked up in Typst's own symbol table
+  (`typst_bridge::resolve_symbol`, handed to the model as a plain `fn`, so `model` stays
+  Typst-free); `.` continues a symbol name with modifiers (`times.o` → ⊗). TeX names
+  need a `\`. Operators (`log`, `lim`) are emitted as `op(#[log])` so their glyphs map
+  back to the node.
 - `/` takes the selection, a `( … )` group (dropping the parens, like Typst) or the
   previous operand as numerator; with none, an empty fraction. `^`/`_` likewise
   (a group keeps its parens as base). `(` typed into an empty slot only opens a group;

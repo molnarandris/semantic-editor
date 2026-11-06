@@ -55,7 +55,13 @@ pub struct Editor {
     word: Option<CursorPath>,
     /// Rows opened with a `(` that was swallowed; `)` leaves them.
     groups: HashSet<NodeId>,
+    /// Typst's symbol names with modifiers (`times.o` → ⊗), provided by the
+    /// GUI from the Typst bridge. Without it, a small built-in table is used.
+    resolver: Option<SymbolResolver>,
 }
+
+/// Looks up a symbol name with `.modifiers`; `None` if it is not a symbol.
+pub type SymbolResolver = fn(&str) -> Option<String>;
 
 /// Position of a text caret inside a paragraph or heading.
 struct TextPos<'a> {
@@ -212,6 +218,22 @@ impl Editor {
             selected: None,
             word: None,
             groups: HashSet::new(),
+            resolver: None,
+        }
+    }
+
+    pub fn set_symbol_resolver(&mut self, resolver: SymbolResolver) {
+        self.resolver = Some(resolver);
+    }
+
+    /// The symbol for a word (`\\`-commands first try the TeX table).
+    fn lookup(&self, name: &str, command: bool) -> Option<String> {
+        if command && let Some(s) = symbols::word(name, true) {
+            return Some(s.into());
+        }
+        match self.resolver {
+            Some(resolve) => resolve(name),
+            None => symbols::word(name, command).map(Into::into),
         }
     }
 
@@ -505,6 +527,27 @@ impl Editor {
             return true;
         }
 
+        // `.` continues a symbol name with a modifier: `times.o`, `arrow.r`.
+        if c == '.'
+            && self.word.as_ref() == Some(&self.caret)
+            && let Some(MathNode {
+                id,
+                kind: MathKind::Ident(name),
+            }) = prev(self)
+            && self
+                .lookup(name.trim_start_matches('\\'), name.starts_with('\\'))
+                .is_some()
+        {
+            let node = MathNode {
+                id,
+                kind: MathKind::Ident(format!("{name}.")),
+            };
+            let op = row_replace(p.row, p.offset - 1, node);
+            let ok = self.commit(vec![op], p.at(p.offset), typing);
+            self.word = Some(self.caret.clone());
+            return ok;
+        }
+
         // Finishing a word can remove a lone `\`, so look again.
         changed |= self.finish_word();
         let Some(p) = self.row_pos() else {
@@ -621,8 +664,29 @@ impl Editor {
             None => (name.as_str(), false),
         };
         let typing = Last::Typing { space: false };
-        let kind = match symbols::word(bare, command) {
-            Some(sym) => MathKind::Sym(sym.into()),
+        let kind = match self.lookup(bare, command) {
+            Some(sym) => MathKind::Sym(sym),
+            None if bare.contains('.') => {
+                // Not a symbol after all (`x.`, `times.q`): the part before
+                // the dot as usual, then the dot, then the rest.
+                let (head, tail) = bare.split_once('.').expect("contains a dot");
+                let head = match self.lookup(head, command) {
+                    Some(sym) => MathKind::Sym(sym),
+                    None => MathKind::Ident(head.into()),
+                };
+                let mut nodes = vec![MathNode { id, kind: head }, self.doc.sym(".")];
+                if !tail.is_empty() {
+                    nodes.push(self.doc.ident(tail));
+                }
+                let n = nodes.len();
+                let op = Op::Replace {
+                    seq: Seq::Row(p.row),
+                    index: p.offset - 1,
+                    count: 1,
+                    items: Items::Math(nodes),
+                };
+                return self.commit(vec![op], p.at(p.offset - 1 + n), typing);
+            }
             None if command && !bare.is_empty() => MathKind::Ident(bare.into()),
             None if command => {
                 let op = row_delete(p.row, p.offset - 1, 1);
@@ -1889,6 +1953,35 @@ mod tests {
         e.backspace();
         e.insert_text("n ");
         assert_eq!(display_of(&e, 0), "α + β 2.50 → sin x ≠ ≤ ln");
+    }
+
+    /// A stand-in for the Typst resolver.
+    fn fake_resolver(name: &str) -> Option<String> {
+        match name {
+            "times" => Some("×".into()),
+            "times.o" => Some("⊗".into()),
+            "arrow" | "arrow.r" => Some("→".into()),
+            "arrow.r.long" => Some("⟶".into()),
+            "chi" => Some("χ".into()),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn dotted_symbol_names() {
+        let mut e = empty_display();
+        e.set_symbol_resolver(fake_resolver);
+        e.insert_text("a times.o b arrow.r.long c times b");
+        assert_eq!(display_of(&e, 0), "a ⊗ b ⟶ c × b");
+        // Not symbols: the dot stays a dot.
+        let mut e = empty_display();
+        e.set_symbol_resolver(fake_resolver);
+        e.insert_text("x. times.q chi. ");
+        assert_eq!(display_of(&e, 0), "x . × . q χ .");
+        e.insert_text("\\times.o ");
+        assert_eq!(display_of(&e, 0), "x . × . q χ . ⊗");
+        while e.undo() {}
+        assert_eq!(display_of(&e, 0), "");
     }
 
     #[test]

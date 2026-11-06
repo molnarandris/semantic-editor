@@ -538,12 +538,14 @@ mod tests {
             "\\alpha^2_i/x + \\foo ' , ; | [ ] { } & ~~ := \\",
             "(a+b)^2 / ( ) _ ^ 3.14.15 é ∑ #$",
             "e^(-x^2/2) ! != -> <-> 1/2/3",
+            "a times.o b arrow.r.long c eq.not x. times.q y. lt.eq.slant",
         ];
         let mut d = Document::empty();
         let p = d.paragraph(vec![]);
         d.blocks = vec![p];
         for keys in sessions {
             let mut e = model::Editor::new(d.clone());
+            e.set_symbol_resolver(crate::resolve_symbol);
             e.insert_text("text $");
             for c in keys.chars() {
                 e.insert_text(&c.to_string());

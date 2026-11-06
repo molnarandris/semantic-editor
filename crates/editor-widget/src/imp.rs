@@ -169,6 +169,9 @@ impl ObjectImpl for SemEditor {
         });
         let _ = self.worker.set(worker);
 
+        self.editor
+            .borrow_mut()
+            .set_symbol_resolver(typst_bridge::resolve_symbol);
         obj.connect_scale_factor_notify(|obj| obj.queue_allocate());
         self.setup_input();
     }
@@ -284,7 +287,9 @@ enum Command {
 
 impl SemEditor {
     pub(crate) fn set_document(&self, doc: Document) {
-        *self.editor.borrow_mut() = Editor::new(doc);
+        let mut editor = Editor::new(doc);
+        editor.set_symbol_resolver(typst_bridge::resolve_symbol);
+        *self.editor.borrow_mut() = editor;
         self.views.borrow_mut().clear();
         self.sync_views();
         self.submit_blocks(true);
