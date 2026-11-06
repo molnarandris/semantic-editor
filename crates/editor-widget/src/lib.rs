@@ -6,6 +6,8 @@
 mod caret;
 mod imp;
 
+pub use imp::DEFAULT_ZOOM;
+
 use std::cell::Ref;
 
 use gtk::glib;
@@ -37,6 +39,20 @@ impl SemEditor {
 
     pub fn document(&self) -> Ref<'_, Document> {
         Ref::map(self.imp().editor.borrow(), |e| e.doc())
+    }
+
+    /// Logical pixels per point (1.0 = 100 %).
+    pub fn zoom(&self) -> f64 {
+        self.imp().zoom()
+    }
+
+    pub fn set_zoom(&self, zoom: f64) {
+        self.imp().set_zoom(zoom);
+    }
+
+    /// Zoom in (positive) or out by `steps` steps of 10 %.
+    pub fn zoom_by(&self, steps: f64) {
+        self.imp().zoom_by(steps);
     }
 
     pub fn caret(&self) -> CursorPath {

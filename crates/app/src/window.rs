@@ -207,6 +207,23 @@ impl Window {
             self.window.add_action(&action);
         }
 
+        type ZoomFn = fn(&SemEditor);
+        let zooms: [(&str, ZoomFn); 3] = [
+            ("zoom-in", |e| e.zoom_by(1.0)),
+            ("zoom-out", |e| e.zoom_by(-1.0)),
+            ("zoom-reset", |e| e.set_zoom(editor_widget::DEFAULT_ZOOM)),
+        ];
+        for (name, handler) in zooms {
+            let action = gio::SimpleAction::new(name, None);
+            let weak = Rc::downgrade(self);
+            action.connect_activate(move |_, _| {
+                if let Some(this) = weak.upgrade() {
+                    handler(&this.editor);
+                }
+            });
+            self.window.add_action(&action);
+        }
+
         let pane = gio::SimpleAction::new_stateful("source-pane", None, &false.to_variant());
         let weak = Rc::downgrade(self);
         pane.connect_activate(move |action, _| {
@@ -499,6 +516,11 @@ fn main_menu() -> gio::Menu {
     export.append(Some("Export _PDF…"), Some("win.export-pdf"));
     export.append(Some("Export _Typst…"), Some("win.export-typ"));
     menu.append_section(None, &export);
+    let zoom = gio::Menu::new();
+    zoom.append(Some("Zoom _In"), Some("win.zoom-in"));
+    zoom.append(Some("Zoom _Out"), Some("win.zoom-out"));
+    zoom.append(Some("_Reset Zoom"), Some("win.zoom-reset"));
+    menu.append_section(None, &zoom);
     let other = gio::Menu::new();
     other.append(Some("Open S_ample Document"), Some("win.open-sample"));
     menu.append_section(None, &other);

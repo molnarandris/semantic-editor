@@ -14,8 +14,12 @@ use typst_bridge::{
 
 use crate::caret::{self, Stop};
 
-/// Logical pixels per typographic point at 100 % zoom.
-const ZOOM: f64 = 1.5;
+/// Logical pixels per typographic point: default, limits, and the factor
+/// of one zoom step.
+pub const DEFAULT_ZOOM: f64 = 1.75;
+const MIN_ZOOM: f64 = 0.75;
+const MAX_ZOOM: f64 = 5.0;
+const ZOOM_STEP: f64 = 1.1;
 /// Page width limits in points (the page shrinks with the window).
 const MAX_PAGE_WIDTH_PT: f64 = 460.0;
 const MIN_PAGE_WIDTH_PT: f64 = 120.0;
@@ -80,6 +84,10 @@ pub struct SemEditor {
     /// Page width and pixels per point the current renders were requested at.
     page_width_pt: Cell<f64>,
     pixel_per_pt: Cell<f64>,
+    /// Logical pixels per point.
+    zoom: Cell<f64>,
+    /// Zoom when a pinch gesture began.
+    pinch_start: Cell<f64>,
 
     im: OnceCell<gtk::IMMulticontext>,
     caret_on: Cell<bool>,
@@ -159,6 +167,7 @@ impl ObjectImpl for SemEditor {
         obj.set_focus_on_click(true);
         obj.set_overflow(gtk::Overflow::Hidden);
         obj.set_cursor_from_name(Some("text"));
+        self.zoom.set(DEFAULT_ZOOM);
 
         // Results arrive on the compile thread; hop to the main loop.
         let weak = glib::SendWeakRef::from(obj.downgrade());
@@ -189,10 +198,11 @@ impl ObjectImpl for SemEditor {
 
 impl WidgetImpl for SemEditor {
     fn measure(&self, orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
+        let zoom = self.zoom.get();
         match orientation {
             gtk::Orientation::Horizontal => {
-                let min = MIN_PAGE_WIDTH_PT * ZOOM + 2.0 * SIDE_MARGIN_PX;
-                let nat = MAX_PAGE_WIDTH_PT * ZOOM + 2.0 * (SIDE_MARGIN_PX + PAPER_PAD_PT * ZOOM);
+                let min = MIN_PAGE_WIDTH_PT * zoom + 2.0 * SIDE_MARGIN_PX;
+                let nat = MAX_PAGE_WIDTH_PT * zoom + 2.0 * (SIDE_MARGIN_PX + PAPER_PAD_PT * zoom);
                 (min as i32, nat as i32, -1, -1)
             }
             _ => (0, self.content_height() as i32, -1, -1),
@@ -200,10 +210,11 @@ impl WidgetImpl for SemEditor {
     }
 
     fn size_allocate(&self, width: i32, height: i32, _baseline: i32) {
-        let page = ((width as f64 - 2.0 * (SIDE_MARGIN_PX + PAPER_PAD_PT * ZOOM)) / ZOOM)
+        let zoom = self.zoom.get();
+        let page = ((width as f64 - 2.0 * (SIDE_MARGIN_PX + PAPER_PAD_PT * zoom)) / zoom)
             .clamp(MIN_PAGE_WIDTH_PT, MAX_PAGE_WIDTH_PT)
             .floor();
-        let ppp = ZOOM * self.device_scale();
+        let ppp = zoom * self.device_scale();
         if page != self.page_width_pt.get() || ppp != self.pixel_per_pt.get() {
             self.page_width_pt.set(page);
             self.pixel_per_pt.set(ppp);
@@ -213,12 +224,13 @@ impl WidgetImpl for SemEditor {
     }
 
     fn snapshot(&self, snapshot: &gtk::Snapshot) {
+        let zoom = self.zoom.get();
         let obj = self.obj();
         let (width, height) = (obj.width() as f64, obj.height() as f64);
         let scroll = self.scroll();
-        let page_px = self.page_width_pt.get() * ZOOM;
+        let page_px = self.page_width_pt.get() * zoom;
         let x0 = self.page_x(width);
-        let pad = PAPER_PAD_PT * ZOOM;
+        let pad = PAPER_PAD_PT * zoom;
 
         // Paper.
         let paper = graphene::Rect::new(
@@ -235,22 +247,22 @@ impl WidgetImpl for SemEditor {
         let snap = self.pixel_snapper();
         let mut y = TOP_MARGIN_PX - scroll;
         for view in self.views.borrow().iter() {
-            let h = view.height_pt() * ZOOM;
+            let h = view.height_pt() * zoom;
             if y + h >= 0.0 && y <= height {
                 if let Some(texture) = &view.texture {
                     // The raster has a transparent pad around the content.
                     // Draw it one texture pixel per device pixel, on the
                     // pixel grid: any resampling blurs the thin glyphs.
-                    let pad = BLOCK_PAD_PT * ZOOM;
+                    let pad = BLOCK_PAD_PT * zoom;
                     let (px, py) = snap(x0 - pad, y - pad);
-                    let per_px = ZOOM / view.texture_ppp;
+                    let per_px = zoom / view.texture_ppp;
                     let rect = graphene::Rect::new(
                         px as f32,
                         py as f32,
                         (texture.width() as f64 * per_px) as f32,
                         (texture.height() as f64 * per_px) as f32,
                     );
-                    snapshot.append_scaled_texture(texture, gsk::ScalingFilter::Nearest, &rect);
+                    snapshot.append_scaled_texture(texture, gsk::ScalingFilter::Linear, &rect);
                 }
                 if view.error.is_some() {
                     let marker =
@@ -258,7 +270,7 @@ impl WidgetImpl for SemEditor {
                     snapshot.append_color(&gdk::RGBA::new(0.88, 0.11, 0.14, 1.0), &marker);
                 }
             }
-            y += h + BLOCK_SPACING_PT * ZOOM;
+            y += h + BLOCK_SPACING_PT * zoom;
         }
 
         if obj.has_focus()
@@ -293,6 +305,8 @@ enum Command {
     PrevSlot,
     /// Ctrl+1…6: heading level; Ctrl+0: paragraph.
     Heading(Option<u8>),
+    /// Ctrl+plus / Ctrl+minus.
+    Zoom(f64),
 }
 
 impl SemEditor {
@@ -378,6 +392,39 @@ impl SemEditor {
         });
         obj.add_controller(click);
 
+        // Ctrl+wheel and touchpad pinch zoom.
+        let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+        let weak = obj.downgrade();
+        scroll.connect_scroll(move |ctrl, _, dy| {
+            let ctrl_held = ctrl
+                .current_event_state()
+                .contains(gdk::ModifierType::CONTROL_MASK);
+            match weak.upgrade() {
+                Some(obj) if ctrl_held => {
+                    obj.imp().zoom_by(-dy.signum());
+                    glib::Propagation::Stop
+                }
+                _ => glib::Propagation::Proceed,
+            }
+        });
+        obj.add_controller(scroll);
+        let pinch = gtk::GestureZoom::new();
+        let weak = obj.downgrade();
+        pinch.connect_begin(move |_, _| {
+            if let Some(obj) = weak.upgrade() {
+                let imp = obj.imp();
+                imp.pinch_start.set(imp.zoom.get());
+            }
+        });
+        let weak = obj.downgrade();
+        pinch.connect_scale_changed(move |_, scale| {
+            if let Some(obj) = weak.upgrade() {
+                let imp = obj.imp();
+                imp.set_zoom(imp.pinch_start.get() * scale);
+            }
+        });
+        obj.add_controller(pinch);
+
         let _ = self.im.set(im);
     }
 
@@ -407,6 +454,11 @@ impl SemEditor {
                 Command::Escape => ed.escape(),
                 Command::NextSlot => ed.next_slot(false),
                 Command::Heading(level) => ed.set_heading(level),
+                Command::Zoom(steps) => {
+                    drop(ed);
+                    self.zoom_by(steps);
+                    return;
+                }
                 Command::PrevSlot => ed.next_slot(true),
                 Command::DocStart => {
                     let c = ed.doc().block_start(0);
@@ -480,6 +532,7 @@ impl SemEditor {
 
     /// Current structure and selection, drawn under the text.
     fn snapshot_highlights(&self, snapshot: &gtk::Snapshot, x0: f64, scroll: f64) {
+        let zoom = self.zoom.get();
         let ed = self.editor.borrow();
         let (context, selected) = (ed.context_ids(), ed.selected_ids());
         if context.is_empty() && selected.is_empty() {
@@ -498,10 +551,10 @@ impl SemEditor {
         let rect = |id: NodeId, pad: f64| {
             layout.box_of(id).map(|r| {
                 graphene::Rect::new(
-                    (x0 + r.x * ZOOM - pad) as f32,
-                    (top + r.y * ZOOM - scroll - pad) as f32,
-                    (r.w * ZOOM + 2.0 * pad) as f32,
-                    (r.h * ZOOM + 2.0 * pad) as f32,
+                    (x0 + r.x * zoom - pad) as f32,
+                    (top + r.y * zoom - scroll - pad) as f32,
+                    (r.w * zoom + 2.0 * pad) as f32,
+                    (r.h * zoom + 2.0 * pad) as f32,
                 )
             })
         };
@@ -532,6 +585,31 @@ impl SemEditor {
             .iter()
             .map(|b| old.remove(&b.id).unwrap_or_else(|| BlockView::new(b.id)))
             .collect();
+    }
+
+    pub(crate) fn zoom(&self) -> f64 {
+        self.zoom.get()
+    }
+
+    /// Set the zoom (clamped); blocks re-render at the new scale and text
+    /// rewraps to the window.
+    pub(crate) fn set_zoom(&self, zoom: f64) {
+        let zoom = zoom.clamp(MIN_ZOOM, MAX_ZOOM);
+        let old = self.zoom.replace(zoom);
+        if (zoom - old).abs() < 1e-9 {
+            return;
+        }
+        // Keep roughly the same part of the document in view.
+        if let Some(adj) = self.vadjustment.borrow().as_ref() {
+            adj.set_value(adj.value() * zoom / old);
+        }
+        self.obj().queue_allocate();
+        self.obj().queue_draw();
+        self.obj().emit_by_name::<()>("caret-moved", &[]);
+    }
+
+    pub(crate) fn zoom_by(&self, steps: f64) {
+        self.set_zoom(self.zoom.get() * ZOOM_STEP.powf(steps));
     }
 
     /// Rounds widget coordinates to the nearest device pixel, taking the
@@ -568,27 +646,30 @@ impl SemEditor {
 
     /// Left edge of the text column in widget coordinates.
     fn page_x(&self, width: f64) -> f64 {
-        ((width - self.page_width_pt.get() * ZOOM) / 2.0).floor()
+        let zoom = self.zoom.get();
+        ((width - self.page_width_pt.get() * zoom) / 2.0).floor()
     }
 
     fn content_height(&self) -> f64 {
+        let zoom = self.zoom.get();
         let views = self.views.borrow();
         let blocks: f64 = views
             .iter()
-            .map(|v| (v.height_pt() + BLOCK_SPACING_PT) * ZOOM)
+            .map(|v| (v.height_pt() + BLOCK_SPACING_PT) * zoom)
             .sum();
         blocks + 2.0 * TOP_MARGIN_PX
     }
 
     /// Top of every block in content coordinates (px, unscrolled).
     fn block_tops(&self) -> Vec<f64> {
+        let zoom = self.zoom.get();
         let mut y = TOP_MARGIN_PX;
         self.views
             .borrow()
             .iter()
             .map(|v| {
                 let top = y;
-                y += (v.height_pt() + BLOCK_SPACING_PT) * ZOOM;
+                y += (v.height_pt() + BLOCK_SPACING_PT) * zoom;
                 top
             })
             .collect()
@@ -615,12 +696,13 @@ impl SemEditor {
 
     /// The caret in widget coordinates.
     fn caret_rect(&self) -> Option<graphene::Rect> {
+        let zoom = self.zoom.get();
         let (index, stop) = self.caret_stop()?;
         let top = *self.block_tops().get(index)?;
         let x0 = self.page_x(self.obj().width() as f64);
-        let x = (x0 + stop.x * ZOOM - CARET_WIDTH_PX / 2.0).round();
-        let y = top + stop.top * ZOOM - self.scroll();
-        let h = ((stop.bottom - stop.top) * ZOOM).max(8.0);
+        let x = (x0 + stop.x * zoom - CARET_WIDTH_PX / 2.0).round();
+        let y = top + stop.top * zoom - self.scroll();
+        let h = ((stop.bottom - stop.top) * zoom).max(8.0);
         Some(graphene::Rect::new(
             x as f32,
             y as f32,
@@ -631,13 +713,14 @@ impl SemEditor {
 
     /// The caret position for a click at widget coordinates.
     fn locate(&self, x: f64, y: f64) -> Option<CursorPath> {
+        let zoom = self.zoom.get();
         let cy = y + self.scroll();
         let tops = self.block_tops();
         // The gap below a block belongs to it.
         let index = tops.iter().rposition(|&t| t <= cy).unwrap_or(0);
         let top = *tops.get(index)?;
-        let bx = (x - self.page_x(self.obj().width() as f64)) / ZOOM;
-        let by = (cy - top) / ZOOM;
+        let bx = (x - self.page_x(self.obj().width() as f64)) / zoom;
+        let by = (cy - top) / zoom;
         let stops = self.block_stops(index);
         caret::hit(&stops, bx, by).map(|s| s.cursor.clone())
     }
@@ -856,6 +939,8 @@ fn command_for(key: gdk::Key, state: gdk::ModifierType) -> Option<Command> {
             let digit = key.to_unicode().and_then(|c| c.to_digit(10)).unwrap_or(0) as u8;
             Command::Heading((digit > 0).then_some(digit))
         }
+        Key::plus | Key::equal | Key::KP_Add if ctrl => Command::Zoom(1.0),
+        Key::minus | Key::underscore | Key::KP_Subtract if ctrl => Command::Zoom(-1.0),
         _ if ctrl => match key.to_lower() {
             Key::z if shift => Command::Redo,
             Key::z => Command::Undo,
