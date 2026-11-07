@@ -24,10 +24,13 @@ Platform/SDK 51 + `rust-stable//26.08`; gtk4-rs with `v4_18`, libadwaita with `v
 - Manifest: `build-aux/io.github.molnarandris.SemanticEditor.Devel.json` (GNOME Builder
   picks it up). Network allowed during build for now; Flathub later needs
   `cargo-sources.json` from `flatpak-cargo-generator`.
-- Offline builds: the manifest runs `cargo fetch` before `cargo build`. Cargo needs every
-  crate in `Cargo.lock` cached, other platforms' crates included, or it tries the network.
-  `--offline` is not needed. Builder also uses `~/.cargo`, so after dependency changes run
-  `build-aux/sdk cargo fetch` (fills `~/.cargo`) as well.
+- Offline builds: Builder's play button ignores `build-commands` and runs its own
+  `cargo build` in a sandbox where `~/.cargo` is an empty tmpfs, so the manifest env sets
+  `CARGO_HOME=target/cargo-home` (relative to the source dir; Builder honours
+  `build-options.env`). Cargo needs every crate in `Cargo.lock` cached, other platforms'
+  included, or it tries the network: `build-commands` run `cargo fetch` first; for Builder,
+  after dependency changes run once online:
+  `build-aux/sdk sh -c 'CARGO_HOME=target/cargo-home cargo fetch'`.
 - CLI loop: `build-aux/sdk cargo test|clippy|run` runs cargo inside the SDK
   (target dir `target/sdk`).
 - Install: `flatpak-builder --user --install --force-clean build-dir build-aux/*.Devel.json`.

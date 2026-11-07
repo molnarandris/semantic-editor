@@ -17,6 +17,7 @@
         "build-args": ["--share=network"],
         "env": {
             "RUST_BACKTRACE": "1",
+            "CARGO_HOME": "target/cargo-home",
             "APP_ID": "io.github.molnarandris.SemanticEditor.Devel"
         }
     },
@@ -25,8 +26,8 @@
             "name": "semantic-editor",
             "buildsystem": "simple",
             "build-commands": [
-                "CARGO_HOME=\"$PWD/target/cargo-home\" cargo fetch",
-                "CARGO_HOME=\"$PWD/target/cargo-home\" cargo build --release --bin semantic-editor",
+                "cargo fetch",
+                "cargo build --release --bin semantic-editor",
                 "install -Dm755 target/release/semantic-editor /app/bin/semantic-editor",
                 "install -Dm644 data/io.github.molnarandris.SemanticEditor.desktop /app/share/applications/${FLATPAK_ID}.desktop",
                 "sed -i \"s/^Icon=.*/Icon=${FLATPAK_ID}/\" /app/share/applications/${FLATPAK_ID}.desktop",
