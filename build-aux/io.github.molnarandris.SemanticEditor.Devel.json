@@ -25,6 +25,7 @@
             "name": "semantic-editor",
             "buildsystem": "simple",
             "build-commands": [
+                "CARGO_HOME=\"$PWD/target/cargo-home\" cargo fetch",
                 "CARGO_HOME=\"$PWD/target/cargo-home\" cargo build --release --bin semantic-editor",
                 "install -Dm755 target/release/semantic-editor /app/bin/semantic-editor",
                 "install -Dm644 data/io.github.molnarandris.SemanticEditor.desktop /app/share/applications/${FLATPAK_ID}.desktop",
