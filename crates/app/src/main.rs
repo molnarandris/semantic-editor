@@ -2,7 +2,6 @@
 
 mod file;
 mod sample;
-mod source_view;
 mod window;
 
 use adw::prelude::*;
@@ -69,7 +68,6 @@ fn setup_actions(app: &adw::Application) {
         ("win.save-as", &["<Control><Shift>s"]),
         ("win.export-pdf", &["<Control>e"]),
         ("win.export-typ", &["<Control><Shift>e"]),
-        ("win.source-pane", &["F9"]),
         ("win.insert-diagram", &["<Control><Shift>d"]),
         ("window.close", &["<Control>w"]),
     ] {

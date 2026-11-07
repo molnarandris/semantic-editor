@@ -545,6 +545,15 @@ impl SemEditor {
             .and_then(|v| v.error.clone())
     }
 
+    /// A block's current texture and its size in logical pixels per
+    /// texture pixel (at the current zoom).
+    pub(crate) fn block_texture(&self, block: NodeId) -> Option<(gdk::Texture, f64)> {
+        let views = self.views.borrow();
+        let view = views.iter().find(|v| v.id == block)?;
+        let texture = view.texture.clone()?;
+        Some((texture, self.zoom() / view.texture_ppp))
+    }
+
     /// Select the structure of breadcrumb entry `path_len`.
     pub(crate) fn select_crumb(&self, path_len: usize) {
         let changed = self.editor.borrow_mut().select_crumb(path_len);

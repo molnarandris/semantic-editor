@@ -111,6 +111,12 @@ impl SemEditor {
         self.imp().block_error(block)
     }
 
+    /// A block's current render (the last good one if its last compile
+    /// failed) and the logical pixels per texture pixel at the current zoom.
+    pub fn block_texture(&self, block: NodeId) -> Option<(gtk::gdk::Texture, f64)> {
+        self.imp().block_texture(block)
+    }
+
     /// A raw/diagram block should be opened for editing (Enter or double
     /// click on it).
     pub fn connect_edit_source<F: Fn(&Self, NodeId) + 'static>(

@@ -224,7 +224,7 @@ impl Editor {
         }
     }
 
-    /// Replace the source of a raw/diagram block (from the source pane).
+    /// Replace the source of a raw/diagram block (from the source editor dialog).
     /// Consecutive edits of one block are one undo step.
     pub fn set_block_source(&mut self, block: NodeId, source: &str) -> bool {
         let Some(old) = self.block_source(block) else {

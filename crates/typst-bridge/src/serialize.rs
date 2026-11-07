@@ -157,7 +157,7 @@ pub enum Style {
     /// the node it belongs to, so groups are always parenthesized and
     /// operators spelled `op(#[log])`.
     Edit,
-    /// For people (export, source pane): brackets only where Typst needs
+    /// For people (export): brackets only where Typst needs
     /// them, plain operator names, literal punctuation. Renders the same.
     Readable,
 }
@@ -213,7 +213,7 @@ impl Writer {
     }
 
     /// Typst source copied as is, each line after the first indented by
-    /// `indent`; records where every char went (for the source pane).
+    /// `indent`; records where every char went.
     fn verbatim(&mut self, id: NodeId, src: &str, indent: &str) {
         let mut starts = Vec::with_capacity(src.len() + 1);
         for c in src.chars() {
@@ -551,7 +551,7 @@ pub fn serialize_document(doc: &Document) -> String {
 }
 
 /// The whole document as one readable Typst file, with a span map over all
-/// blocks (for the source pane).
+/// blocks.
 pub fn serialize_document_mapped(doc: &Document) -> (String, SpanMap) {
     let mut out = String::from(PREAMBLE);
     if doc
@@ -851,7 +851,7 @@ mod tests {
                  circle((0, 0))\n  line((0, 0), (1, 1))\n}}))"
             )
         );
-        // The source pane can find every char of the drawing code.
+        // The span map finds every char of the drawing code.
         let at = map.text_byte_of(gid, 15).unwrap();
         assert_eq!(&snippet[at..at + 4], "line");
         let doc = serialize_document(&d);

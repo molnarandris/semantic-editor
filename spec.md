@@ -142,12 +142,12 @@ Keys map to `Op`s in the `model` crate; the widget only translates events. Behav
 
 An `adw::Application` with one `adw::ApplicationWindow`, matching the notes.sem mockup.
 
-- **Header bar:** new,  title `<file> — Semantic editor`, toggle source pane, main menu (open, save, save as, export .typ, export PDF).
+- **Header bar:** new,  title `<file> — Semantic editor`, main menu (open, save, save as, export .typ, export PDF).
 - **Body:** `SemEditor` in a `GtkScrolledWindow`; optional right pane with a read-only `sourceview5::View` showing the serialized Typst, current node highlighted.
 - **Status bar:** breadcrumb of the cursor path (clickable to select that structure) and a hint like "Tab → next slot".
 - **File format `.sem`:** JSON `{ "version": 1, "typst": "<pinned version>", "blocks": [...] }` via serde; NodeIds regenerated on load.
 - **Export:** `.typ` via serializer; PDF via `typst-pdf` from a full-document compile.
-- **Actions:** `GAction`s with accelerators (`Ctrl+S`, `Ctrl+O`, `Ctrl+E` export, `F9` toggle source pane).
+- **Actions:** `GAction`s with accelerators (`Ctrl+S`, `Ctrl+O`, `Ctrl+E` export).
 
 ## Milestones and acceptance criteria
 

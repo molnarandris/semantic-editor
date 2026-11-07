@@ -185,7 +185,7 @@ Follow-ups after M6 (done):
 
 - Source pane: GTK draws a text view's cursor only when focused, so a small
   `sourceview5::View` subclass draws a caret bar at the mirrored position otherwise.
-  (The source pane is to be removed in M8.)
+  (Removed in M8.)
 - Block textures are drawn one texture pixel per device pixel, snapped to the device
   pixel grid relative to the surface: fractional placement made GTK resample and
   soften the glyphs.
@@ -240,9 +240,7 @@ geometry testable without GTK). Changes made:
 
 Deliberately left for the milestone that needs it:
 
-- `app::window` mixes window, file actions, source pane and block editor. M8 removes
-  the source pane and moves block editing to a dialog; split it then (`files.rs`,
-  `block_editor.rs`).
+- `app::window` mixes window, file actions, source pane and block editor. (Done in M8.)
 - Page geometry (`page_x`, `block_tops`, `content_height`, margins) is spread over
   `imp.rs`. M9b (header banner) and M10 (label pills in the margin) add to it; introduce
   a small geometry type then.
@@ -251,5 +249,24 @@ Deliberately left for the milestone that needs it:
   changes what a block's render depends on, so revisit there.
 - `CursorPath` / `RowPos.base` assume blocks are top level. M11 (environments holding
   blocks) is where nesting gets designed.
+
+## M8 — Cleanup and diagram editor
+
+Implementation notes (done):
+
+- Source pane removed (F9, header toggle, `source_view.rs`, the `OverlaySplitView`).
+  `serialize_document_mapped` stays (export uses it; its span map is tested).
+- `app::window` is now a module: `mod.rs` (window, actions, title, status bar),
+  `files.rs` (open/save/export), `block_editor.rs` (the source dialog).
+- Diagram and raw Typst blocks are edited in an `adw::Dialog` (1040×640): GtkSourceView
+  on the left, live preview on the right (`gtk::Paned`), compile error under the
+  preview. A fresh dialog per open; Done or Esc closes it. Edits still apply 300 ms
+  after the last key (one undo step per block); pending edits are applied before
+  save, export, closing the window and discarding.
+- The preview shows the page's own texture (`SemEditor::block_texture`, refreshed on
+  `block-rendered`), at the page's zoom, shrunk to fit and centred. After a failed
+  compile it keeps the last good render, like the page.
+- The dialog closes itself when its block disappears (undo of the insert, new
+  document) and reloads its text when the source changes from outside.
 
 Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing.
