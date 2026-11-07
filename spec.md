@@ -206,26 +206,22 @@ Chosen approach: **counter state chained through blocks** (no whole-document com
 - **Diagram/raw editing side by side**: source on the left, live render on the right.
   Proposed: an `adw::Dialog` (or window) with a GtkSourceView and a preview picture fed
   by the same worker. Simpler than doing it in-page, since the block can be anywhere on
-  the page. Effort: small.
+  the page. Effort: small. The same dialog edits the document header in M9a.
 
-### M9 — Document header and numbering (items 1, 4)
+### M9a — Header and numbering engine (items 1, 4)
+
+Order decided 2026-11-07: M8 → M9a → M10 → M11 → M9b. The counter chaining is the
+riskiest piece and M10/M11 depend on it, so it comes before the header UI polish.
 
 - **Editable header**: the document preamble (set/show rules, imports, theorem
-  definitions). Revealed by scrolling past the top with resistance (rubber band): extra
-  scroll at offset 0 accumulates and only opens a banner past a threshold, with a
-  spring animation (`adw::SpringAnimation`). Also a menu entry. Stored in `.sem`;
-  prepended to every block snippet and to the export. Effort: medium (the overscroll
-  gesture is custom; GTK has none built in).
-- **Title, authors, date**: structured fields in the header banner (title, authors,
-  date, maybe keywords/abstract), stored in `.sem`. The serializer emits them as
-  `#set document(title: …, author: (…), date: …)`, which is the metadata (PDF info).
-  What appears on the page is up to the header: the default header shows the title
-  block (`#title()` plus an author line); the user can restyle or remove it. In the
-  editor the title block is a rendered, non-editable block at the top of the page;
-  clicking it opens the header banner at that field.
-- **Numbered headings**: number shown, not editable. With the shared design above the
-  number is part of the render but has no node, so the caret and hit-testing skip it.
-  Effort: medium (mostly the full-document introspection pass).
+  definitions), stored in `.sem`, prepended to every block snippet and to the export.
+  Edited through the M8 source + preview dialog, opened from a menu entry (the banner
+  comes in M9b).
+- **Counter state chained through blocks** as in the shared design above, with the test
+  that compares chained numbers against a full-document compile.
+- **Numbered headings**: number shown, not editable. The number is part of the render
+  but has no node, so the caret and hit-testing skip it.
+- Effort: medium–large (mostly the chaining).
 
 ### M10 — Labels and references (items 2, 3, 6)
 
@@ -266,6 +262,21 @@ Chosen approach: **counter state chained through blocks** (no whole-document com
   to declare separately. Environments whose definition disappears keep their content
   and show an error marker.
 - Effort: large; the biggest item.
+
+### M9b — Header banner and title fields (items 1, 4; after M11, or any time after M9a)
+
+- **Header banner**: revealed by scrolling past the top with resistance (rubber band):
+  extra scroll at offset 0 accumulates and only opens a banner past a threshold, with a
+  spring animation (`adw::SpringAnimation`). Replaces the M9a dialog as the main way to
+  edit the header (the menu entry stays). Effort: medium (the overscroll gesture is
+  custom; GTK has none built in).
+- **Title, authors, date**: structured fields in the header banner (title, authors,
+  date, maybe keywords/abstract), stored in `.sem`. The serializer emits them as
+  `#set document(title: …, author: (…), date: …)`, which is the metadata (PDF info).
+  What appears on the page is up to the header: the default header shows the title
+  block (`#title()` plus an author line); the user can restyle or remove it. In the
+  editor the title block is a rendered, non-editable block at the top of the page;
+  clicking it opens the header banner at that field.
 
 ## Risks, fallbacks, open questions
 

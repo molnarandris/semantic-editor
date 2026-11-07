@@ -244,10 +244,10 @@ Deliberately left for the milestone that needs it:
   the source pane and moves block editing to a dialog; split it then (`files.rs`,
   `block_editor.rs`).
 - Page geometry (`page_x`, `block_tops`, `content_height`, margins) is spread over
-  `imp.rs`. M9 (header banner) and M10 (label pills in the margin) add to it; introduce
+  `imp.rs`. M9b (header banner) and M10 (label pills in the margin) add to it; introduce
   a small geometry type then.
 - Every command serializes every block to find stale ones, and `is_dirty` compares all
-  blocks: O(document) per keystroke, fine at current sizes. M9's counter chaining
+  blocks: O(document) per keystroke, fine at current sizes. M9a's counter chaining
   changes what a block's render depends on, so revisit there.
 - `CursorPath` / `RowPos.base` assume blocks are top level. M11 (environments holding
   blocks) is where nesting gets designed.
