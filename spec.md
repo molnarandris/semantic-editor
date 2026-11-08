@@ -214,8 +214,7 @@ Chosen approach: **counter state chained through blocks** (no whole-document com
 
 Order decided 2026-11-07: M8 → M9a → M10 → M11 → M9b. The counter chaining is the
 riskiest piece and M10/M11 depend on it, so it comes before the header UI polish.
-Changed 2026-11-08: `.typ` import (M9c) moved up, right after M9a, so real documents
-can be opened early: M9a → M9c → M10 → M11 → M9b.
+Changed 2026-11-08: replaced by the "Roadmap to full Typst" below (M10–M18).
 
 - **Editable header**: the document preamble (set/show rules, imports, theorem
   definitions), stored in `.sem`, prepended to every block snippet and to the export.
@@ -232,45 +231,74 @@ can be opened early: M9a → M9c → M10 → M11 → M9b.
   dialog previews a fixed specimen of text.
 - Known limits: a header that produces content (e.g. a `#show: template` that adds a
   title) shows it in every block (M9b's title block will address this); figure counters
-  and counters defined inside packages are not tracked yet (M11).
+  and counters defined inside packages are not tracked yet (M10).
 
-### M9c — Import `.typ` files (requested 2026-11-08, top priority after M9a)
+## Roadmap to full Typst (decided 2026-11-08)
 
-Goal: open the user's existing Typst documents and edit them.
+Goal: edit everything a Typst document can contain; only real code (scripting, layout
+commands without content) stays raw Typst. The order follows what builds on what; the
+user needs all of it before switching to the editor, so the `.typ` import comes last
+(replacing the earlier plan M9c → M10 → M11 → M9b).
 
-- Parse with `typst::syntax` (no compile needed). The leading part of the file (set/show
-  rules, imports, `#let`s before the first content) becomes the header.
-- Map what the model knows: headings, paragraphs (text with inline math), display
-  math. Everything else (figures, lists, function calls, `#show: template`, …) becomes a
-  raw Typst block with its source verbatim, so nothing is lost and it still renders.
-- Math: formulas inside the model's math subset become math nodes; a formula with
-  anything else becomes raw Typst. **Q:** for inline math in a paragraph, should the
-  whole paragraph become raw, or should the model get a "raw math" inline?
-- Acceptance: importing then exporting gives a document that compiles to the same
-  PDF (compare page images) for the user's own files; unknown parts round-trip
-  byte for byte.
-- Decided 2026-11-08: one-way import (open `.typ`, save as `.sem`, export `.typ` as
-  before). Saving back into the original `.typ` is not planned for now.
+Input: an inventory of the user's paper (`examples/inventory.rs`; counts only). Its
+needs, roughly by frequency: math functions (`cal` 762, `overline` 417, `hat`, `bold`,
+`tilde`, `bb`, `abs`, `lr`, header macros like `ket`; ~1500 in all), references (271) and
+labels (110), CeTZ drawings inside formulas (101), theorem environments (~70, built as
+figures with a kind), ~100 document-level `#let`s next to the figures that use them, a
+mid-document `#set heading(numbering: …)` (appendix), primes (129), text in math (90),
+lists (90 items), text markup (~100), multi-line aligned equations (30), `cases`,
+figures, footnotes, an embedded bibliography. Not used: images, tables, local files.
 
-### M10 — Labels and references (items 2, 3, 6)
+A shared idea: **one generic call node** (function name, editable content arguments,
+other arguments kept as source). Typst draws it, so the editor never needs to know what
+`cal`, `overline`, `ket`, `lemma` or `cl` look like; the caret moves through the content
+arguments via spans, like numerator and denominator today. Works for the header's own
+functions and packages.
 
-- **Labels** on headings, display equations (numbered when labelled) and theorems:
-  `label: Option<String>` on those blocks. Shown as a pill (drawn by the widget, in the
-  right margin, not part of the Typst render). `<` inside math is "less than", so
-  labels get a visible slot instead of a shortcut: while the caret is in a labelable
-  block, a faint "+ label" pill shows in the right margin (where the equation number
-  goes). → at the last position of the block moves the caret onto the pill; typing
-  there edits the label in place, → / Enter leave it. Clicking the pill works too.
-  Existing labels always show as pills.
-- **References**: `@` in text opens a completion popover at the caret listing labels
-  (with their kind and number), filtered as you type. New inline node `Ref(label)`,
-  an atom for the caret (Backspace selects, then deletes). Dangling refs are flagged.
-- **Navigation**: clicking a reference scrolls to its target and puts the caret there;
-  Plain click follows the link (the caret reaches a reference with the arrow keys
-  instead); Alt+Left goes back.
-- Effort: medium–large (model node, popover, label table, resolution).
+### M10 — Code blocks (definitions and rules in the body)
 
-### M11 — Theorem-like environments (item 5)
+- A raw Typst block whose top level is only `#let`/`#set`/`#show`/`#import`/comments is a
+  **code block** (detected by parsing; no user decision). Its source is compiled before
+  every later block (in document order, after the header), so definitions and rules
+  apply from that point on, as in Typst. A raw block with content stays a content block.
+- Shown collapsed by default: a thin marker with a distinct style (e.g. a margin chip
+  "{ }" or a dashed line) saying that code is hidden there; double click or Enter opens it
+  in the source dialog, like a diagram. A view option shows code blocks expanded.
+  (The margin marker is shared UI with label pills, M15.)
+- Editing a code block recompiles the blocks after it (like a header change); cache
+  keys include the accumulated code.
+- Also: figure counters (`counter(figure.where(kind: …))`) in the counter chain, for
+  theorems built as figures.
+
+### M11 — Inline code: diagrams inside formulas and text
+
+- A new atom for math rows and inline lists holding Typst code (e.g. `#dia({…})`,
+  `#box(cetz.canvas({…}))`). It behaves exactly like a diagram block: double click or
+  Enter opens the source dialog with the live preview, Backspace selects then deletes.
+  The difference is only internal: it lives inside a formula, so editing it recompiles
+  the formula's block.
+- Inserting: "Insert Diagram" with the caret inside a formula inserts an inline one.
+
+### M12 — Math: generic calls and missing atoms
+
+- The generic call node in math: `cal(A)`, `overline(x)`, `hat`, `bold`, `tilde`, `bb`,
+  `abs`, `norm`, `sqrt`, `root`, `upright`, `op`, `underbrace(a, b)`, `cases(…)` (comma
+  separated arguments), header macros (`ket(psi)`). Typing: name then `(` creates the
+  call with an empty slot (`sqrt(`); also from a symbol palette later. **Q:** also a
+  backslash command (`\sqrt`)?
+- Atoms: primes (`f'`), text in math (`"if"`), alignment point `&` and line break `\`
+  (multi-line aligned equations; Typst lays them out, the caret follows spans).
+- `phi(x)` where `phi` is a symbol is not a call (already representable).
+- Later: matrices (`mat(…; …)`, 2D arguments).
+
+### M13 — Text markup and inline calls
+
+- Bold, italic (as the calls `strong`/`emph`, written `*…*`/`_…_`), inline code, links,
+  line breaks, non-breaking space and dash shorthands.
+- The generic call in text: `#cl[…]`, `#todo[…]`, `#highlight[…]`, `#underline[…]`,
+  `#footnote[…]`: content argument editable in place, rendered by Typst.
+
+### M14 — Nested blocks: theorem environments and lists
 
 - Theorem, lemma, definition, proof, … as a container block holding paragraphs and
   equations (the model is a flat block list today, so nesting is the main change:
@@ -292,10 +320,56 @@ Goal: open the user's existing Typst documents and edit them.
   and show an error marker.
 - Effort: large; the biggest item.
 
-### M9b — Title fields (items 1, 4; after M11, or any time after M9a)
+- Lists: bullet, numbered and term lists with nesting, same container mechanism.
+- Block-level calls with block bodies (`#claude-block[…]`, `#align(center)[…]`).
 
-- ~~Header banner~~ (rubber-band overscroll): dropped 2026-11-08; the M9a header dialog
-  is enough.
+### M15 — Labels and references
+
+- **Labels** on headings, display equations (numbered when labelled) and theorems:
+  `label: Option<String>` on those blocks. Shown as a pill (drawn by the widget, in the
+  right margin, not part of the Typst render). `<` inside math is "less than", so
+  labels get a visible slot instead of a shortcut: while the caret is in a labelable
+  block, a faint "+ label" pill shows in the right margin (where the equation number
+  goes). → at the last position of the block moves the caret onto the pill; typing
+  there edits the label in place, → / Enter leave it. Clicking the pill works too.
+  Existing labels always show as pills.
+- **References**: `@` in text opens a completion popover at the caret listing labels
+  (with their kind and number), filtered as you type. New inline node `Ref(label)`,
+  an atom for the caret (Backspace selects, then deletes). Dangling refs are flagged.
+- **Navigation**: clicking a reference scrolls to its target and puts the caret there;
+  Plain click follows the link (the caret reaches a reference with the arrow keys
+  instead); Alt+Left goes back.
+- Effort: medium–large (model node, popover, label table, resolution).
+
+- Labels on figures and theorems too (all targets exist by now); citations (`@key`)
+  with the bibliography.
+
+### M16 — Figures, footnotes, bibliography
+
+- Figures as block calls with a body and a caption (content arguments), labelled.
+- Footnotes (inline call, M13) with numbering through the chain.
+- Bibliography: embedded (as in the user's paper) or a file (needs project files).
+
+### M17 — Import `.typ` files
+
+- Parse with `typst::syntax` (no compile needed). The leading part of the file (set/show
+  rules, imports, `#let`s before the first content) becomes the header.
+- Map everything the model knows (by then: M10–M16). What is left (scripting, layout
+  commands without content, `#show: template`) becomes a raw Typst block with its source
+  verbatim, so nothing is lost and it still renders. No "raw math" fallback: the user
+  wants full support (decided 2026-11-08).
+- Acceptance: importing then exporting gives a document that compiles to the same
+  PDF (compare page images) for the user's own files; unknown parts round-trip
+  byte for byte.
+- Decided 2026-11-08: one-way import (open `.typ`, save as `.sem`, export `.typ` as
+  before). Saving back into the original `.typ` is not planned for now.
+- With M10–M16 done, the header gets the leading definitions, code blocks keep the
+  mid-document ones in place, and only real code ends up raw.
+
+### M18 — Title fields
+
+- ~~Header banner~~ (rubber-band overscroll): dropped 2026-11-08; the header dialog is
+  enough.
 - **Title, authors, date**: structured fields (in the header dialog; title, authors,
   date, maybe keywords/abstract), stored in `.sem`. The serializer emits them as
   `#set document(title: …, author: (…), date: …)`, which is the metadata (PDF info).
@@ -303,6 +377,14 @@ Goal: open the user's existing Typst documents and edit them.
   block (`#title()` plus an author line); the user can restyle or remove it. In the
   editor the title block is a rendered, non-editable block at the top of the page;
   clicking it opens the header dialog at that field.
+
+
+### Later
+
+- Project files: images, `#include`, local imports, bibliography files.
+- Multi-file projects: a zip holding the document, its files and a git repository for
+  version control (idea, 2026-11-08; compare Typesetter's project format).
+- Matrices, tables (2D content arguments).
 
 ## Risks, fallbacks, open questions
 
