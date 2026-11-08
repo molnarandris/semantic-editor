@@ -16,6 +16,7 @@ use typst::syntax::Span;
 use typst_layout::Page;
 
 use crate::compile::BLOCK_PAD_PT;
+use crate::counters::CounterState;
 use crate::serialize::SpanMap;
 use crate::world::BridgeWorld;
 
@@ -212,6 +213,10 @@ pub struct RawLayout {
     marks: Vec<Mark>,
     /// Text glyphs: (snippet offset, cluster char count, rect, baseline).
     text: Vec<(usize, usize, Rect, f64)>,
+    /// Counter values the block reported at its end (not geometry, but
+    /// cached with it).
+    #[serde(default)]
+    pub(crate) end_state: Option<CounterState>,
 }
 
 /// Extract the raw geometry of a compiled block page. `snippet_offset` is the
@@ -247,6 +252,7 @@ pub fn raw_layout(world: &BridgeWorld, page: &Page, snippet_offset: usize) -> Ra
             .into_iter()
             .filter_map(|(o, n, r, b)| Some((local(o)?, n, r, b)))
             .collect(),
+        end_state: None,
     }
 }
 
@@ -293,15 +299,40 @@ impl RawLayout {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{block_document, compile, serialize_block};
+    use crate::{Around, block_document, compile, serialize_block};
     use model::{Document, MathKind};
 
     fn layout_of(block: &model::BlockNode) -> BlockLayout {
         let mut world = BridgeWorld::new();
         let (snippet, map) = serialize_block(block);
-        let (src, offset) = block_document(&snippet, 300.0);
+        let (src, offset) = block_document(&Around::default(), &snippet, 300.0);
         let doc = compile(&mut world, &src).unwrap();
         raw_layout(&world, &doc.pages()[0], offset).resolve(&map)
+    }
+
+    /// The number of a numbered heading has no node: no glyph boxes, so the
+    /// caret skips it; the text starts after it.
+    #[test]
+    fn heading_numbers_are_not_text() {
+        let mut d = Document::empty();
+        let text = d.text("Intro");
+        let tid = text.id;
+        let block = d.heading(1, vec![text]);
+        let (snippet, map) = serialize_block(&block);
+        let around = Around {
+            header: crate::DEFAULT_HEADER.into(),
+            prefix: "#counter(heading).update((4,))\n".into(),
+            ..Around::default()
+        };
+        let mut world = BridgeWorld::new();
+        let (src, offset) = block_document(&around, &snippet, 300.0);
+        let doc = compile(&mut world, &src).unwrap();
+        let l = raw_layout(&world, &doc.pages()[0], offset).resolve(&map);
+        assert_eq!(l.glyphs.len(), 5, "{:?}", l.glyphs);
+        assert!(l.glyphs.iter().all(|g| g.node == tid));
+        // "5 " comes first.
+        assert!(l.glyphs[0].rect.x > 5.0, "{:?}", l.glyphs[0].rect);
+        assert_eq!(l.glyphs[0].chars, 0..1);
     }
 
     #[test]

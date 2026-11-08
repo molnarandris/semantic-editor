@@ -9,6 +9,15 @@ mod jobs;
 
 pub use imp::DEFAULT_ZOOM;
 
+/// What the source editor's preview shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreviewTarget {
+    /// A raw Typst or diagram block, as on the page.
+    Block(NodeId),
+    /// A specimen of text styled by the document header.
+    Header,
+}
+
 use std::cell::Ref;
 
 use gtk::glib;
@@ -106,15 +115,11 @@ impl SemEditor {
         }
     }
 
-    /// The error of a block's last compile, if it failed.
-    pub fn block_error(&self, block: NodeId) -> Option<String> {
-        self.imp().block_error(block)
-    }
-
-    /// Keep a render of `block` at `pixel_per_pt` device pixels per point,
+    /// Keep a render of `target` at `pixel_per_pt` device pixels per point,
     /// cropped to its ink, up to date for a preview (`None` stops it). Read
-    /// it with [`Self::preview_texture`] on `preview-rendered`.
-    pub fn set_preview(&self, target: Option<(NodeId, f64)>) {
+    /// it with [`Self::preview_texture`] and [`Self::preview_error`] on
+    /// `preview-rendered`.
+    pub fn set_preview(&self, target: Option<(PreviewTarget, f64)>) {
         self.imp().set_preview(target);
     }
 
@@ -123,7 +128,26 @@ impl SemEditor {
         self.imp().preview_texture()
     }
 
-    /// The preview render changed.
+    /// The error of the preview's last compile, if it failed.
+    pub fn preview_error(&self) -> Option<String> {
+        self.imp().preview_error()
+    }
+
+    /// The document header.
+    pub fn header(&self) -> String {
+        self.imp().editor.borrow().doc().header.clone()
+    }
+
+    /// Replace the document header (one undo step per run of edits) and
+    /// re-render every block.
+    pub fn set_header(&self, header: &str) {
+        let imp = self.imp();
+        if imp.editor.borrow_mut().set_header(header) {
+            imp.after_command(false);
+        }
+    }
+
+    /// The preview render or its error changed.
     pub fn connect_preview_rendered<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
         self.connect_local("preview-rendered", false, move |args| {
             let obj = args[0].get::<Self>().expect("SemEditor");
@@ -139,18 +163,6 @@ impl SemEditor {
         f: F,
     ) -> glib::SignalHandlerId {
         self.connect_local("edit-source", false, move |args| {
-            let obj = args[0].get::<Self>().expect("SemEditor");
-            f(&obj, NodeId(args[1].get::<u64>().expect("block id")));
-            None
-        })
-    }
-
-    /// A block's render or compile error arrived.
-    pub fn connect_block_rendered<F: Fn(&Self, NodeId) + 'static>(
-        &self,
-        f: F,
-    ) -> glib::SignalHandlerId {
-        self.connect_local("block-rendered", false, move |args| {
             let obj = args[0].get::<Self>().expect("SemEditor");
             f(&obj, NodeId(args[1].get::<u64>().expect("block id")));
             None

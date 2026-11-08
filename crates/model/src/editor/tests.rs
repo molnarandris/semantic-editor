@@ -190,6 +190,21 @@ fn equals_space_makes_headings() {
 }
 
 #[test]
+fn header_edits_are_one_undo_step_and_keep_the_caret() {
+    let mut e = sample();
+    caret_at(&mut e, 1, 0, 2);
+    let caret = e.caret().clone();
+    assert!(e.set_header("#set text(size: 12pt)"));
+    assert!(e.set_header("#set text(size: 12pt)\n#set heading(numbering: \"1.\")"));
+    assert!(!e.set_header("#set text(size: 12pt)\n#set heading(numbering: \"1.\")"));
+    assert_eq!(e.caret(), &caret);
+    e.undo();
+    assert_eq!(e.doc().header, "");
+    e.redo();
+    assert!(e.doc().header.ends_with("numbering: \"1.\")"));
+}
+
+#[test]
 fn diagram_blocks() {
     let mut e = sample();
     caret_at(&mut e, 1, 0, 2);

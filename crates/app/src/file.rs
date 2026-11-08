@@ -1,17 +1,18 @@
 //! `.sem` files: JSON with a format version, the Typst version the document
-//! was written with, and the blocks. Node ids are not stored; they are
-//! regenerated on load.
+//! was written with, the header and the blocks. Node ids are not stored;
+//! they are regenerated on load.
 
 use model::{BlockNode, Document};
 use serde::{Deserialize, Serialize};
 
-/// Version of the file format written by this build.
-pub const FORMAT_VERSION: u32 = 1;
+/// Version of the file format written by this build. 2: the header.
+pub const FORMAT_VERSION: u32 = 2;
 
 #[derive(Serialize)]
 struct SemFileOut<'a> {
     version: u32,
     typst: &'a str,
+    header: &'a str,
     blocks: &'a [BlockNode],
 }
 
@@ -20,6 +21,9 @@ struct SemFileIn {
     version: u32,
     #[allow(dead_code)]
     typst: String,
+    /// Version 1 has none: the editor's defaults, nothing numbered.
+    #[serde(default)]
+    header: String,
     blocks: Vec<BlockNode>,
 }
 
@@ -28,6 +32,7 @@ pub fn to_json(doc: &Document) -> String {
     let file = SemFileOut {
         version: FORMAT_VERSION,
         typst: typst_bridge::TYPST_VERSION,
+        header: &doc.header,
         blocks: &doc.blocks,
     };
     let mut out = serde_json::to_string_pretty(&file).expect("documents always serialize");
@@ -47,6 +52,7 @@ pub fn from_json(text: &str) -> Result<Document, String> {
         ));
     }
     let mut doc = Document::empty();
+    doc.header = file.header;
     doc.blocks = file.blocks;
     doc.regenerate_ids();
     doc.check_invariants()?;
@@ -68,7 +74,8 @@ mod tests {
         let loaded = from_json(&saved).unwrap();
         assert_eq!(serialize_document(&loaded), serialize_document(&doc));
         assert_eq!(to_json(&loaded), saved);
-        assert!(saved.contains("\"version\": 1"));
+        assert!(saved.contains("\"version\": 2"));
+        assert!(saved.contains("\"header\": \"#set heading"));
         assert!(saved.contains(&format!("\"typst\": \"{}\"", typst_bridge::TYPST_VERSION)));
     }
 
@@ -82,8 +89,10 @@ mod tests {
     fn bad_files_are_rejected() {
         assert!(from_json("{").is_err());
         assert!(from_json(r#"{"version": 99, "typst": "x", "blocks": []}"#).is_err());
-        // An empty document gets its one paragraph back.
+        // An empty document gets its one paragraph back; version 1 has no
+        // header.
         let doc = from_json(r#"{"version": 1, "typst": "0.15.1", "blocks": []}"#).unwrap();
         assert_eq!(doc.blocks.len(), 1);
+        assert_eq!(doc.header, "");
     }
 }

@@ -302,4 +302,47 @@ Implementation notes (done):
 - The dialog closes itself when its block disappears (undo of the insert, new
   document) and reloads its text when the source changes from outside.
 
+## M9a — Header and numbering engine
+
+Implementation notes (done):
+
+- `Document.header: String` (model). Edited with `Editor::set_header`, an
+  `Op::Replace` on the new `Seq::Header` (the same text op as raw sources), so
+  consecutive edits are one undo step and the caret stays. `.sem` format version 2
+  stores it; version 1 files load with an empty header (they look as before).
+  New documents get `DEFAULT_HEADER` (`#set heading(numbering: "1.1")`); the sample
+  numbers equations too.
+- The editor's own preamble (NCM fonts, `sem-slot`) stays and comes first, so a header
+  can override the font. Export: preamble, header, blocks.
+- `typst_bridge::Around { header, prefix, suffix }`: the code compiled around a block's
+  snippet, part of the worker's cache key. `block_document` writes preamble, header,
+  then the editor's `#set page(...)` (after the header, so its paper, margins,
+  page header/footer do not apply to blocks), prefix, snippet, suffix.
+- Counter chaining (`typst_bridge::counters`): tracked counters are `heading`,
+  `math.equation` and every `counter("…")` the header names (`tracked_counters`). The
+  prefix is one `#counter(…).update((…))` per tracked counter, the suffix
+  `#context [#metadata((…get(), …)) <sem-end>]`; `end_state` reads it back from the
+  introspector. The end state is stored in `RawLayout`, so cached renders (memory and
+  disk) keep it. Tests: chained end states equal a full-document compile (headings,
+  numbered equations, a custom counter), and the prefix/suffix change neither size nor
+  baseline of a block.
+- Scheduling (`editor_widget::jobs::stale_blocks`): headings, display math and raw
+  Typst are counter-sensitive. A sensitive block's `Around` holds its start state, so
+  a changed start makes it stale. It is submitted only once the previous sensitive
+  block's end state is known (its result arrived); the result handler then calls
+  `submit_blocks` again. A changed end state ripples down one compile at a time; an
+  unchanged one stops it. A failed block passes its start state on. Paragraphs and
+  diagrams never wait and keep their cache entries; a header change recompiles all.
+  A forced re-render (zoom, page width) clears the views' submitted snippets instead of
+  passing a flag, so blocks that wait for the chain are re-rendered when it reaches
+  them (`stale_blocks` lost its `force` parameter).
+- Numbered headings need nothing extra: the number's glyphs map to the heading block,
+  not to a text node, so they get no caret stops (test `heading_numbers_are_not_text`).
+- Header editing: the source dialog's target is `PreviewTarget::Block(id)` or
+  `::Header` (menu "Document Header…", `win.edit-header`). The header's preview is
+  `HEADER_SPECIMEN` (headings, text, inline and display math) under the header. The
+  dialog shows the preview's own compile error (`preview_error`; the preview now
+  reports failures), which replaced `block_error` and the `block-rendered` signal.
+- Dirty tracking compares header and blocks.
+
 Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing.

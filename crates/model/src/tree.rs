@@ -235,6 +235,9 @@ impl MathRow {
 /// The whole document: a flat list of blocks.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Document {
+    /// Typst code compiled before every block and at the top of the export:
+    /// set/show rules, imports, definitions. Should not produce content.
+    pub header: String,
     pub blocks: Vec<BlockNode>,
     #[serde(skip)]
     next_id: u64,
@@ -249,10 +252,7 @@ impl Default for Document {
 impl Document {
     /// A document with one empty paragraph.
     pub fn new() -> Self {
-        let mut doc = Self {
-            blocks: vec![],
-            next_id: 1,
-        };
+        let mut doc = Self::empty();
         let p = doc.paragraph(vec![]);
         doc.blocks.push(p);
         doc
@@ -262,6 +262,7 @@ impl Document {
     /// builders, or regenerated afterwards).
     pub fn empty() -> Self {
         Self {
+            header: String::new(),
             blocks: vec![],
             next_id: 1,
         }

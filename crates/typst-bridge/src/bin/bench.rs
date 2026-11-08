@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use typst_bridge::{BridgeWorld, block_document, compile, render_page};
+use typst_bridge::{Around, BridgeWorld, block_document, compile, render_page};
 
 const WIDTH_PT: f64 = 400.0;
 const PIXEL_PER_PT: f64 = 2.0;
@@ -47,7 +47,7 @@ fn main() {
         "formula", "cold c+r", "warm comp", "warm render", "warm total"
     );
     for (name, snippet) in FORMULAS {
-        let (doc_text, _) = block_document(snippet, WIDTH_PT);
+        let (doc_text, _) = block_document(&Around::default(), snippet, WIDTH_PT);
 
         let t = Instant::now();
         let doc = compile(&mut world, &doc_text).unwrap_or_else(|e| panic!("{name}: {e:?}"));
@@ -83,7 +83,11 @@ fn main() {
     // A "keystroke" scenario: a formula that changes slightly every time.
     let mut times = Vec::new();
     for i in 0..WARM_RUNS {
-        let (doc_text, _) = block_document(&format!("$ S <= (log chi)/(2) + c_{i} $"), WIDTH_PT);
+        let (doc_text, _) = block_document(
+            &Around::default(),
+            &format!("$ S <= (log chi)/(2) + c_{i} $"),
+            WIDTH_PT,
+        );
         let t = Instant::now();
         let doc = compile(&mut world, &doc_text).unwrap();
         let _ = render_page(&doc.pages()[0], PIXEL_PER_PT);

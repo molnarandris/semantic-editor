@@ -37,6 +37,8 @@ enum Last {
     Deleting,
     /// Editing the source of a raw or diagram block in the side pane.
     Source(NodeId),
+    /// Editing the document header.
+    Header,
 }
 
 /// A block inserted by [`Editor::insert_block`].
@@ -348,6 +350,7 @@ impl Editor {
             (Last::Typing { space: was }, Last::Typing { space: now }) => !was || now,
             (Last::Deleting, Last::Deleting) => true,
             (Last::Source(a), Last::Source(b)) => a == b,
+            (Last::Header, Last::Header) => true,
             _ => false,
         };
         let before = self.caret.clone();

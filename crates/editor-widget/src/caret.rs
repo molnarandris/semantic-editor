@@ -385,12 +385,12 @@ pub fn nearest_in_row<'a>(stops: &'a [Stop], path: &[Step], x: f64) -> Option<&'
 mod tests {
     use super::*;
     use model::Document;
-    use typst_bridge::{BridgeWorld, block_document, compile, raw_layout, serialize_block};
+    use typst_bridge::{Around, BridgeWorld, block_document, compile, raw_layout, serialize_block};
 
     fn layout_of(block: &BlockNode, width: f64) -> BlockLayout {
         let mut world = BridgeWorld::new();
         let (snippet, map) = serialize_block(block);
-        let (src, offset) = block_document(&snippet, width);
+        let (src, offset) = block_document(&Around::default(), &snippet, width);
         let doc = compile(&mut world, &src).unwrap();
         raw_layout(&world, &doc.pages()[0], offset).resolve(&map)
     }

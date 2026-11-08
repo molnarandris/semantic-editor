@@ -138,5 +138,9 @@ for i in range(3) {
     }
 
     b.0.blocks = blocks;
+    b.0.header = format!(
+        "{}#set math.equation(numbering: \"(1)\")\n",
+        typst_bridge::DEFAULT_HEADER
+    );
     b.0
 }

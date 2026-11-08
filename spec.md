@@ -224,6 +224,13 @@ riskiest piece and M10/M11 depend on it, so it comes before the header UI polish
 - **Numbered headings**: number shown, not editable. The number is part of the render
   but has no node, so the caret and hit-testing skip it.
 - Effort: medium–large (mostly the chaining).
+- Done 2026-11-08 (see PLAN.md). Decisions: the editor's fonts stay as a fixed preamble
+  before the header (a header may override them); new documents get
+  `#set heading(numbering: "1.1")`; old files load with an empty header; the header
+  dialog previews a fixed specimen of text.
+- Known limits: a header that produces content (e.g. a `#show: template` that adds a
+  title) shows it in every block (M9b's title block will address this); figure counters
+  and counters defined inside packages are not tracked yet (M11).
 
 ### M10 — Labels and references (items 2, 3, 6)
 

@@ -21,6 +21,8 @@ pub enum Seq {
     Row(NodeId),
     /// The chars of a text inline (by inline id) or raw-Typst block (by block id).
     Text(NodeId),
+    /// The chars of the document header.
+    Header,
 }
 
 /// Content for a [`Seq`]. Text indices and counts are in chars.
@@ -173,6 +175,7 @@ impl Document {
         let not_found = || OpError::NotFound(seq.clone());
         match *seq {
             Seq::Blocks => Ok(SeqMut::Blocks(&mut self.blocks)),
+            Seq::Header => Ok(SeqMut::Text(&mut self.header)),
             Seq::Inlines(block) => self
                 .blocks
                 .iter_mut()

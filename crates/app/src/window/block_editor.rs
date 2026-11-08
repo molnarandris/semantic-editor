@@ -1,14 +1,17 @@
-//! Source editor for diagram and raw Typst blocks: a dialog with the source
-//! on the left and the block's live render on the right. Edits apply to the
-//! model after a short pause; the editor widget's worker renders the block
-//! for the page and, cropped and at the preview's own scale, for the dialog.
+//! Source editor for diagram and raw Typst blocks and for the document
+//! header: a dialog with the source on the left and a live render on the
+//! right (the block, or a specimen of text styled by the header). Edits
+//! apply to the model after a short pause; the editor widget's worker
+//! renders the page and, cropped and at the preview's own scale, the
+//! preview.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
+use editor_widget::PreviewTarget;
 use gtk::glib;
-use model::{Block, NodeId};
+use model::Block;
 use sourceview5::prelude::*;
 
 use super::Window;
@@ -22,8 +25,8 @@ pub(super) struct BlockEditor {
     view: sourceview5::View,
     preview: Preview,
     error: gtk::Label,
-    /// The block being edited.
-    block: NodeId,
+    /// The block being edited, or the header.
+    target: PreviewTarget,
     /// Set while the buffer is filled from the model (not a user edit).
     loading: Cell<bool>,
     /// Pending debounced apply of the buffer to the model.
@@ -55,36 +58,46 @@ impl Window {
         self.block_editor.borrow().clone()
     }
 
-    /// Open the dialog for a raw/diagram block's source.
-    pub(super) fn open_block_editor(self: &Rc<Self>, block: NodeId) {
+    /// The source the dialog edits: a raw/diagram block's, or the header.
+    fn source_of(&self, target: PreviewTarget) -> Option<String> {
+        match target {
+            PreviewTarget::Block(block) => self.editor.block_source(block),
+            PreviewTarget::Header => Some(self.editor.header()),
+        }
+    }
+
+    /// Open the dialog for a raw/diagram block's source or the header.
+    pub(super) fn open_block_editor(self: &Rc<Self>, target: PreviewTarget) {
         self.close_block_editor();
-        let Some(source) = self.editor.block_source(block) else {
+        let Some(source) = self.source_of(target) else {
             return;
         };
-        let diagram = matches!(
-            self.editor.document().block(block).map(|b| &b.kind),
-            Some(Block::Diagram(_))
-        );
-        let (title, subtitle) = if diagram {
-            ("Diagram", "CeTZ drawing code")
-        } else {
-            ("Raw Typst", "Typst markup")
+        let (title, subtitle) = match target {
+            PreviewTarget::Header => (
+                "Document Header",
+                "Set and show rules, imports, definitions",
+            ),
+            PreviewTarget::Block(block) => {
+                match self.editor.document().block(block).map(|b| &b.kind) {
+                    Some(Block::Diagram(_)) => ("Diagram", "CeTZ drawing code"),
+                    _ => ("Raw Typst", "Typst markup"),
+                }
+            }
         };
-        let ed = Rc::new(build(title, subtitle, block));
+        let ed = Rc::new(build(title, subtitle, target));
         ed.set_text(&source);
         *self.block_editor.borrow_mut() = Some(ed.clone());
 
         // Start at the page's scale; the preview asks for its own once laid out.
         let ppp = self.editor.zoom() * self.window.scale_factor() as f64;
-        self.editor.set_preview(Some((block, ppp)));
+        self.editor.set_preview(Some((target, ppp)));
         let editor = self.editor.downgrade();
         ed.preview.connect_wants_scale(move |ppp| {
             if let Some(editor) = editor.upgrade() {
-                editor.set_preview(Some((block, ppp)));
+                editor.set_preview(Some((target, ppp)));
             }
         });
         self.refresh_block_preview();
-        self.show_block_error();
 
         let weak = Rc::downgrade(self);
         ed.view.buffer().connect_changed(move |_| {
@@ -160,7 +173,10 @@ impl Window {
             return;
         };
         ed.cancel_debounce();
-        self.editor.set_block_source(ed.block, &ed.text());
+        match ed.target {
+            PreviewTarget::Block(block) => self.editor.set_block_source(block, &ed.text()),
+            PreviewTarget::Header => self.editor.set_header(&ed.text()),
+        }
     }
 
     /// After a command: close the dialog if its block is gone (undo, a new
@@ -169,7 +185,7 @@ impl Window {
         let Some(ed) = self.current_block_editor() else {
             return;
         };
-        match self.editor.block_source(ed.block) {
+        match self.source_of(ed.target) {
             None => {
                 self.forget_block_editor();
                 ed.dialog.close();
@@ -183,28 +199,13 @@ impl Window {
         }
     }
 
-    /// A page render or error arrived; update the error if it is our block.
-    pub(super) fn block_rendered(&self, block: NodeId) {
-        if self
-            .current_block_editor()
-            .is_some_and(|ed| ed.block == block)
-        {
-            self.show_block_error();
-        }
-    }
-
-    /// The zoomed preview render arrived.
+    /// The zoomed preview render or its error arrived.
     pub(super) fn refresh_block_preview(&self) {
-        if let Some(ed) = self.current_block_editor() {
-            ed.preview.set_texture(self.editor.preview_texture());
-        }
-    }
-
-    fn show_block_error(&self) {
         let Some(ed) = self.current_block_editor() else {
             return;
         };
-        let error = self.editor.block_error(ed.block);
+        ed.preview.set_texture(self.editor.preview_texture());
+        let error = self.editor.preview_error();
         ed.error.set_visible(error.is_some());
         ed.error.set_label(error.as_deref().unwrap_or(""));
     }
@@ -212,7 +213,7 @@ impl Window {
 
 /// The dialog: header with title and Done, source | preview, error below
 /// the preview.
-fn build(title: &str, subtitle: &str, block: NodeId) -> BlockEditor {
+fn build(title: &str, subtitle: &str, target: PreviewTarget) -> BlockEditor {
     let done = gtk::Button::builder()
         .label("Done")
         .css_classes(["suggested-action"])
@@ -297,7 +298,7 @@ fn build(title: &str, subtitle: &str, block: NodeId) -> BlockEditor {
         view,
         preview,
         error,
-        block,
+        target,
         loading: Cell::new(false),
         debounce: RefCell::new(None),
     }

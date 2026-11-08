@@ -243,4 +243,21 @@ impl Editor {
         let after = cursor(block, vec![], source.chars().count());
         self.commit(vec![op], after, Last::Source(block))
     }
+
+    /// Replace the document header. Consecutive edits are one undo step;
+    /// the caret stays where it is.
+    pub fn set_header(&mut self, header: &str) -> bool {
+        let old = &self.doc.header;
+        if old == header {
+            return false;
+        }
+        let op = Op::Replace {
+            seq: Seq::Header,
+            index: 0,
+            count: old.chars().count(),
+            items: Items::Text(header.into()),
+        };
+        let after = self.caret.clone();
+        self.commit(vec![op], after, Last::Header)
+    }
 }

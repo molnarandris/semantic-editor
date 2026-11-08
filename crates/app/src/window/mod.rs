@@ -10,7 +10,7 @@ use std::future::Future;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use editor_widget::SemEditor;
+use editor_widget::{PreviewTarget, SemEditor};
 use gtk::{gio, glib};
 use model::{BlockNode, Document, NewBlock};
 
@@ -29,8 +29,9 @@ pub struct Window {
     title: adw::WindowTitle,
     toasts: adw::ToastOverlay,
     file: RefCell<Option<gio::File>>,
-    /// The blocks as last saved or loaded, to tell if there are changes.
-    saved: RefCell<Vec<BlockNode>>,
+    /// Header and blocks as last saved or loaded, to tell if there are
+    /// changes.
+    saved: RefCell<(String, Vec<BlockNode>)>,
     /// The open source editor dialog, if any.
     block_editor: RefCell<Option<Rc<BlockEditor>>>,
 }
@@ -97,12 +98,12 @@ impl Window {
             title,
             toasts,
             file: RefCell::new(None),
-            saved: RefCell::new(vec![]),
+            saved: RefCell::default(),
             block_editor: RefCell::new(None),
         });
         this.add_actions();
         this.connect_signals();
-        this.set_document(Document::new(), None);
+        this.set_document(new_document(), None);
         WINDOWS.with(|w| w.borrow_mut().push(this.clone()));
         this
     }
@@ -129,13 +130,7 @@ impl Window {
         let weak = Rc::downgrade(self);
         self.editor.connect_edit_source(move |_, block| {
             if let Some(this) = weak.upgrade() {
-                this.open_block_editor(block);
-            }
-        });
-        let weak = Rc::downgrade(self);
-        self.editor.connect_block_rendered(move |_, block| {
-            if let Some(this) = weak.upgrade() {
-                this.block_rendered(block);
+                this.open_block_editor(PreviewTarget::Block(block));
             }
         });
         let weak = Rc::downgrade(self);
@@ -172,7 +167,10 @@ impl Window {
 
     fn add_actions(self: &Rc<Self>) {
         type Handler = fn(Rc<Window>);
-        let actions: [(&str, Handler); 11] = [
+        let actions: [(&str, Handler); 12] = [
+            ("edit-header", |w| {
+                w.open_block_editor(PreviewTarget::Header)
+            }),
             ("insert-diagram", |w| w.insert_block(NewBlock::Diagram)),
             ("insert-raw", |w| w.insert_block(NewBlock::RawTypst)),
             ("open", |w| spawn(async move { w.open().await })),
@@ -215,20 +213,22 @@ impl Window {
 
     fn insert_block(self: Rc<Self>, kind: NewBlock) {
         self.editor.insert_block(kind);
-        self.open_block_editor(self.editor.caret().block);
+        self.open_block_editor(PreviewTarget::Block(self.editor.caret().block));
     }
 
     // ----- State -----
 
     fn set_document(&self, doc: Document, file: Option<gio::File>) {
-        *self.saved.borrow_mut() = doc.blocks.clone();
+        *self.saved.borrow_mut() = (doc.header.clone(), doc.blocks.clone());
         *self.file.borrow_mut() = file;
         // Emits caret-moved, which updates the title and status bar.
         self.editor.set_document(doc);
     }
 
     fn is_dirty(&self) -> bool {
-        self.editor.document().blocks != *self.saved.borrow()
+        let doc = self.editor.document();
+        let saved = self.saved.borrow();
+        doc.header != saved.0 || doc.blocks != saved.1
     }
 
     /// File name without extension, for titles and export names.
@@ -261,6 +261,13 @@ impl Window {
     }
 }
 
+/// An empty document with the default header.
+fn new_document() -> Document {
+    let mut doc = Document::new();
+    doc.header = typst_bridge::DEFAULT_HEADER.into();
+    doc
+}
+
 fn main_menu() -> gio::Menu {
     let menu = gio::Menu::new();
     let file = gio::Menu::new();
@@ -277,6 +284,7 @@ fn main_menu() -> gio::Menu {
     zoom.append(Some("_Reset Zoom"), Some("win.zoom-reset"));
     menu.append_section(None, &zoom);
     let insert = gio::Menu::new();
+    insert.append(Some("Document _Header…"), Some("win.edit-header"));
     insert.append(Some("Insert _Diagram"), Some("win.insert-diagram"));
     insert.append(Some("Insert _Raw Typst"), Some("win.insert-raw"));
     menu.append_section(None, &insert);

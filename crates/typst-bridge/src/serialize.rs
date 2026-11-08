@@ -18,6 +18,17 @@ pub const PREAMBLE: &str = "\
 #let sem-slot = box.with(width: 0.55em, height: 0.7em, stroke: (paint: luma(160), thickness: 0.5pt, dash: \"densely-dashed\"))
 ";
 
+/// The header of new documents.
+pub const DEFAULT_HEADER: &str = "#set heading(numbering: \"1.1\")\n";
+
+/// What the header dialog previews: a little of everything a header styles.
+pub const HEADER_SPECIMEN: &str = "\
+= Section heading
+Body text with inline math $x^2 + y^2 = r^2$, set in the document's font and size.
+
+== Subsection heading
+$ integral_0^1 f(x) dif x = F(1) - F(0) $";
+
 macro_rules! cetz_version {
     () => {
         "0.5.3"
@@ -545,7 +556,7 @@ pub fn serialize_block_styled(block: &BlockNode, style: Style) -> (String, SpanM
     (w.out, w.map)
 }
 
-/// The whole document as one readable Typst file: preamble + blocks.
+/// The whole document as one readable Typst file: preamble, header, blocks.
 pub fn serialize_document(doc: &Document) -> String {
     serialize_document_mapped(doc).0
 }
@@ -554,6 +565,10 @@ pub fn serialize_document(doc: &Document) -> String {
 /// blocks.
 pub fn serialize_document_mapped(doc: &Document) -> (String, SpanMap) {
     let mut out = String::from(PREAMBLE);
+    out.push_str(&doc.header);
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
     if doc
         .blocks
         .iter()
@@ -578,7 +593,7 @@ pub fn serialize_document_mapped(doc: &Document) -> (String, SpanMap) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BridgeWorld, block_document, compile};
+    use crate::{Around, BridgeWorld, block_document, compile};
 
     fn ser(block: &BlockNode) -> String {
         serialize_block(block).0
@@ -687,7 +702,7 @@ mod tests {
     fn every_snapshot_compiles() {
         let mut world = BridgeWorld::new();
         for (name, block, _) in golden() {
-            let (src, _) = block_document(&ser(&block), 300.0);
+            let (src, _) = block_document(&Around::default(), &ser(&block), 300.0);
             if let Err(e) = compile(&mut world, &src) {
                 panic!("{name}: {e:?}\n{src}");
             }
@@ -716,7 +731,7 @@ mod tests {
             for c in keys.chars() {
                 e.insert_text(&c.to_string());
                 let block = &e.doc().blocks[0];
-                let (src, _) = block_document(&ser(block), 300.0);
+                let (src, _) = block_document(&Around::default(), &ser(block), 300.0);
                 if let Err(err) = compile(&mut world, &src) {
                     panic!("after {c:?} in {keys:?}: {err:?}\n{src}");
                 }
@@ -808,7 +823,7 @@ mod tests {
             "/ + x^ + (/)/ + ^/_",
         ];
         let render = |world: &mut BridgeWorld, snippet: &str| {
-            let (src, _) = block_document(snippet, 400.0);
+            let (src, _) = block_document(&Around::default(), snippet, 400.0);
             let doc = compile(world, &src).unwrap_or_else(|e| panic!("{e:?}\n{src}"));
             crate::render_page(&doc.pages()[0], 2.0).data
         };
@@ -857,7 +872,7 @@ mod tests {
         let doc = serialize_document(&d);
         assert_eq!(doc.matches(CETZ_IMPORT).count(), 1, "{doc}");
         let mut world = BridgeWorld::new();
-        let (src, _) = block_document(&snippet, 300.0);
+        let (src, _) = block_document(&Around::default(), &snippet, 300.0);
         compile(&mut world, &src).unwrap();
         compile(&mut world, &doc).unwrap();
     }

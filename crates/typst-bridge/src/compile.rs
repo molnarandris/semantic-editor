@@ -10,16 +10,31 @@ use crate::world::BridgeWorld;
 /// the raster. Layout coordinates are relative to the content, not the page.
 pub const BLOCK_PAD_PT: f64 = 8.0;
 
+/// Typst code compiled around a block's snippet.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Around {
+    /// The document header.
+    pub header: String,
+    /// Right before the snippet (e.g. restoring counters).
+    pub prefix: String,
+    /// Right after the snippet (e.g. reporting counters).
+    pub suffix: String,
+}
+
 /// Build the standalone document for one block whose content is `width_pt`
 /// wide. Returns the source and the byte offset at which `snippet` starts,
-/// to shift the block's span map by.
-pub fn block_document(snippet: &str, width_pt: f64) -> (String, usize) {
+/// to shift the block's span map by. The page is set up after the header,
+/// so page settings there (paper, margins, page numbers) do not apply.
+pub fn block_document(around: &Around, snippet: &str, width_pt: f64) -> (String, usize) {
     let page = width_pt + 2.0 * BLOCK_PAD_PT;
     let mut src = format!(
-        "#set page(width: {page}pt, height: auto, margin: {BLOCK_PAD_PT}pt, fill: none)\n{PREAMBLE}"
+        "{PREAMBLE}{}\n#set page(width: {page}pt, height: auto, margin: {BLOCK_PAD_PT}pt, \
+         fill: none, header: none, footer: none, background: none, foreground: none, columns: 1)\n{}",
+        around.header, around.prefix
     );
     let offset = src.len();
     src.push_str(snippet);
+    src.push_str(&around.suffix);
     (src, offset)
 }
 
@@ -138,7 +153,7 @@ mod tests {
         let mut world = BridgeWorld::new();
         let doc = compile(
             &mut world,
-            &block_document("$ S <= (log chi)/(2) + c $", 300.0).0,
+            &block_document(&Around::default(), "$ S <= (log chi)/(2) + c $", 300.0).0,
         )
         .expect("compiles");
         let raster = render_page(&doc.pages()[0], 2.0);

@@ -9,10 +9,13 @@ use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, glib, graphene, gsk};
 use model::{CursorPath, Document, Editor, NodeId};
-use typst_bridge::{BLOCK_PAD_PT, BlockLayout, CompileJob, CompileResult, Raster, SpanMap, Worker};
+use typst_bridge::{
+    Around, BLOCK_PAD_PT, BlockLayout, CompileJob, CompileResult, CounterState, HEADER_SPECIMEN,
+    Raster, SpanMap, Worker,
+};
 
 use crate::caret::{self, Stop};
-use crate::jobs;
+use crate::{PreviewTarget, jobs};
 
 /// Logical pixels per typographic point: default, limits, and the factor
 /// of one zoom step.
@@ -39,10 +42,15 @@ const BLINK_INTERVAL: Duration = Duration::from_millis(600);
 /// Render state of one block.
 struct BlockView {
     id: NodeId,
-    /// Snippet and span map of the last submitted job, to skip redundant
-    /// compiles.
+    /// Code around, snippet and span map of the last submitted job, to skip
+    /// redundant compiles.
+    around: Around,
     snippet: String,
     map: SpanMap,
+    /// Counter-sensitive blocks: the counters at the start of the last
+    /// submitted job, and at its end once its result arrived.
+    start: Option<CounterState>,
+    end: Option<CounterState>,
     /// Generation of the last submitted job.
     submitted: u64,
     /// Generation of the result currently shown.
@@ -61,8 +69,11 @@ impl BlockView {
     fn new(id: NodeId) -> Self {
         Self {
             id,
+            around: Around::default(),
             snippet: String::new(),
             map: SpanMap::default(),
+            start: None,
+            end: None,
             submitted: 0,
             shown: 0,
             texture: None,
@@ -86,18 +97,19 @@ const PREVIEW_ID: NodeId = NodeId(u64::MAX);
 /// Largest device pixels per point a preview is rendered at.
 const MAX_PREVIEW_PPP: f64 = 12.0;
 
-/// A zoomed render of one block for the source editor's preview, cropped
-/// to its ink.
+/// A zoomed render for the source editor's preview, cropped to its ink.
 #[derive(Default)]
 struct Preview {
-    block: Option<NodeId>,
+    target: Option<PreviewTarget>,
     pixel_per_pt: f64,
-    /// Snippet, page width and scale of the last submitted job.
-    submitted: Option<(String, f64, f64)>,
+    /// Code around, snippet, page width and scale of the last submitted job.
+    submitted: Option<(Around, String, f64, f64)>,
     /// Generation of the last submitted job and of the result shown.
     generation: u64,
     shown: u64,
     texture: Option<(gdk::Texture, f64)>,
+    /// Message of the last failed compile; the last good render stays.
+    error: Option<String>,
 }
 
 #[derive(Default)]
@@ -166,10 +178,6 @@ impl ObjectImpl for SemEditor {
                 // A raw/diagram block's source should be opened for editing
                 // (Enter or double click on it). Param: block id.
                 Signal::builder("edit-source")
-                    .param_types([u64::static_type()])
-                    .build(),
-                // A block's render (or error) arrived. Param: block id.
-                Signal::builder("block-rendered")
                     .param_types([u64::static_type()])
                     .build(),
                 // The preview render (see `set_preview`) changed.
@@ -559,15 +567,6 @@ impl SemEditor {
         }
     }
 
-    /// The last compile error of a block, if its last compile failed.
-    pub(crate) fn block_error(&self, block: NodeId) -> Option<String> {
-        self.views
-            .borrow()
-            .iter()
-            .find(|v| v.id == block)
-            .and_then(|v| v.error.clone())
-    }
-
     /// Select the structure of breadcrumb entry `path_len`.
     pub(crate) fn select_crumb(&self, path_len: usize) {
         let changed = self.editor.borrow_mut().select_crumb(path_len);
@@ -904,16 +903,34 @@ impl SemEditor {
         }
         let ed = self.editor.borrow();
         let mut views = self.views.borrow_mut();
+        if force {
+            // Forget what was submitted: every block is stale, also those
+            // that wait for the counter chain and are submitted later.
+            for view in views.iter_mut() {
+                view.snippet.clear();
+            }
+        }
         let jobs = {
-            let submitted: Vec<_> = views.iter().map(|v| (v.snippet.as_str(), &v.map)).collect();
-            jobs::stale_blocks(&ed.doc().blocks, &submitted, force)
+            let submitted: Vec<_> = views
+                .iter()
+                .map(|v| jobs::Submitted {
+                    around: &v.around,
+                    snippet: &v.snippet,
+                    map: &v.map,
+                    end: v.end.as_ref(),
+                })
+                .collect();
+            jobs::stale_blocks(&ed.doc().blocks, &ed.doc().header, &submitted)
         };
         for job in jobs {
             let (block, view) = (&ed.doc().blocks[job.index], &mut views[job.index]);
             let generation = self.generation.get() + 1;
             self.generation.set(generation);
+            view.around = job.around.clone();
             view.snippet = job.snippet.clone();
             view.map = job.map.clone();
+            view.start = job.start;
+            view.end = None;
             view.submitted = generation;
             // The block changed; its stops follow the new tree right away
             // (against the old layout until the new one arrives).
@@ -921,6 +938,7 @@ impl SemEditor {
             self.worker.get().expect("worker").submit(CompileJob {
                 block: block.id,
                 generation,
+                around: job.around,
                 snippet: job.snippet,
                 map: job.map,
                 width_pt: self.page_width_pt.get(),
@@ -933,17 +951,17 @@ impl SemEditor {
         self.submit_preview();
     }
 
-    /// Render `block` for a preview at `pixel_per_pt` (device pixels per
+    /// Render `target` for a preview at `pixel_per_pt` (device pixels per
     /// point), kept up to date with its source; `None` stops it.
-    pub(crate) fn set_preview(&self, target: Option<(NodeId, f64)>) {
+    pub(crate) fn set_preview(&self, target: Option<(PreviewTarget, f64)>) {
         {
             let mut preview = self.preview.borrow_mut();
             match target {
                 None => *preview = Preview::default(),
-                Some((block, ppp)) => {
-                    if preview.block != Some(block) {
+                Some((target, ppp)) => {
+                    if preview.target != Some(target) {
                         *preview = Preview::default();
-                        preview.block = Some(block);
+                        preview.target = Some(target);
                     }
                     preview.pixel_per_pt = ppp.clamp(0.25, MAX_PREVIEW_PPP);
                 }
@@ -956,19 +974,37 @@ impl SemEditor {
         self.preview.borrow().texture.clone()
     }
 
-    /// Submit the preview job if its block, size or scale changed.
+    pub(crate) fn preview_error(&self) -> Option<String> {
+        self.preview.borrow().error.clone()
+    }
+
+    /// Submit the preview job if its source, size or scale changed. A block
+    /// is previewed as it was last submitted for the page; the header with
+    /// a specimen of text.
     fn submit_preview(&self) {
         let width = self.page_width_pt.get();
         let mut preview = self.preview.borrow_mut();
-        let Some(block) = preview.block else { return };
-        let views = self.views.borrow();
-        let Some(view) = views.iter().find(|v| v.id == block) else {
-            return;
+        let Some(target) = preview.target else { return };
+        let (around, snippet, map) = match target {
+            PreviewTarget::Block(block) => {
+                let views = self.views.borrow();
+                let Some(view) = views.iter().find(|v| v.id == block) else {
+                    return;
+                };
+                (view.around.clone(), view.snippet.clone(), view.map.clone())
+            }
+            PreviewTarget::Header => {
+                let around = Around {
+                    header: self.editor.borrow().doc().header.clone(),
+                    ..Around::default()
+                };
+                (around, HEADER_SPECIMEN.to_string(), SpanMap::default())
+            }
         };
-        if width <= 0.0 || view.snippet.is_empty() {
+        if width <= 0.0 || snippet.is_empty() {
             return;
         }
-        let key = (view.snippet.clone(), width, preview.pixel_per_pt);
+        let key = (around.clone(), snippet.clone(), width, preview.pixel_per_pt);
         if preview.submitted.as_ref() == Some(&key) {
             return;
         }
@@ -979,8 +1015,9 @@ impl SemEditor {
         self.worker.get().expect("worker").submit(CompileJob {
             block: PREVIEW_ID,
             generation,
-            snippet: view.snippet.clone(),
-            map: view.map.clone(),
+            around,
+            snippet,
+            map,
             width_pt: width,
             pixel_per_pt: preview.pixel_per_pt,
             persist: false,
@@ -991,13 +1028,20 @@ impl SemEditor {
     fn on_preview_result(&self, result: CompileResult) {
         {
             let mut preview = self.preview.borrow_mut();
-            if preview.block.is_none() || result.generation < preview.shown {
+            if preview.target.is_none() || result.generation < preview.shown {
                 return;
             }
-            let Ok(rendered) = result.outcome else {
-                return; // The page shows the error; keep the last preview.
-            };
             preview.shown = result.generation;
+            let rendered = match result.outcome {
+                Ok(rendered) => rendered,
+                Err(errors) => {
+                    preview.error = Some(errors.join("\n"));
+                    drop(preview);
+                    self.obj().emit_by_name::<()>("preview-rendered", &[]);
+                    return;
+                }
+            };
+            preview.error = None;
             let raster = match rendered.raster.ink_bounds() {
                 Some(bounds) => Arc::new(rendered.raster.crop(bounds)),
                 None => rendered.raster,
@@ -1012,7 +1056,7 @@ impl SemEditor {
             self.on_preview_result(result);
             return;
         }
-        {
+        let chained = {
             let mut views = self.views.borrow_mut();
             let Some(view) = views.iter_mut().find(|v| v.id == result.block) else {
                 return;
@@ -1022,20 +1066,34 @@ impl SemEditor {
             }
             view.shown = result.generation;
             view.stops = OnceCell::new();
-            match result.outcome {
+            let end = match result.outcome {
                 Ok(rendered) => {
                     view.texture = Some(texture(rendered.raster));
                     view.texture_ppp = rendered.pixel_per_pt;
                     view.layout = Some(rendered.layout);
                     view.error = None;
+                    rendered.end_state
                 }
-                Err(errors) => view.error = Some(errors.join("\n")),
+                Err(errors) => {
+                    view.error = Some(errors.join("\n"));
+                    None
+                }
+            };
+            // The counters this block ends with; a failed block passes its
+            // start on unchanged.
+            let current = result.generation == view.submitted && view.start.is_some();
+            if current {
+                view.end = end.or_else(|| view.start.clone());
             }
+            current
+        };
+        if chained {
+            // The next counter-sensitive block can go now.
+            self.submit_blocks(false);
         }
         let obj = self.obj();
         obj.queue_resize();
         obj.queue_draw();
-        obj.emit_by_name::<()>("block-rendered", &[&result.block.0]);
         if self.editor.borrow().caret().block == result.block {
             if self.reveal.take() {
                 self.reveal_caret();

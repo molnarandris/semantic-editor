@@ -20,7 +20,8 @@ use std::time::{Duration, Instant};
 use model::NodeId;
 
 use crate::TYPST_VERSION;
-use crate::compile::{Raster, block_document, compile, render_page};
+use crate::compile::{Around, Raster, block_document, compile, render_page};
+use crate::counters::{self, CounterState};
 use crate::disk_cache::DiskCache;
 use crate::layout::{BlockLayout, RawLayout, raw_layout};
 use crate::serialize::SpanMap;
@@ -35,6 +36,8 @@ pub struct CompileJob {
     /// Increases with every edit of the block; results carry it back so the
     /// caller can ignore stale ones.
     pub generation: u64,
+    /// Header and counter code compiled around the snippet.
+    pub around: Around,
     pub snippet: String,
     pub map: SpanMap,
     pub width_pt: f64,
@@ -52,6 +55,8 @@ pub struct Rendered {
     pub raster: Arc<Raster>,
     pub layout: BlockLayout,
     pub pixel_per_pt: f64,
+    /// Counter values at the end of the block, if `around` asked for them.
+    pub end_state: Option<CounterState>,
 }
 
 #[derive(Debug)]
@@ -108,6 +113,7 @@ struct Cached {
 
 fn cache_key(job: &CompileJob) -> u64 {
     let mut h = DefaultHasher::new();
+    job.around.hash(&mut h);
     job.snippet.hash(&mut h);
     job.width_pt.to_bits().hash(&mut h);
     job.pixel_per_pt.to_bits().hash(&mut h);
@@ -195,6 +201,7 @@ fn run(
             raster,
             layout: raw.resolve(&job.map),
             pixel_per_pt: job.pixel_per_pt,
+            end_state: raw.end_state.clone(),
         });
         deliver(CompileResult {
             block: job.block,
@@ -214,14 +221,15 @@ fn compile_job(
     world: &mut BridgeWorld,
     job: &CompileJob,
 ) -> Result<(Arc<Raster>, Arc<RawLayout>), Vec<String>> {
-    let (src, offset) = block_document(&job.snippet, job.width_pt);
+    let (src, offset) = block_document(&job.around, &job.snippet, job.width_pt);
     let doc = compile(world, &src)?;
     let page = doc
         .pages()
         .first()
         .ok_or_else(|| vec!["no page".to_string()])?;
     let raster = render_page(page, job.pixel_per_pt);
-    let raw = raw_layout(world, page, offset);
+    let mut raw = raw_layout(world, page, offset);
+    raw.end_state = counters::end_state(&doc);
     Ok((Arc::new(raster), Arc::new(raw)))
 }
 
@@ -235,6 +243,7 @@ mod tests {
         CompileJob {
             block,
             generation,
+            around: Around::default(),
             snippet: snippet.into(),
             map: SpanMap::default(),
             width_pt: 200.0,

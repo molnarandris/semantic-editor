@@ -90,11 +90,14 @@ impl Window {
 
     async fn write(self: &Rc<Self>, file: gio::File) -> bool {
         self.apply_block_edit();
-        let blocks = self.editor.document().blocks.clone();
+        let saved = {
+            let doc = self.editor.document();
+            (doc.header.clone(), doc.blocks.clone())
+        };
         let json = file::to_json(&self.editor.document());
         match write_file(&file, json.into_bytes()).await {
             Ok(()) => {
-                *self.saved.borrow_mut() = blocks;
+                *self.saved.borrow_mut() = saved;
                 *self.file.borrow_mut() = Some(file);
                 self.update_title();
                 true
