@@ -214,6 +214,8 @@ Chosen approach: **counter state chained through blocks** (no whole-document com
 
 Order decided 2026-11-07: M8 → M9a → M10 → M11 → M9b. The counter chaining is the
 riskiest piece and M10/M11 depend on it, so it comes before the header UI polish.
+Changed 2026-11-08: `.typ` import (M9c) moved up, right after M9a, so real documents
+can be opened early: M9a → M9c → M10 → M11 → M9b.
 
 - **Editable header**: the document preamble (set/show rules, imports, theorem
   definitions), stored in `.sem`, prepended to every block snippet and to the export.
@@ -231,6 +233,23 @@ riskiest piece and M10/M11 depend on it, so it comes before the header UI polish
 - Known limits: a header that produces content (e.g. a `#show: template` that adds a
   title) shows it in every block (M9b's title block will address this); figure counters
   and counters defined inside packages are not tracked yet (M11).
+
+### M9c — Import `.typ` files (requested 2026-11-08, top priority after M9a)
+
+Goal: open the user's existing Typst documents and edit them.
+
+- Parse with `typst::syntax` (no compile needed). The leading part of the file (set/show
+  rules, imports, `#let`s before the first content) becomes the header.
+- Map what the model knows: headings, paragraphs (text with inline math), display
+  math. Everything else (figures, lists, function calls, `#show: template`, …) becomes a
+  raw Typst block with its source verbatim, so nothing is lost and it still renders.
+- Math: formulas inside the model's math subset become math nodes; a formula with
+  anything else becomes raw Typst. **Q:** for inline math in a paragraph, should the
+  whole paragraph become raw, or should the model get a "raw math" inline?
+- Acceptance: importing then exporting gives a document that compiles to the same
+  PDF (compare page images) for the user's own files; unknown parts round-trip
+  byte for byte.
+- Open: one-way import (save as `.sem`) or later also saving back to `.typ`.
 
 ### M10 — Labels and references (items 2, 3, 6)
 
@@ -272,20 +291,17 @@ riskiest piece and M10/M11 depend on it, so it comes before the header UI polish
   and show an error marker.
 - Effort: large; the biggest item.
 
-### M9b — Header banner and title fields (items 1, 4; after M11, or any time after M9a)
+### M9b — Title fields (items 1, 4; after M11, or any time after M9a)
 
-- **Header banner**: revealed by scrolling past the top with resistance (rubber band):
-  extra scroll at offset 0 accumulates and only opens a banner past a threshold, with a
-  spring animation (`adw::SpringAnimation`). Replaces the M9a dialog as the main way to
-  edit the header (the menu entry stays). Effort: medium (the overscroll gesture is
-  custom; GTK has none built in).
-- **Title, authors, date**: structured fields in the header banner (title, authors,
+- ~~Header banner~~ (rubber-band overscroll): dropped 2026-11-08; the M9a header dialog
+  is enough.
+- **Title, authors, date**: structured fields (in the header dialog; title, authors,
   date, maybe keywords/abstract), stored in `.sem`. The serializer emits them as
   `#set document(title: …, author: (…), date: …)`, which is the metadata (PDF info).
   What appears on the page is up to the header: the default header shows the title
   block (`#title()` plus an author line); the user can restyle or remove it. In the
   editor the title block is a rendered, non-editable block at the top of the page;
-  clicking it opens the header banner at that field.
+  clicking it opens the header dialog at that field.
 
 ## Risks, fallbacks, open questions
 

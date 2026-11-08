@@ -52,19 +52,23 @@ pub fn stops(block: &BlockNode, layout: Option<&BlockLayout>) -> Vec<Stop> {
         }
     };
     if out.is_empty() {
-        // Not rendered yet, or nothing visible (an empty paragraph).
+        // Not rendered yet, or no text (an empty paragraph or heading).
         let start = match block.kind.inlines() {
             Some(_) => vec![Step::Index(0)],
             None => vec![],
         };
         let baseline = layout.map_or(EMPTY_BOTTOM_PT * 0.8, |l| l.baseline.max(1.0));
+        // An empty heading still shows its number: typed text goes after it.
+        let x = layout
+            .and_then(|l| l.box_of(block.id))
+            .map_or(0.0, |r| r.right() + SPACE_PT);
         out.push(Stop {
             cursor: CursorPath {
                 block: block.id,
                 path: start,
                 offset: 0,
             },
-            x: 0.0,
+            x,
             top: EMPTY_TOP_PT,
             bottom: EMPTY_BOTTOM_PT,
             line: baseline,
@@ -395,6 +399,32 @@ mod tests {
         raw_layout(&world, &doc.pages()[0], offset).resolve(&map)
     }
 
+    /// In a numbered heading without text the caret sits after the number,
+    /// where typed text appears.
+    #[test]
+    fn empty_numbered_heading_puts_the_caret_after_the_number() {
+        let mut d = Document::empty();
+        let empty = d.heading(1, vec![]);
+        let t = d.text("A");
+        let full = d.heading(1, vec![t]);
+        let layout = |block: &BlockNode| {
+            let mut world = BridgeWorld::new();
+            let (snippet, map) = serialize_block(block);
+            let around = Around {
+                header: typst_bridge::DEFAULT_HEADER.into(),
+                ..Around::default()
+            };
+            let (src, offset) = block_document(&around, &snippet, 300.0);
+            let doc = compile(&mut world, &src).unwrap();
+            raw_layout(&world, &doc.pages()[0], offset).resolve(&map)
+        };
+        let s = stops(&empty, Some(&layout(&empty)));
+        assert_eq!(s.len(), 1);
+        let typed = stops(&full, Some(&layout(&full)))[0].x;
+        assert!(s[0].x > 5.0, "after the number: {}", s[0].x);
+        assert!((s[0].x - typed).abs() < 2.5, "{} vs {typed}", s[0].x);
+    }
+
     /// The acceptance check of the prose milestone: clicking anywhere on a
     /// glyph puts the caret at one of its edges, the nearer one.
     #[test]
@@ -502,6 +532,7 @@ mod tests {
         let s = stops(&p, Some(&l));
         assert_eq!(s.len(), 1);
         assert_eq!(s[0].cursor.path, vec![Step::Index(0)]);
+        assert_eq!(s[0].x, 0.0);
 
         let (a, b) = (d.ident("a"), d.ident("b"));
         let disp = d.display(vec![a, b]);

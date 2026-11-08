@@ -344,5 +344,9 @@ Implementation notes (done):
   dialog shows the preview's own compile error (`preview_error`; the preview now
   reports failures), which replaced `block_error` and the `block-rendered` signal.
 - Dirty tracking compares header and blocks.
+- Follow-up: in a numbered heading without text the caret sat before the number (no
+  glyphs, so the fallback stop was at x = 0). The fallback stop now goes after the
+  block's visible box (the number) plus a space; an empty paragraph has no box and
+  keeps x = 0.
 
 Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing.
