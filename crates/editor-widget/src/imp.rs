@@ -295,6 +295,7 @@ impl WidgetImpl for SemEditor {
         );
         snapshot.append_color(&gdk::RGBA::WHITE, &paper);
         if obj.has_focus() {
+            self.snapshot_env_outline(snapshot, x0, scroll);
             self.snapshot_highlights(snapshot, x0, scroll);
         }
 
@@ -592,6 +593,55 @@ impl SemEditor {
     }
 
     /// Current structure and selection, drawn under the text.
+    /// A faint outline around the environment the caret is in (tinted) or
+    /// just before/after (outline only), so in and out can be told apart.
+    fn snapshot_env_outline(&self, snapshot: &gtk::Snapshot, x0: f64, scroll: f64) {
+        let zoom = self.zoom.get();
+        let ed = self.editor.borrow();
+        let Some((env, inside)) = ed.env_focus() else {
+            return;
+        };
+        let Some(index) = ed.doc().top_index(env) else {
+            return;
+        };
+        let Some(&top) = self.block_tops().get(index) else {
+            return;
+        };
+        let views = self.views.borrow();
+        let Some(view) = views.get(index) else {
+            return;
+        };
+        let Some(layout) = view.layout.as_ref() else {
+            return;
+        };
+        let r = if view.id == env {
+            typst_bridge::Rect {
+                x: 0.0,
+                y: 0.0,
+                w: layout.width,
+                h: view.height_pt(),
+            }
+        } else {
+            let Some(r) = layout.box_of(env) else { return };
+            r
+        };
+        let pad = caret::OUTLINE_PAD_PT * zoom;
+        let rect = graphene::Rect::new(
+            (x0 + r.x * zoom - pad) as f32,
+            (top + r.y * zoom - scroll - pad) as f32,
+            (r.w * zoom + 2.0 * pad) as f32,
+            (r.h * zoom + 2.0 * pad) as f32,
+        );
+        let blue = |a: f32| gdk::RGBA::new(0.21, 0.52, 0.89, a);
+        let outline = gsk::RoundedRect::from_rect(rect, 3.0);
+        if inside {
+            snapshot.push_rounded_clip(&outline);
+            snapshot.append_color(&blue(0.04), &rect);
+            snapshot.pop();
+        }
+        snapshot.append_border(&outline, &[1.0; 4], &[blue(0.35); 4]);
+    }
+
     fn snapshot_highlights(&self, snapshot: &gtk::Snapshot, x0: f64, scroll: f64) {
         let zoom = self.zoom.get();
         let ed = self.editor.borrow();

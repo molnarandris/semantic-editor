@@ -20,21 +20,20 @@ impl Editor {
     }
 
     pub(super) fn neighbour(&self, back: bool) -> Option<CursorPath> {
-        let list = self.doc.positions(self.doc.block(self.caret.block)?);
+        // Positions of the top-level block, environments with their edges
+        // (just before and after, outside them).
+        let b = self.doc.top_index(self.caret.block)?;
+        let list = self.doc.positions(&self.doc.blocks[b]);
         if let Some(i) = list.iter().position(|c| *c == self.caret) {
             let next = if back { i.checked_sub(1) } else { Some(i + 1) };
             if let Some(c) = next.and_then(|j| list.get(j)) {
                 return Some(c.clone());
             }
         }
-        // The previous/next block the caret can be in, in document order
-        // (into and out of environments).
-        let leaves = self.doc.leaves();
-        let b = leaves.iter().position(|b| b.id == self.caret.block)?;
         if back {
-            Some(self.doc.end_of(leaves.get(b.checked_sub(1)?)?))
+            Some(self.doc.end_of(self.doc.blocks.get(b.checked_sub(1)?)?))
         } else {
-            Some(self.doc.start_of(leaves.get(b + 1)?))
+            Some(self.doc.start_of(self.doc.blocks.get(b + 1)?))
         }
     }
 

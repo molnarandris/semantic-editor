@@ -196,7 +196,8 @@ fn equals_space_makes_headings() {
 }
 
 /// `#lemma` + space makes an environment; typing, Enter, arrows, Escape and
-/// Backspace work inside it and at its edges.
+/// Backspace work inside it, and at its edges (just before and after it,
+/// outside it).
 #[test]
 fn environments() {
     let mut d = Document::empty();
@@ -213,41 +214,74 @@ fn environments() {
     e.insert_text("Second.");
     assert_eq!(texts(&e), ["Before", "#lemma[First.|Second.]"]);
     e.doc().check_invariants().unwrap();
+    let env = e.doc().blocks[1].id;
+    let (before, after) = (cursor(env, vec![], 0), cursor(env, vec![], 1));
+    let body = |e: &Editor| e.doc().blocks[1].kind.body().unwrap().clone();
 
-    // ← from the start of the body leaves to the paragraph before; → back in.
-    e.set_caret(e.doc().start_of(&e.doc().blocks[1]));
+    // ← from the start of the body: just before it, then the paragraph
+    // before; → back the same way.
+    e.set_caret(e.doc().start_of(&body(&e)[0]));
+    assert!(e.move_left());
+    assert_eq!(e.caret(), &before);
     assert!(e.move_left());
     assert_eq!(e.caret(), &e.doc().end_of(&e.doc().blocks[0]));
     assert!(e.move_right());
-    assert_eq!(e.caret(), &e.doc().start_of(&e.doc().blocks[1]));
+    assert_eq!(e.caret(), &before);
+    assert!(e.move_right());
+    assert_eq!(e.caret(), &e.doc().start_of(&body(&e)[0]));
 
-    // Enter on an empty last paragraph moves it out, after the environment.
-    e.set_caret(e.doc().end_of(&e.doc().blocks[1]));
-    e.enter();
-    assert_eq!(texts(&e), ["Before", "#lemma[First.|Second.|]"]);
-    e.enter();
-    assert_eq!(texts(&e), ["Before", "#lemma[First.|Second.]", ""]);
+    // → at the end of the body: just after it.
+    e.set_caret(e.doc().end_of(&body(&e)[1]));
+    assert!(e.move_right());
+    assert_eq!(e.caret(), &after);
+
+    // Escape in the body: just after it, no new paragraph.
+    e.set_caret(e.doc().start_of(&body(&e)[0]));
+    assert!(e.escape());
+    assert_eq!(e.caret(), &after);
+    assert_eq!(texts(&e), ["Before", "#lemma[First.|Second.]"]);
+
+    // Typing just after it starts a paragraph after it.
     e.insert_text("After");
     assert_eq!(texts(&e), ["Before", "#lemma[First.|Second.]", "After"]);
 
-    // Backspace at the start of the paragraph after it: caret to its end.
+    // Enter on an empty last paragraph of the body moves it out.
+    e.set_caret(e.doc().end_of(&body(&e)[1]));
+    e.enter();
+    assert_eq!(texts(&e), ["Before", "#lemma[First.|Second.|]", "After"]);
+    e.enter();
+    assert_eq!(texts(&e), ["Before", "#lemma[First.|Second.]", "", "After"]);
+    e.backspace();
+    assert_eq!(texts(&e), ["Before", "#lemma[First.|Second.]", "After"]);
+    assert_eq!(e.caret(), &after);
+
+    // Typing just before it starts a paragraph before it.
+    e.set_caret(before.clone());
+    e.insert_text("x");
+    assert_eq!(
+        texts(&e),
+        ["Before", "x", "#lemma[First.|Second.]", "After"]
+    );
+    e.undo();
+    e.undo();
+    assert_eq!(texts(&e), ["Before", "#lemma[First.|Second.]", "After"]);
+
+    // Backspace at the start of the paragraph after it: just after it; the
+    // next press selects it, the one after deletes it.
     e.set_caret(e.doc().start_of(&e.doc().blocks[2]));
     e.backspace();
-    assert_eq!(e.caret(), &e.doc().end_of(&e.doc().blocks[1]));
-
-    // Escape in the body: to the paragraph after the environment.
-    assert!(e.escape());
-    assert_eq!(e.caret(), &e.doc().start_of(&e.doc().blocks[2]));
-
-    // Backspace at the start of the body selects it, then deletes it.
-    e.set_caret(e.doc().start_of(&e.doc().blocks[1]));
+    assert_eq!(e.caret(), &after);
     e.backspace();
-    let env = e.doc().blocks[1].id;
     assert_eq!(e.selected(), Some(&Selected::Block { block: env }));
     e.backspace();
     assert_eq!(texts(&e), ["Before", "After"]);
     e.undo();
-    assert_eq!(texts(&e), ["Before", "#lemma[First.|Second.]", "After"]);
+
+    // Backspace at the start of the body selects it too.
+    e.set_caret(e.doc().start_of(&body(&e)[0]));
+    e.backspace();
+    assert_eq!(e.selected(), Some(&Selected::Block { block: env }));
+    e.escape();
 
     // An empty environment goes with one Backspace.
     e.set_caret(e.doc().end_of(&e.doc().blocks[2]));

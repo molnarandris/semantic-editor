@@ -537,8 +537,11 @@ impl Editor {
             (None, Some(p)) if p.nested() => "Tab → next slot · Esc → leave structure",
             (None, Some(_)) => "/ fraction · ^ _ scripts · Esc or $ → leave formula",
             (None, None) if self.typing_env_name() => "space → environment (e.g. #lemma, #proof)",
+            (None, None) if self.edge().is_some() => {
+                "outside the environment: typing or Enter → new paragraph · Backspace → select it"
+            }
             (None, None) if self.in_env() => {
-                "Esc → leave environment · Enter on an empty last paragraph → leave"
+                "Esc → just after the environment · Enter on an empty last paragraph → leave"
             }
             (None, None) => {
                 "$ → formula · = and space at the start → section · #name and space → environment"
@@ -551,6 +554,16 @@ impl Editor {
         self.doc
             .place(self.caret.block)
             .is_some_and(|p| p.parent.is_some())
+    }
+
+    /// The environment to outline: the one the caret is just before/after
+    /// (`false`), else the innermost one it is in (`true`).
+    pub fn env_focus(&self) -> Option<(NodeId, bool)> {
+        if self.edge().is_some() {
+            return Some((self.caret.block, false));
+        }
+        let env = self.doc.place(self.caret.block)?.parent?;
+        Some((env, true))
     }
 
     /// Whether the caret's paragraph is `#name` so far, with the caret at

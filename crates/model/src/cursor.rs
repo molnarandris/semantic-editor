@@ -7,6 +7,8 @@
 //!   continues as a row path.
 //! - Display math: the path is a row path from the block's row.
 //! - Raw Typst: empty path, `offset` counts chars.
+//! - Environment: empty path, `offset` 0 is just before it, 1 just after it
+//!   (outside it; inside, the caret is in one of its blocks).
 //! - Row path: pairs `Index(k), <child>` descending into node `k`'s child row
 //!   (`Num`, `Den`, `Base`, `Sup`, `Sub`); `offset` is a position `0..=len`
 //!   between the row's nodes.
@@ -60,6 +62,10 @@ pub enum Target<'a> {
     Row {
         row: &'a MathRow,
     },
+    /// Just before (offset 0) or after (offset 1) an environment.
+    Edge {
+        block: &'a BlockNode,
+    },
 }
 
 impl Target<'_> {
@@ -68,6 +74,7 @@ impl Target<'_> {
         match self {
             Target::Text { text, .. } | Target::Raw { text, .. } => text.chars().count(),
             Target::Row { row } => row.nodes.len(),
+            Target::Edge { .. } => 1,
         }
     }
 
@@ -104,6 +111,7 @@ impl Document {
             Block::RawTypst(text) | Block::Diagram(text) if path.is_empty() => {
                 Ok(Target::Raw { block, text })
             }
+            Block::Env { .. } if path.is_empty() => Ok(Target::Edge { block }),
             Block::RawTypst(_) | Block::Diagram(_) | Block::Env { .. } => Err(0),
         }
     }
@@ -117,12 +125,9 @@ impl Document {
             .is_some_and(|t| cursor.offset <= t.len())
     }
 
-    /// The first caret position in `block` (in an environment: of its first
-    /// block).
+    /// The first caret position of `block` (of an environment: just before
+    /// it).
     pub fn start_of(&self, block: &BlockNode) -> CursorPath {
-        if let Some(first) = block.kind.body().and_then(|b| b.first()) {
-            return self.start_of(first);
-        }
         let path = if block.kind.inlines().is_some() {
             vec![Step::Index(0)]
         } else {
@@ -135,11 +140,9 @@ impl Document {
         }
     }
 
-    /// The last caret position in `block`.
+    /// The last caret position of `block` (of an environment: just after
+    /// it).
     pub fn end_of(&self, block: &BlockNode) -> CursorPath {
-        if let Some(last) = block.kind.body().and_then(|b| b.last()) {
-            return self.end_of(last);
-        }
         let path = match block.kind.inlines() {
             Some(inlines) => vec![Step::Index(inlines.len().saturating_sub(1))],
             None => vec![],
@@ -167,9 +170,6 @@ impl Document {
         let Some(block) = self.block(cursor.block) else {
             return self.doc_start();
         };
-        if block.kind.body().is_some() {
-            return self.start_of(block);
-        }
         match self.walk(block, &cursor.path) {
             Ok(t) => CursorPath {
                 offset: cursor.offset.min(t.len()),
@@ -226,9 +226,11 @@ impl Document {
                 out.push(at(vec![], s.chars().count()));
             }
             Block::Env { body, .. } => {
+                out.push(at(vec![], 0));
                 for child in body {
                     out.extend(self.positions(child));
                 }
+                out.push(at(vec![], 1));
             }
         }
         out

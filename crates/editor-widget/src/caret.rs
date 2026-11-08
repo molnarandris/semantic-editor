@@ -12,6 +12,11 @@ use typst_bridge::{BlockLayout, Rect};
 
 /// Advance used for chars that produced no glyph, in pt (≈ a space at 11 pt).
 const SPACE_PT: f64 = 3.7;
+/// How far an environment's outline lies outside its box, in pt.
+pub(crate) const OUTLINE_PAD_PT: f64 = 3.0;
+/// The caret just before/after an environment sits this far outside its box
+/// (outside the outline), in pt.
+const EDGE_GAP_PT: f64 = OUTLINE_PAD_PT + 1.5;
 /// Caret extent for a block without content, in pt.
 const EMPTY_TOP_PT: f64 = 0.0;
 const EMPTY_BOTTOM_PT: f64 = 11.0;
@@ -29,6 +34,8 @@ pub struct Stop {
     pub line: f64,
     /// 0 in text, 1 in a formula's top row, +1 per structure level.
     pub depth: usize,
+    /// Just before/after an environment (outside it): Home/End stay inside.
+    pub edge: bool,
 }
 
 /// All caret positions of a block, in document order.
@@ -60,6 +67,7 @@ pub fn stops(block: &BlockNode, layout: Option<&BlockLayout>) -> Vec<Stop> {
             bottom: EMPTY_BOTTOM_PT,
             line: baseline,
             depth: 0,
+            edge: false,
         });
     }
     out
@@ -85,6 +93,7 @@ fn stop(
         bottom,
         line,
         depth: 0,
+        edge: false,
     }
 }
 
@@ -162,7 +171,34 @@ fn block_stops(block: &BlockNode, l: &BlockLayout, top: bool) -> Vec<Stop> {
                 stop(block, vec![], n, r.right(), r.y, r.bottom(), line),
             ]
         }
-        Block::Env { body, .. } => body.iter().flat_map(|b| block_stops(b, l, false)).collect(),
+        Block::Env { body, .. } => {
+            let inner: Vec<Stop> = body.iter().flat_map(|b| block_stops(b, l, false)).collect();
+            let r = match (top, l.box_of(block.id)) {
+                (true, _) => Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: l.width,
+                    h: l.height,
+                },
+                (false, Some(r)) => r,
+                (false, None) => return inner,
+            };
+            let (Some(first), Some(last)) = (inner.first(), inner.last()) else {
+                return inner;
+            };
+            // Just before and after it, outside its outline: on its first and
+            // last line.
+            let edge = |offset, x, s: &Stop| Stop {
+                edge: true,
+                ..stop(block, vec![], offset, x, s.top, s.bottom, s.line)
+            };
+            let before = edge(0, r.x - EDGE_GAP_PT, first);
+            let after = edge(1, r.right() + EDGE_GAP_PT, last);
+            let mut out = vec![before];
+            out.extend(inner);
+            out.push(after);
+            out
+        }
     }
 }
 
@@ -364,7 +400,13 @@ pub fn nearest_in_line<'a>(stops: &'a [Stop], line: &[usize], x: f64) -> Option<
 
 /// The first or last stop of a line.
 pub fn line_edge<'a>(stops: &'a [Stop], line: &[usize], end: bool) -> Option<&'a Stop> {
-    let stops = line.iter().map(|&i| &stops[i]);
+    // Home/End stay inside an environment: its edges only on a line of
+    // nothing else.
+    let inside = line.iter().any(|&i| !stops[i].edge);
+    let stops = line
+        .iter()
+        .map(|&i| &stops[i])
+        .filter(|s| !(inside && s.edge));
     if end {
         stops.max_by(|a, b| a.x.total_cmp(&b.x))
     } else {
@@ -471,16 +513,29 @@ mod tests {
 
         let mut d = Document::empty();
         let fresh = d.env("lemma", vec![]);
-        let s = stops(&fresh, Some(&layout(&fresh)));
-        assert_eq!(s.len(), 1);
+        let fresh_layout = layout(&fresh);
+        let s = stops(&fresh, Some(&fresh_layout));
+        // Just before it, inside it, just after it.
+        let offsets: Vec<_> = s
+            .iter()
+            .map(|s| (s.cursor.block, s.cursor.offset))
+            .collect();
         let body = fresh.kind.body().unwrap()[0].id;
-        assert_eq!(s[0].cursor.block, body);
+        assert_eq!(offsets, [(fresh.id, 0), (body, 0), (fresh.id, 1)]);
+        assert!(
+            s[0].x < 0.0 && s[2].x > fresh_layout.width,
+            "outside its box"
+        );
+        // Home/End on that line stay inside.
+        let line: Vec<usize> = (0..s.len()).collect();
+        assert_eq!(line_edge(&s, &line, true).unwrap().cursor.block, body);
+        assert_eq!(line_edge(&s, &line, false).unwrap().cursor.block, body);
         let one = d.text("A");
         let p = d.paragraph(vec![one]);
         let typed = d.env("lemma", vec![p]);
-        let typed_x = stops(&typed, Some(&layout(&typed)))[0].x;
-        assert!(s[0].x > 30.0, "after the label: {}", s[0].x);
-        assert!((s[0].x - typed_x).abs() < 1.0, "{} vs {typed_x}", s[0].x);
+        let typed_x = stops(&typed, Some(&layout(&typed)))[1].x;
+        assert!(s[1].x > 30.0, "after the label: {}", s[1].x);
+        assert!((s[1].x - typed_x).abs() < 1.0, "{} vs {typed_x}", s[1].x);
 
         let (first, second) = (d.text("First"), d.text("Second one"));
         let (p1, p2) = (d.paragraph(vec![first]), d.paragraph(vec![second]));

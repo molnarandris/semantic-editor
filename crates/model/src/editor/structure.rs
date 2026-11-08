@@ -40,16 +40,29 @@ impl Editor {
     }
 
     /// Insert an empty paragraph before the block at `place`; the caret
-    /// stays.
-    fn paragraph_before(&mut self, place: Place) -> bool {
+    /// stays, or with `enter` goes into it.
+    pub(super) fn paragraph_before(&mut self, place: Place, enter: bool) -> bool {
         let block = self.doc.paragraph(vec![]);
+        let after = if enter {
+            self.doc.start_of(&block)
+        } else {
+            self.caret.clone()
+        };
         let op = Op::Insert {
             seq: place.seq(),
             index: place.index,
             items: Items::Blocks(vec![block]),
         };
-        let after = self.caret.clone();
         self.commit(vec![op], after, Last::Other)
+    }
+
+    /// The caret's place and offset when it is just before (0) or after (1)
+    /// an environment.
+    pub(super) fn edge(&self) -> Option<(Place, usize)> {
+        match self.doc.resolve(&self.caret)? {
+            Target::Edge { block } => Some((self.doc.place(block.id)?, self.caret.offset)),
+            _ => None,
+        }
     }
 
     /// Escape: drop the selection, else leave the innermost structure (caret
@@ -65,12 +78,13 @@ impl Editor {
             return self.leave_block(place);
         }
         let Some(p) = self.row_pos() else {
-            // In the text of an environment: leave it.
-            let env = self.doc.place(self.caret.block).and_then(|p| p.parent);
-            return match env.and_then(|env| self.doc.place(env)) {
-                Some(place) => self.leave_block(place),
-                None => false,
+            // In the text of an environment, or at the edge of a nested one:
+            // to just after the (enclosing) environment, outside it.
+            let env = match self.edge() {
+                Some((place, _)) => place.parent,
+                None => self.doc.place(self.caret.block).and_then(|p| p.parent),
             };
+            return env.is_some_and(|env| self.jump(cursor(env, vec![], 1)));
         };
         self.groups.remove(&p.row);
         match p.parent() {
@@ -100,10 +114,11 @@ impl Editor {
             let Some(place) = self.doc.place(self.caret.block) else {
                 return false;
             };
-            // At the start of a raw/diagram block: a paragraph before it, as
-            // Enter at the start of a line; the caret stays on the block.
-            if self.source_block().is_some() && self.caret.offset == 0 {
-                return self.paragraph_before(place);
+            // At the start of a raw/diagram block or just before an
+            // environment: a paragraph before it, as Enter at the start of a
+            // line; the caret stays.
+            if (self.source_block().is_some() || self.edge().is_some()) && self.caret.offset == 0 {
+                return self.paragraph_before(place, false);
             }
             return self.paragraph_after(place);
         };

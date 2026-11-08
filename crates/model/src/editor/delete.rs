@@ -60,6 +60,11 @@ impl Editor {
         }
     }
 
+    /// The environment the caret is just before or after.
+    fn edge_env(&self) -> Option<NodeId> {
+        self.edge().map(|_| self.caret.block)
+    }
+
     /// The caret's block, if it is a raw Typst or diagram block.
     pub(super) fn source_block(&self) -> Option<NodeId> {
         match self.doc.resolve(&self.caret)? {
@@ -78,7 +83,7 @@ impl Editor {
         if let Some(p) = self.row_pos() {
             return self.math_backspace(p);
         }
-        if let Some(block) = self.source_block() {
+        if let Some(block) = self.source_block().or_else(|| self.edge_env()) {
             return self.select(Selected::Block { block });
         }
         let Some(pos) = self.text_pos() else {
@@ -305,7 +310,7 @@ impl Editor {
         if self.selected.is_some() {
             return self.delete_selection();
         }
-        if let Some(block) = self.source_block() {
+        if let Some(block) = self.source_block().or_else(|| self.edge_env()) {
             return self.select(Selected::Block { block });
         }
         if let Some(p) = self.row_pos() {

@@ -48,6 +48,15 @@ impl Editor {
             return self.math_char(c);
         }
         self.selected = None;
+        // Just before/after an environment: typing starts a paragraph there.
+        if let Some((place, offset)) = self.edge() {
+            let started = if offset == 0 {
+                self.paragraph_before(place, true)
+            } else {
+                self.paragraph_after(place)
+            };
+            return started && self.input_char(c);
+        }
         if c == '$' {
             return self.insert_formula();
         }

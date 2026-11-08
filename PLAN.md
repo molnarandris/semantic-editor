@@ -409,6 +409,15 @@ Done before M11–M13, at the user's request (2026-11-08). Implementation notes:
   caret where typed text will appear (after "Lemma 1." in a fresh environment, after a
   heading's number). A zero-width space does not work: Typst drops it when shaping.
 - Sample: the theorem and a proof are environments, defined by the code block before.
+- Follow-up (user request, TeXmacs-like): an environment has two caret positions of its
+  own, just before (offset 0) and just after (offset 1) it, outside it (`Target::Edge`,
+  empty path). ←/→ pass through them (`positions` of a top-level block include them;
+  `start_of`/`end_of` of an environment are its edges). Esc in its text goes to just
+  after it (no new paragraph; it used to create one). At an edge, typing or Enter starts
+  a paragraph there, Backspace/Delete select the environment. The widget draws a faint
+  rounded outline around the environment the caret is next to, tinted when the caret is
+  inside (`Editor::env_focus`, `snapshot_env_outline`); edge stops sit just outside the
+  outline on the first/last line, and Home/End skip them (`Stop::edge`).
 - Not yet (M14b): titles (`#theorem[Title][…]`), lists, environments by Typst function
   detection (any `#identifier` is accepted; an unknown one shows a compile error).
 
