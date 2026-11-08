@@ -249,7 +249,8 @@ Goal: open the user's existing Typst documents and edit them.
 - Acceptance: importing then exporting gives a document that compiles to the same
   PDF (compare page images) for the user's own files; unknown parts round-trip
   byte for byte.
-- Open: one-way import (save as `.sem`) or later also saving back to `.typ`.
+- Decided 2026-11-08: one-way import (open `.typ`, save as `.sem`, export `.typ` as
+  before). Saving back into the original `.typ` is not planned for now.
 
 ### M10 — Labels and references (items 2, 3, 6)
 
