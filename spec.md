@@ -249,6 +249,15 @@ mid-document `#set heading(numbering: …)` (appendix), primes (129), text in ma
 lists (90 items), text markup (~100), multi-line aligned equations (30), `cases`,
 figures, footnotes, an embedded bibliography. Not used: images, tables, local files.
 
+Principle (discussed 2026-11-08): **stay close to Typst in what a document means,
+diverge freely in how it is typed and shown.** Every structure the editor has maps to
+plain Typst and back without loss; what the editor cannot (yet) represent stays raw
+Typst (code blocks, raw blocks, generic calls with source arguments), never dropped or
+approximated. Conveniences (typing `sum` then `_`, slots that grow as you type, outlines,
+hidden code) live only in the editor. Formatting with no structure of its own is not
+invented: it is a Typst call or rule. This keeps `.typ` import/export one-to-one and
+lets Typst do all layout.
+
 A shared idea: **one generic call node** (function name, editable content arguments,
 other arguments kept as source). Typst draws it, so the editor never needs to know what
 `cal`, `overline`, `ket`, `lemma` or `cl` look like; the caret moves through the content
