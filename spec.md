@@ -283,10 +283,12 @@ functions and packages.
 
 - The generic call node in math: `cal(A)`, `overline(x)`, `hat`, `bold`, `tilde`, `bb`,
   `abs`, `norm`, `sqrt`, `root`, `upright`, `op`, `underbrace(a, b)`, `cases(…)` (comma
-  separated arguments), header macros (`ket(psi)`). Typing: name then `(` creates the
-  call with an empty slot (`sqrt(`); the editor asks Typst whether the name is a
-  function (call) or a symbol (`phi(x)` stays symbol + parenthesis). No backslash
-  commands (decided 2026-11-08).
+  separated arguments), header macros (`ket(psi)`). Typing: the name alone, resolved
+  when the word ends (space, a non-letter, caret moves), as symbol names are today:
+  `sqrt` + space gives √ with an empty slot and the caret inside; `sqrt(` works too
+  (the parenthesis is absorbed). Typst tells whether the name is a function or a symbol
+  (`phi` stays a symbol) and how many content arguments it takes (`root` gets two
+  slots). No backslash commands (decided 2026-11-08).
 - Atoms: primes (`f'`), text in math (`"if"`), alignment point `&` and line break `\`
   (multi-line aligned equations; Typst lays them out, the caret follows spans).
 - `phi(x)` where `phi` is a symbol is not a call (already representable).
