@@ -281,7 +281,10 @@ line((0, 0.25), (0, -0.25))",
 }
 #show figure.where(kind: \"theorem\"): it => block(width: 100%, above: 1em, below: 1em,
   align(left)[*Theorem #it.counter.display(it.numbering)#if it.caption != none [ (#it.caption.body)].* #emph(it.body)])
-#let proof(body) = block(width: 100%)[_Proof._ #body #h(1fr) $square$]",
+#let proof(..args) = {
+  let (title, body) = if args.pos().len() > 1 { args.pos() } else { (none, ..args.pos()) }
+  block(width: 100%)[_Proof#if title != none [ (#title)]._ #body #h(1fr) $square$]
+}",
     ));
 
     let t1 = b.t("If two MPS with injective tensors ");

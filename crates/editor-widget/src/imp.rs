@@ -441,7 +441,12 @@ impl SemEditor {
             if let Some(obj) = weak.upgrade() {
                 obj.grab_focus();
                 let imp = obj.imp();
-                if let Some(cursor) = imp.locate(x, y) {
+                if let Some(env) = imp.heading_at(x, y) {
+                    // An environment's heading: edit (or add) its title.
+                    imp.editor.borrow_mut().edit_title(env);
+                    imp.goal_x.set(None);
+                    imp.after_command(true);
+                } else if let Some(cursor) = imp.locate(x, y) {
                     imp.editor.borrow_mut().set_caret(cursor);
                     imp.goal_x.set(None);
                     imp.after_command(false);
@@ -870,7 +875,9 @@ impl SemEditor {
     }
 
     /// The caret position for a click at widget coordinates.
-    fn locate(&self, x: f64, y: f64) -> Option<CursorPath> {
+    /// The block under widget point `(x, y)`, its stops and the point in
+    /// its coordinates (pt).
+    fn block_at(&self, x: f64, y: f64) -> Option<(Rc<[Stop]>, f64, f64)> {
         let zoom = self.zoom.get();
         let cy = y + self.scroll();
         let tops = self.block_tops();
@@ -879,8 +886,17 @@ impl SemEditor {
         let top = *tops.get(index)?;
         let bx = (x - self.page_x(self.obj().width() as f64)) / zoom;
         let by = (cy - top) / zoom;
-        let stops = self.block_stops(index);
+        Some((self.block_stops(index), bx, by))
+    }
+
+    fn locate(&self, x: f64, y: f64) -> Option<CursorPath> {
+        let (stops, bx, by) = self.block_at(x, y)?;
         caret::hit(&stops, bx, by).map(|s| s.cursor.clone())
+    }
+
+    fn heading_at(&self, x: f64, y: f64) -> Option<NodeId> {
+        let (stops, bx, by) = self.block_at(x, y)?;
+        caret::heading_at(&stops, bx, by)
     }
 
     /// Up/down to the neighbouring line (across blocks), line start/end.

@@ -645,7 +645,7 @@ impl Editor {
                 "outside the environment: typing or Enter → new paragraph · Backspace → select it"
             }
             (None, None) if self.in_env() => {
-                "Esc → just after the environment · Enter on an empty last paragraph → leave"
+                "Esc → just after the environment · click its heading → title · Enter on an empty last paragraph → leave"
             }
             (None, None) => {
                 "$ → formula · = and space at the start → section · #name and space → environment"

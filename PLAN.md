@@ -450,5 +450,12 @@ Done before M11–M13, at the user's request (2026-11-08). Implementation notes:
     between the parentheses) and goes, as its own undo step, when the caret leaves it
     (`Editor::drop_left_title`, from `jump` and `set_caret`). `Editor::edit_title`
     adds one (for the click on the heading).
+  - A click on an environment's heading ("Theorem 2.1.", which has no caret position)
+    edits its title, adding an empty one if needed: the heading is the stretch of the
+    first inside line between the outline and the first position inside
+    (`caret::heading_at`). The sample's `proof` takes a title too, so clicking "Proof."
+    does not give a compile error. Until function detection (later in M14b), clicking
+    the heading of a function without a title parameter shows a compile error until
+    the empty title goes.
 
 Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing.

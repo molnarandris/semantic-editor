@@ -446,6 +446,18 @@ pub fn hit(stops: &[Stop], x: f64, y: f64) -> Option<&Stop> {
         .min_by(|a, b| dist(a).total_cmp(&dist(b)))
 }
 
+/// The environment whose heading ("Theorem 2.1.", drawn by its function,
+/// with no caret position of its own) is at `(x, y)`: on the line of its
+/// first position inside, between its outline and that position.
+pub fn heading_at(stops: &[Stop], x: f64, y: f64) -> Option<model::NodeId> {
+    stops.windows(2).find_map(|w| {
+        let (before, first) = (&w[0], &w[1]);
+        let on_line = first.top - LINE_TOLERANCE_PT <= y && y <= first.bottom + LINE_TOLERANCE_PT;
+        let heading = before.edge && before.cursor.offset == 0 && x > before.x && x < first.x - 1.0;
+        (heading && on_line).then_some(before.cursor.block)
+    })
+}
+
 /// The stop for `path` nearest to `x` (↑/↓ into a given row).
 pub fn nearest_in_row<'a>(stops: &'a [Stop], path: &[Step], x: f64) -> Option<&'a Stop> {
     stops
@@ -537,6 +549,11 @@ mod tests {
         let typed_x = stops(&typed, Some(&layout(&typed)))[1].x;
         assert!(s[1].x > 30.0, "after the label: {}", s[1].x);
         assert!((s[1].x - typed_x).abs() < 1.0, "{} vs {typed_x}", s[1].x);
+        // A click on "Lemma 1." is on its heading; after it, not.
+        let mid = (s[1].top + s[1].bottom) / 2.0;
+        assert_eq!(heading_at(&s, 10.0, mid), Some(fresh.id));
+        assert_eq!(heading_at(&s, s[1].x + 5.0, mid), None);
+        assert_eq!(heading_at(&s, 10.0, s[1].bottom + 20.0), None);
 
         let (first, second) = (d.text("First"), d.text("Second one"));
         let (p1, p2) = (d.paragraph(vec![first]), d.paragraph(vec![second]));
