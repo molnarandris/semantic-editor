@@ -70,9 +70,29 @@ impl Editor {
             && chars[..level].iter().all(|&c| c == '=')
             && matches!(pos.block.kind, Block::Paragraph(_))
         {
-            let b = pos.block_index;
+            let place = pos.place;
             let after = cursor(pos.block.id, vec![Step::Index(0)], 0);
-            return self.retype(b, Some(level as u8), level, after);
+            return self.retype(place, Some(level as u8), level, after);
+        }
+        // `#name ` as the whole paragraph makes it an environment `#name[…]`
+        // with the caret in its body.
+        if s == " "
+            && pos.inlines.len() == 1
+            && pos.offset == pos.len
+            && matches!(pos.block.kind, Block::Paragraph(_))
+            && let Some(name) = env_name(&chars)
+        {
+            let place = pos.place;
+            let body = self.doc.paragraph(vec![]);
+            let after = self.doc.start_of(&body);
+            let env = self.doc.env(&name, vec![body]);
+            let op = Op::Replace {
+                seq: place.seq(),
+                index: place.index,
+                count: 1,
+                items: Items::Blocks(vec![env]),
+            };
+            return self.commit(vec![op], after, Last::Other);
         }
         let mut space_before = pos.offset == 0 && pos.inline == 0
             || pos.offset > 0 && chars[pos.offset - 1].is_whitespace();
@@ -378,11 +398,13 @@ impl Editor {
     }
 
     pub(super) fn make_display(&mut self, p: &RowPos) -> bool {
-        let b = p.block_index;
+        let place = p.place;
         let Step::Index(i) = p.path[0] else {
             return false;
         };
-        let block = &self.doc.blocks[b];
+        let Some(block) = self.doc.at(place) else {
+            return false;
+        };
         let block_id = block.id;
         let inlines = block
             .kind
@@ -411,13 +433,27 @@ impl Editor {
             blocks.push(self.doc.paragraph(tail));
         }
         ops.push(Op::Insert {
-            seq: Seq::Blocks,
-            index: b + 1,
+            seq: place.seq(),
+            index: place.index + 1,
             items: Items::Blocks(blocks),
         });
         if before_empty {
-            ops.push(delete_block(b));
+            ops.push(delete_block(place));
         }
         self.commit(ops, after, Last::Other)
     }
+}
+
+/// `name` if `chars` is `#name` with a Typst identifier (`lemma`,
+/// `todo-block`, `thm_2`).
+pub(super) fn env_name(chars: &[char]) -> Option<String> {
+    let (&'#', name) = chars.split_first()? else {
+        return None;
+    };
+    let first = *name.first()?;
+    let ok = (first.is_alphabetic() || first == '_')
+        && name
+            .iter()
+            .all(|&c| c.is_alphanumeric() || c == '_' || c == '-');
+    ok.then(|| name.iter().collect())
 }

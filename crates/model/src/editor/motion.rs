@@ -20,28 +20,31 @@ impl Editor {
     }
 
     pub(super) fn neighbour(&self, back: bool) -> Option<CursorPath> {
-        let b = self.doc.block_index(self.caret.block)?;
-        let list = self.doc.positions(&self.doc.blocks[b]);
+        let list = self.doc.positions(self.doc.block(self.caret.block)?);
         if let Some(i) = list.iter().position(|c| *c == self.caret) {
             let next = if back { i.checked_sub(1) } else { Some(i + 1) };
             if let Some(c) = next.and_then(|j| list.get(j)) {
                 return Some(c.clone());
             }
         }
+        // The previous/next block the caret can be in, in document order
+        // (into and out of environments).
+        let leaves = self.doc.leaves();
+        let b = leaves.iter().position(|b| b.id == self.caret.block)?;
         if back {
-            (b > 0).then(|| self.doc.block_end(b - 1))
+            Some(self.doc.end_of(leaves.get(b.checked_sub(1)?)?))
         } else {
-            (b + 1 < self.doc.blocks.len()).then(|| self.doc.block_start(b + 1))
+            Some(self.doc.start_of(leaves.get(b + 1)?))
         }
     }
 
     /// Tab / Shift+Tab: the next (previous) empty slot of the block.
     pub fn next_slot(&mut self, back: bool) -> bool {
         self.finish_word();
-        let Some(b) = self.doc.block_index(self.caret.block) else {
+        let Some(block) = self.doc.block(self.caret.block) else {
             return false;
         };
-        let list = self.doc.positions(&self.doc.blocks[b]);
+        let list = self.doc.positions(block);
         let Some(i) = list.iter().position(|c| *c == self.caret) else {
             return false;
         };

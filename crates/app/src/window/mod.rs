@@ -167,7 +167,11 @@ impl Window {
 
     fn add_actions(self: &Rc<Self>) {
         type Handler = fn(Rc<Window>);
-        let actions: [(&str, Handler); 12] = [
+        let actions: [(&str, Handler); 13] = [
+            ("insert-env", |w| {
+                w.editor.start_env();
+                w.editor.grab_focus();
+            }),
             ("edit-header", |w| {
                 w.open_block_editor(PreviewTarget::Header)
             }),
@@ -300,6 +304,7 @@ fn main_menu() -> gio::Menu {
     menu.append_section(None, &zoom);
     let insert = gio::Menu::new();
     insert.append(Some("Document _Header…"), Some("win.edit-header"));
+    insert.append(Some("Insert _Environment"), Some("win.insert-env"));
     insert.append(Some("Insert _Diagram"), Some("win.insert-diagram"));
     insert.append(Some("Insert _Raw Typst"), Some("win.insert-raw"));
     menu.append_section(None, &insert);

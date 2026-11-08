@@ -382,4 +382,34 @@ Implementation notes (done):
   paragraph after it, at its start one before it (caret stays). Ctrl+Enter or a double
   click opens the dialog (`Command::EditSource`); the status bar hint says so.
 
+## M14a — Environments (theorems, proofs, …) edited in place
+
+Done before M11–M13, at the user's request (2026-11-08). Implementation notes:
+
+- Model: `Block::Env { name, body: Vec<BlockNode> }`, a call `#name[…]` of a function
+  from the header or a code block; the body is never empty. The cursor still names a
+  leaf block by id (`doc.block(id)` searches at any depth). Block-level editing goes
+  through `Place { parent, index }` (`doc.place`, `doc.at`, `doc.sibling`,
+  `Place::seq()` = `Seq::Blocks` or the new `Seq::Body(env)`), replacing indexes into
+  `doc.blocks`. `start_of`/`end_of(block)` look into environments; `doc.leaves()` is the
+  document order for ←/→ across blocks; `top_index(id)` maps to the widget's views.
+  Ids, normalization and invariants recurse. `.sem` format version 3.
+- Editing: `#name` + space as a whole paragraph makes it an environment (like `= ` for
+  headings; "Insert Environment" in the menu starts one by typing `#`). Inside, Enter
+  splits paragraphs as usual; Enter on an empty last paragraph moves it out after the
+  environment; Escape in its text leaves it; Backspace at the start of its body selects
+  the environment (deleted by the next press), or removes it at once if still empty.
+  Status bar hints for all of this.
+- Rendering: an environment is one top-level view, compiled as one unit, so the
+  function's label, number and formatting come out as in the export. Its caret stops
+  are its children's, from the same layout (`caret::block_stops`). Counter-sensitive
+  (figure kinds are carried by the M10 chain).
+- An empty paragraph or heading renders, in the editor's own renders only, a
+  transparent `x` at its only caret position: it takes its line, and its glyph puts the
+  caret where typed text will appear (after "Lemma 1." in a fresh environment, after a
+  heading's number). A zero-width space does not work: Typst drops it when shaping.
+- Sample: the theorem and a proof are environments, defined by the code block before.
+- Not yet (M14b): titles (`#theorem[Title][…]`), lists, environments by Typst function
+  detection (any `#identifier` is accepted; an unknown one shows a compile error).
+
 Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing.

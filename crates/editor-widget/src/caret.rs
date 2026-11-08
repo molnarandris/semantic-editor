@@ -33,26 +33,13 @@ pub struct Stop {
 
 /// All caret positions of a block, in document order.
 pub fn stops(block: &BlockNode, layout: Option<&BlockLayout>) -> Vec<Stop> {
-    let mut out = match (layout, &block.kind) {
-        (None, _) => vec![],
-        (Some(l), Block::Paragraph(inlines) | Block::Heading { inlines, .. }) => {
-            inline_stops(block, inlines, l)
-        }
-        (Some(l), Block::DisplayMath(row)) => {
-            let mut v = vec![];
-            row_stops(block, vec![], row, l, l.baseline, 1, &mut v);
-            v
-        }
-        (Some(l), Block::RawTypst(text) | Block::Diagram(text)) => {
-            let n = text.chars().count();
-            vec![
-                stop(block, vec![], 0, 0.0, 0.0, l.height, l.baseline),
-                stop(block, vec![], n, l.width, 0.0, l.height, l.baseline),
-            ]
-        }
-    };
+    let mut out = layout.map_or(vec![], |l| block_stops(block, l, true));
     if out.is_empty() {
         // Not rendered yet, or no text (an empty paragraph or heading).
+        let mut block = block;
+        while let Some(first) = block.kind.body().and_then(|b| b.first()) {
+            block = first;
+        }
         let start = match block.kind.inlines() {
             Some(_) => vec![Step::Index(0)],
             None => vec![],
@@ -138,6 +125,45 @@ fn row_stops(
         }
     }
     out.push(at(path, row.nodes.len(), right));
+}
+
+/// The stops of `block` in layout `l`: the whole rendered block (`top`), or
+/// a block inside an environment, whose stops come from the environment's
+/// layout.
+fn block_stops(block: &BlockNode, l: &BlockLayout, top: bool) -> Vec<Stop> {
+    match &block.kind {
+        Block::Paragraph(inlines) | Block::Heading { inlines, .. } => {
+            inline_stops(block, inlines, l)
+        }
+        Block::DisplayMath(row) => {
+            let line = match (top, l.box_of(block.id)) {
+                (false, Some(r)) => line_near(l, r),
+                _ => l.baseline,
+            };
+            let mut v = vec![];
+            row_stops(block, vec![], row, l, line, 1, &mut v);
+            v
+        }
+        Block::RawTypst(text) | Block::Diagram(text) => {
+            let n = text.chars().count();
+            let r = match (top, l.box_of(block.id)) {
+                (true, _) => Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: l.width,
+                    h: l.height,
+                },
+                (false, Some(r)) => r,
+                (false, None) => return vec![],
+            };
+            let line = if top { l.baseline } else { r.bottom() };
+            vec![
+                stop(block, vec![], 0, r.x, r.y, r.bottom(), line),
+                stop(block, vec![], n, r.right(), r.y, r.bottom(), line),
+            ]
+        }
+        Block::Env { body, .. } => body.iter().flat_map(|b| block_stops(b, l, false)).collect(),
+    }
 }
 
 fn inline_stops(block: &BlockNode, inlines: &[model::InlineNode], l: &BlockLayout) -> Vec<Stop> {
@@ -423,6 +449,55 @@ mod tests {
         let typed = stops(&full, Some(&layout(&full)))[0].x;
         assert!(s[0].x > 5.0, "after the number: {}", s[0].x);
         assert!((s[0].x - typed).abs() < 2.5, "{} vs {typed}", s[0].x);
+    }
+
+    /// Stops inside an environment come from its one render: after the
+    /// environment's label in a fresh one, and for every char of its
+    /// paragraphs, the second below the first.
+    #[test]
+    fn stops_inside_environments() {
+        let header = "#let lemma(body) = block(width: 100%)[*Lemma 1.* #emph(body)]";
+        let layout = |block: &BlockNode| {
+            let mut world = BridgeWorld::new();
+            let (snippet, map) = serialize_block(block);
+            let around = Around {
+                header: header.into(),
+                ..Around::default()
+            };
+            let (src, offset) = block_document(&around, &snippet, 300.0);
+            let doc = compile(&mut world, &src).unwrap();
+            raw_layout(&world, &doc.pages()[0], offset).resolve(&map)
+        };
+
+        let mut d = Document::empty();
+        let fresh = d.env("lemma", vec![]);
+        let s = stops(&fresh, Some(&layout(&fresh)));
+        assert_eq!(s.len(), 1);
+        let body = fresh.kind.body().unwrap()[0].id;
+        assert_eq!(s[0].cursor.block, body);
+        let one = d.text("A");
+        let p = d.paragraph(vec![one]);
+        let typed = d.env("lemma", vec![p]);
+        let typed_x = stops(&typed, Some(&layout(&typed)))[0].x;
+        assert!(s[0].x > 30.0, "after the label: {}", s[0].x);
+        assert!((s[0].x - typed_x).abs() < 1.0, "{} vs {typed_x}", s[0].x);
+
+        let (first, second) = (d.text("First"), d.text("Second one"));
+        let (p1, p2) = (d.paragraph(vec![first]), d.paragraph(vec![second]));
+        let (id1, id2) = (p1.id, p2.id);
+        let env = d.env("lemma", vec![p1, p2]);
+        let s = stops(&env, Some(&layout(&env)));
+        let of = |id| {
+            s.iter()
+                .filter(|s| s.cursor.block == id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(of(id1).len(), "First".len() + 1);
+        assert_eq!(of(id2).len(), "Second one".len() + 1);
+        assert!(
+            of(id2)[0].top > of(id1)[0].bottom - 0.1,
+            "second paragraph below"
+        );
     }
 
     /// The acceptance check of the prose milestone: clicking anywhere on a

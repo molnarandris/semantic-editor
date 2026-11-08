@@ -199,9 +199,9 @@ impl Writer {
                     w.out.push('=');
                 }
                 w.out.push(' ');
-                w.inlines(inlines, false);
+                w.text_block(inlines, false);
             }
-            Block::Paragraph(inlines) => w.inlines(inlines, true),
+            Block::Paragraph(inlines) => w.text_block(inlines, true),
             Block::DisplayMath(row) => {
                 w.out.push_str("$ ");
                 w.row(row);
@@ -220,6 +220,18 @@ impl Writer {
                 w.verbatim(block.id, src, "  ");
                 w.out.push_str("\n}))");
             }
+            Block::Env { name, body } => {
+                w.out.push('#');
+                w.out.push_str(name);
+                w.out.push_str("[\n");
+                for (i, child) in body.iter().enumerate() {
+                    if i > 0 {
+                        w.out.push_str("\n\n");
+                    }
+                    w.block(child);
+                }
+                w.out.push_str("\n]");
+            }
         });
     }
 
@@ -236,6 +248,28 @@ impl Writer {
         }
         starts.push(self.out.len());
         self.map.texts.push((id, starts));
+    }
+
+    /// The inlines of a paragraph or heading. In the editor's renders an
+    /// empty one shows a transparent `x` at its only caret position, so it
+    /// takes its line and its glyph says where typed text will appear
+    /// (after a heading's number, after "Lemma 1." in an environment).
+    fn text_block(&mut self, inlines: &[InlineNode], at_line_start: bool) {
+        match inlines {
+            [
+                InlineNode {
+                    id,
+                    kind: Inline::Text(s),
+                },
+            ] if s.is_empty() && self.style == Style::Edit => {
+                self.node(*id, |w| {
+                    w.out.push_str("#text(fill: rgb(0, 0, 0, 0))[");
+                    w.map.texts.push((*id, vec![w.out.len()]));
+                    w.out.push_str("x]");
+                });
+            }
+            _ => self.inlines(inlines, at_line_start),
+        }
     }
 
     fn inlines(&mut self, inlines: &[InlineNode], at_line_start: bool) {

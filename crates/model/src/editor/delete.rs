@@ -31,32 +31,32 @@ impl Editor {
                 self.commit(ops, after, Last::Other)
             }
             Selected::Block { block } => {
-                let Some(b) = self.doc.block_index(block) else {
+                let Some(place) = self.doc.place(block) else {
                     return false;
                 };
-                let (ops, after) = self.remove_block(b);
+                let (ops, after) = self.remove_block(place);
                 self.commit(ops, after, Last::Other)
             }
         }
     }
 
-    /// Ops that remove block `b`, and the caret after: the end of the block
-    /// before, or the start of the one after. The last block is replaced by
-    /// an empty paragraph.
-    pub(super) fn remove_block(&mut self, b: usize) -> (Vec<Op>, CursorPath) {
-        if self.doc.blocks.len() == 1 {
+    /// Ops that remove the block at `place`, and the caret after: the end
+    /// of the block before, or the start of the one after. The only block of
+    /// the document or of an environment is replaced by an empty paragraph.
+    pub(super) fn remove_block(&mut self, place: Place) -> (Vec<Op>, CursorPath) {
+        if let Some(before) = self.doc.sibling(place, -1) {
+            (vec![delete_block(place)], self.doc.end_of(before))
+        } else if let Some(next) = self.doc.sibling(place, 1) {
+            (vec![delete_block(place)], self.doc.start_of(next))
+        } else {
             let para = self.doc.paragraph(vec![]);
             let after = cursor(para.id, vec![Step::Index(0)], 0);
             let insert = Op::Insert {
-                seq: Seq::Blocks,
-                index: 1,
+                seq: place.seq(),
+                index: place.index + 1,
                 items: Items::Blocks(vec![para]),
             };
-            (vec![insert, delete_block(0)], after)
-        } else if b > 0 {
-            (vec![delete_block(b)], self.doc.block_end(b - 1))
-        } else {
-            (vec![delete_block(b)], self.doc.block_start(b + 1))
+            (vec![insert, delete_block(place)], after)
         }
     }
 
@@ -91,8 +91,8 @@ impl Editor {
         }
         if pos.inline == 0 && matches!(pos.block.kind, Block::Heading { .. }) {
             // A heading first becomes a paragraph; the next press joins.
-            let (b, after) = (pos.block_index, self.caret.clone());
-            return self.retype(b, None, 0, after);
+            let (place, after) = (pos.place, self.caret.clone());
+            return self.retype(place, None, 0, after);
         }
         if pos.inline >= 2 {
             return self.select(Selected::Formula {
@@ -100,22 +100,41 @@ impl Editor {
                 inline: pos.inline - 1,
             });
         }
-        let b = pos.block_index;
-        if b == 0 {
-            return false;
-        }
-        if self.doc.blocks[b - 1].kind.inlines().is_some() {
-            let (ops, after) = join_blocks(&self.doc, b - 1);
+        let place = pos.place;
+        let Some(before) = self.doc.sibling(place, -1) else {
+            // The start of an environment: select it (the next press deletes
+            // it), or remove it at once if it is still empty.
+            let Some(env) = place.parent else {
+                return false;
+            };
+            let empty = self
+                .doc
+                .block(env)
+                .and_then(|b| b.kind.body())
+                .is_some_and(|body| body.len() == 1 && is_empty_text_block(&body[0]));
+            if empty {
+                let env_place = self.doc.place(env).expect("environment of the caret");
+                let (ops, after) = self.remove_block(env_place);
+                return self.commit(ops, after, Last::Other);
+            }
+            return self.select(Selected::Block { block: env });
+        };
+        if before.kind.inlines().is_some() {
+            let (ops, after) = join_blocks(
+                &self.doc,
+                Place {
+                    index: place.index - 1,
+                    ..place
+                },
+            );
             return self.commit(ops, after, Last::Other);
         }
-        // The previous block is math or raw Typst.
+        // The previous block is math, raw Typst or an environment.
+        let end = self.doc.end_of(before);
         if is_empty_text_block(pos.block) {
-            let after = self.doc.block_end(b - 1);
-            let ops = vec![delete_block(b)];
-            return self.commit(ops, after, Last::Other);
+            return self.commit(vec![delete_block(place)], end, Last::Other);
         }
-        let caret = self.doc.block_end(b - 1);
-        self.jump(caret)
+        self.jump(end)
     }
 
     pub(super) fn math_backspace(&mut self, p: RowPos) -> bool {
@@ -155,7 +174,7 @@ impl Editor {
                 self.move_left()
             };
         }
-        let b = p.block_index;
+        let place = p.place;
         if p.base == 1 {
             let Step::Index(i) = p.path[0] else {
                 return false;
@@ -163,18 +182,26 @@ impl Editor {
             if p.len > 0 {
                 return self.move_left();
             }
-            let inlines = self.doc.blocks[b].kind.inlines().expect("text block");
+            let inlines = self
+                .doc
+                .at(place)
+                .and_then(|b| b.kind.inlines())
+                .expect("text block");
             let (ops, after) = remove_formula(p.block, inlines, i);
             return self.commit(ops, after, Last::Other);
         }
         // Display math.
         if p.len == 0 {
-            let (ops, after) = self.remove_block(b);
+            let (ops, after) = self.remove_block(place);
             return self.commit(ops, after, Last::Other);
         }
-        if b > 0 && is_empty_text_block(&self.doc.blocks[b - 1]) {
+        if self.doc.sibling(place, -1).is_some_and(is_empty_text_block) {
             let after = self.caret.clone();
-            return self.commit(vec![delete_block(b - 1)], after, Last::Other);
+            let before = Place {
+                index: place.index - 1,
+                ..place
+            };
+            return self.commit(vec![delete_block(before)], after, Last::Other);
         }
         self.move_left()
     }
@@ -309,17 +336,17 @@ impl Editor {
                 inline: pos.inline + 1,
             });
         }
-        let b = pos.block_index;
-        let Some(next) = self.doc.blocks.get(b + 1) else {
+        let place = pos.place;
+        let Some(next) = self.doc.sibling(place, 1) else {
             return false;
         };
         if next.kind.inlines().is_some() {
-            let (ops, after) = join_blocks(&self.doc, b);
+            let (ops, after) = join_blocks(&self.doc, place);
             return self.commit(ops, after, Last::Other);
         }
         if is_empty_text_block(pos.block) {
-            let after = self.doc.block_start(b + 1);
-            return self.commit(vec![delete_block(b)], after, Last::Other);
+            let after = self.doc.start_of(next);
+            return self.commit(vec![delete_block(place)], after, Last::Other);
         }
         false
     }
@@ -364,10 +391,15 @@ pub(super) fn remove_formula(
     (ops, caret)
 }
 
-/// Append text block `first + 1` to text block `first`.
-pub(super) fn join_blocks(doc: &Document, first: usize) -> (Vec<Op>, CursorPath) {
-    let a = &doc.blocks[first];
-    let b = &doc.blocks[first + 1];
+/// Append the text block after `first` (in the same list) to the text
+/// block at `first`.
+pub(super) fn join_blocks(doc: &Document, first: Place) -> (Vec<Op>, CursorPath) {
+    let a = doc.at(first).expect("first block");
+    let b = doc.sibling(first, 1).expect("second block");
+    let second = Place {
+        index: first.index + 1,
+        ..first
+    };
     let (ai, bi) = (
         a.kind.inlines().expect("text block"),
         b.kind.inlines().expect("text block"),
@@ -376,7 +408,7 @@ pub(super) fn join_blocks(doc: &Document, first: usize) -> (Vec<Op>, CursorPath)
     let len = text_of(last).chars().count();
     let mut ops = vec![
         // Remove the second block first so its nodes never exist twice.
-        delete_block(first + 1),
+        delete_block(second),
         Op::Insert {
             seq: Seq::Text(last.id),
             index: len,

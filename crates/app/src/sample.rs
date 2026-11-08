@@ -266,25 +266,68 @@ line((0, 0.25), (0, -0.25))",
     let t = b.t("Uniqueness of the tensors");
     blocks.push(b.0.heading(2, vec![t]));
     let t1 = b.t(
-        "Different tensors can generate the same state. Theorem-like environments are not \
-         modelled yet: the statement below is raw Typst, and its environment is defined in \
-         the code block just before it (the marker; double-click to edit it).",
+        "Different tensors can generate the same state. The statement below is an \
+         environment: its text is edited in place, while the code block before it (the \
+         marker; double-click to edit) defines how theorems and proofs look.",
     );
     blocks.push(b.0.paragraph(vec![t1]));
     blocks.push(b.0.raw(
         "// Theorems: figures of their own kind, numbered on their own.
-#let theorem(title, body) = figure(
-  kind: \"theorem\", supplement: \"Theorem\", numbering: \"1\", outlined: false,
-  caption: title, body,
+#let theorem(body) = figure(
+  kind: \"theorem\", supplement: \"Theorem\", numbering: \"1\", outlined: false, body,
 )
 #show figure.where(kind: \"theorem\"): it => block(width: 100%, above: 1em, below: 1em,
-  align(left)[*Theorem #it.counter.display(it.numbering)* (#it.caption.body). #emph(it.body)])",
+  align(left)[*Theorem #it.counter.display(it.numbering).* #emph(it.body)])
+#let proof(body) = block(width: 100%)[_Proof._ #body #h(1fr) $square$]",
     ));
-    blocks.push(b.0.raw(
-        "#theorem[Fundamental theorem][If two MPS with injective tensors $A$ and $B$ \
-         generate the same state for every system size, then $B^i = e^(i phi) X A^i X^(-1)$ \
-         for an invertible matrix $X$ and a phase $phi$.]",
-    ));
+
+    let t1 = b.t("If two MPS with injective tensors ");
+    let a = b.i("A");
+    let m1 = b.m(vec![a]);
+    let t2 = b.t(" and ");
+    let bb = b.i("B");
+    let m2 = b.m(vec![bb]);
+    let t3 = b.t(" generate the same state for every system size, then ");
+    let bi = {
+        let bb = b.i("B");
+        let i = b.i("i");
+        b.sup(bb, vec![i])
+    };
+    let eq = b.s("=");
+    let phase = {
+        let e = b.i("e");
+        let (i, phi) = (b.i("i"), b.s("φ"));
+        b.sup(e, vec![i, phi])
+    };
+    let x = b.i("X");
+    let ai = {
+        let a = b.i("A");
+        let i = b.i("i");
+        b.sup(a, vec![i])
+    };
+    let xinv = {
+        let x = b.i("X");
+        let (minus, one) = (b.s("−"), b.n("1"));
+        b.sup(x, vec![minus, one])
+    };
+    let m3 = b.m(vec![bi, eq, phase, x, ai, xinv]);
+    let t4 = b.t(" for an invertible matrix ");
+    let x = b.i("X");
+    let m4 = b.m(vec![x]);
+    let t5 = b.t(" and a phase ");
+    let phi = b.s("φ");
+    let m5 = b.m(vec![phi]);
+    let t6 = b.t(".");
+    let statement =
+        b.0.paragraph(vec![t1, m1, t2, m2, t3, m3, t4, m4, t5, m5, t6]);
+    blocks.push(b.0.env("theorem", vec![statement]));
+
+    let t1 = b.t(
+        "Equal states have equal transfer matrices, which fixes the tensors up to a gauge \
+         transformation; injectivity makes the gauge invertible and unique up to the phase.",
+    );
+    let p = b.0.paragraph(vec![t1]);
+    blocks.push(b.0.env("proof", vec![p]));
 
     b.0.blocks = blocks;
     b.0.header = format!(

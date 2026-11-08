@@ -307,7 +307,9 @@ functions and packages.
 
 User request (2026-11-08, after M10): the theorem's text must be editable in place, like
 any paragraph; the environment only contributes "Theorem", the number and the formatting
-(bold, italic, …). The body is the call's content argument.
+(bold, italic, …). The body is the call's content argument. Moved before M11 at the
+user's request. Split: **M14a** environments with a body of blocks (done 2026-11-08, see
+PLAN.md; created by typing `#lemma` + space); **M14b** titles, lists, block-level calls.
 
 - Theorem, lemma, definition, proof, … as a container block holding paragraphs and
   equations (the model is a flat block list today, so nesting is the main change:

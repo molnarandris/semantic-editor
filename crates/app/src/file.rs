@@ -6,7 +6,8 @@ use model::{BlockNode, Document};
 use serde::{Deserialize, Serialize};
 
 /// Version of the file format written by this build. 2: the header.
-pub const FORMAT_VERSION: u32 = 2;
+/// 3: environments (`Env` blocks).
+pub const FORMAT_VERSION: u32 = 3;
 
 #[derive(Serialize)]
 struct SemFileOut<'a> {
@@ -74,7 +75,7 @@ mod tests {
         let loaded = from_json(&saved).unwrap();
         assert_eq!(serialize_document(&loaded), serialize_document(&doc));
         assert_eq!(to_json(&loaded), saved);
-        assert!(saved.contains("\"version\": 2"));
+        assert!(saved.contains("\"version\": 3"));
         assert!(saved.contains("\"header\": \"#set heading"));
         assert!(saved.contains(&format!("\"typst\": \"{}\"", typst_bridge::TYPST_VERSION)));
     }

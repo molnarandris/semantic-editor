@@ -17,22 +17,28 @@ fn sample() -> Editor {
     Editor::new(d)
 }
 
+/// The top-level blocks as short strings; an environment as
+/// `#name[block|block]`.
 fn texts(e: &Editor) -> Vec<String> {
-    e.doc()
-        .blocks
-        .iter()
-        .map(|b| match &b.kind {
-            Block::Paragraph(v) | Block::Heading { inlines: v, .. } => v
-                .iter()
-                .map(|i| match &i.kind {
-                    Inline::Text(s) => s.clone(),
-                    Inline::Math(_) => "$".into(),
-                })
-                .collect(),
-            Block::DisplayMath(_) => "$$".into(),
-            Block::RawTypst(s) | Block::Diagram(s) => s.clone(),
-        })
-        .collect()
+    e.doc().blocks.iter().map(block_text).collect()
+}
+
+fn block_text(b: &BlockNode) -> String {
+    match &b.kind {
+        Block::Paragraph(v) | Block::Heading { inlines: v, .. } => v
+            .iter()
+            .map(|i| match &i.kind {
+                Inline::Text(s) => s.clone(),
+                Inline::Math(_) => "$".into(),
+            })
+            .collect(),
+        Block::DisplayMath(_) => "$$".into(),
+        Block::RawTypst(s) | Block::Diagram(s) => s.clone(),
+        Block::Env { name, body } => {
+            let inner: Vec<String> = body.iter().map(block_text).collect();
+            format!("#{name}[{}]", inner.join("|"))
+        }
+    }
 }
 
 fn caret_at(e: &mut Editor, block: usize, inline: usize, offset: usize) {
@@ -187,6 +193,74 @@ fn equals_space_makes_headings() {
     ));
     assert!(e.set_heading(None));
     assert!(!e.set_heading(None));
+}
+
+/// `#lemma` + space makes an environment; typing, Enter, arrows, Escape and
+/// Backspace work inside it and at its edges.
+#[test]
+fn environments() {
+    let mut d = Document::empty();
+    let t = d.text("Before");
+    d.blocks = vec![d.paragraph(vec![t])];
+    let mut e = Editor::new(d);
+    caret_at(&mut e, 0, 0, 6);
+    e.enter();
+    e.insert_text("#lemma");
+    e.insert_text(" ");
+    assert_eq!(texts(&e), ["Before", "#lemma[]"]);
+    e.insert_text("First.");
+    e.enter();
+    e.insert_text("Second.");
+    assert_eq!(texts(&e), ["Before", "#lemma[First.|Second.]"]);
+    e.doc().check_invariants().unwrap();
+
+    // ← from the start of the body leaves to the paragraph before; → back in.
+    e.set_caret(e.doc().start_of(&e.doc().blocks[1]));
+    assert!(e.move_left());
+    assert_eq!(e.caret(), &e.doc().end_of(&e.doc().blocks[0]));
+    assert!(e.move_right());
+    assert_eq!(e.caret(), &e.doc().start_of(&e.doc().blocks[1]));
+
+    // Enter on an empty last paragraph moves it out, after the environment.
+    e.set_caret(e.doc().end_of(&e.doc().blocks[1]));
+    e.enter();
+    assert_eq!(texts(&e), ["Before", "#lemma[First.|Second.|]"]);
+    e.enter();
+    assert_eq!(texts(&e), ["Before", "#lemma[First.|Second.]", ""]);
+    e.insert_text("After");
+    assert_eq!(texts(&e), ["Before", "#lemma[First.|Second.]", "After"]);
+
+    // Backspace at the start of the paragraph after it: caret to its end.
+    e.set_caret(e.doc().start_of(&e.doc().blocks[2]));
+    e.backspace();
+    assert_eq!(e.caret(), &e.doc().end_of(&e.doc().blocks[1]));
+
+    // Escape in the body: to the paragraph after the environment.
+    assert!(e.escape());
+    assert_eq!(e.caret(), &e.doc().start_of(&e.doc().blocks[2]));
+
+    // Backspace at the start of the body selects it, then deletes it.
+    e.set_caret(e.doc().start_of(&e.doc().blocks[1]));
+    e.backspace();
+    let env = e.doc().blocks[1].id;
+    assert_eq!(e.selected(), Some(&Selected::Block { block: env }));
+    e.backspace();
+    assert_eq!(texts(&e), ["Before", "After"]);
+    e.undo();
+    assert_eq!(texts(&e), ["Before", "#lemma[First.|Second.]", "After"]);
+
+    // An empty environment goes with one Backspace.
+    e.set_caret(e.doc().end_of(&e.doc().blocks[2]));
+    e.enter();
+    e.insert_text("#proof ");
+    assert_eq!(texts(&e)[3], "#proof[]");
+    e.backspace();
+    assert_eq!(texts(&e), ["Before", "#lemma[First.|Second.]", "After"]);
+    e.doc().check_invariants().unwrap();
+
+    // Not an identifier: stays text.
+    e.insert_text(" #1 ");
+    assert_eq!(texts(&e)[2], "After #1 ");
 }
 
 /// Enter on a raw/diagram block adds a paragraph: after it at its end (also
@@ -521,7 +595,7 @@ fn tab_visits_empty_slots_and_escape_leaves() {
     e.insert_text("=/");
     e.escape();
     assert_eq!(display_of(&e, 0), "frac(, ) = frac(, )");
-    let start = e.doc().block_start(0);
+    let start = e.doc().doc_start();
     e.set_caret(start);
     let mut visits = vec![];
     while e.next_slot(false) {

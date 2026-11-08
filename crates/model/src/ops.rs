@@ -8,13 +8,15 @@
 use std::fmt;
 
 use crate::cursor::Step;
-use crate::tree::{Block, BlockNode, Document, Inline, InlineNode, MathNode, NodeId};
+use crate::tree::{Block, BlockNode, Document, Inline, InlineNode, MathNode, NodeId, Place};
 
 /// A sequence inside the document that ops splice into.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Seq {
     /// The document's block list.
     Blocks,
+    /// The body of an environment (by its block id).
+    Body(NodeId),
     /// The inline list of a paragraph or heading (by block id).
     Inlines(NodeId),
     /// The nodes of a math row (by row id).
@@ -23,6 +25,16 @@ pub enum Seq {
     Text(NodeId),
     /// The chars of the document header.
     Header,
+}
+
+impl Place {
+    /// The sequence this place is in.
+    pub fn seq(&self) -> Seq {
+        match self.parent {
+            None => Seq::Blocks,
+            Some(env) => Seq::Body(env),
+        }
+    }
 }
 
 /// Content for a [`Seq`]. Text indices and counts are in chars.
@@ -175,11 +187,14 @@ impl Document {
         let not_found = || OpError::NotFound(seq.clone());
         match *seq {
             Seq::Blocks => Ok(SeqMut::Blocks(&mut self.blocks)),
+            Seq::Body(env) => self
+                .block_mut(env)
+                .and_then(|b| b.kind.body_mut())
+                .map(SeqMut::Blocks)
+                .ok_or_else(not_found),
             Seq::Header => Ok(SeqMut::Text(&mut self.header)),
             Seq::Inlines(block) => self
-                .blocks
-                .iter_mut()
-                .find(|b| b.id == block)
+                .block_mut(block)
                 .and_then(|b| b.kind.inlines_mut())
                 .map(SeqMut::Inlines)
                 .ok_or_else(not_found),
@@ -188,7 +203,7 @@ impl Document {
                 .map(|r| SeqMut::Row(&mut r.nodes))
                 .ok_or_else(not_found),
             Seq::Text(id) => {
-                for block in &mut self.blocks {
+                for block in self.leaves_mut() {
                     match &mut block.kind {
                         Block::RawTypst(s) | Block::Diagram(s) if block.id == id => {
                             return Ok(SeqMut::Text(s));

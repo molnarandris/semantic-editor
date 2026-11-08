@@ -513,11 +513,11 @@ impl SemEditor {
             Command::PrevSlot => _ = ed.next_slot(true),
             Command::Heading(level) => _ = ed.set_heading(level),
             Command::DocStart => {
-                let c = ed.doc().block_start(0);
+                let c = ed.doc().doc_start();
                 ed.set_caret(c);
             }
             Command::DocEnd => {
-                let c = ed.doc().block_end(ed.doc().blocks.len() - 1);
+                let c = ed.doc().doc_end();
                 ed.set_caret(c);
             }
             Command::Zoom(steps) => {
@@ -599,7 +599,7 @@ impl SemEditor {
         if context.is_empty() && selected.is_empty() {
             return;
         }
-        let Some(index) = ed.doc().block_index(ed.caret().block) else {
+        let Some(index) = ed.doc().top_index(ed.caret().block) else {
             return;
         };
         let Some(&top) = self.block_tops().get(index) else {
@@ -769,7 +769,9 @@ impl SemEditor {
     /// Block index and stop of the caret.
     fn caret_stop(&self) -> Option<(usize, Stop)> {
         let caret = self.editor.borrow().caret().clone();
-        let index = self.editor.borrow().doc().block_index(caret.block)?;
+        // Views are per top-level block; an environment's view has the
+        // stops of the blocks inside it.
+        let index = self.editor.borrow().doc().top_index(caret.block)?;
         let stops = self.block_stops(index);
         let stop = caret::find(&stops, &caret)?.clone();
         Some((index, stop))
@@ -1111,7 +1113,12 @@ impl SemEditor {
         let obj = self.obj();
         obj.queue_resize();
         obj.queue_draw();
-        if self.editor.borrow().caret().block == result.block {
+        let caret_view = {
+            let ed = self.editor.borrow();
+            let doc = ed.doc();
+            doc.top_index(ed.caret().block).map(|i| doc.blocks[i].id)
+        };
+        if caret_view == Some(result.block) {
             if self.reveal.take() {
                 self.reveal_caret();
             }

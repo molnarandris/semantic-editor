@@ -13,41 +13,39 @@ impl Editor {
             };
             return self.jump(cursor(p.block, vec![Step::Index(i + 1)], 0));
         }
-        self.leave_block(p.block_index)
+        self.leave_block(p.place)
     }
 
-    /// Caret to the start of the text block after block `b`, created if the
-    /// next block is not a paragraph or heading.
-    pub(super) fn leave_block(&mut self, b: usize) -> bool {
-        if self
-            .doc
-            .blocks
-            .get(b + 1)
-            .is_some_and(|n| n.kind.inlines().is_some())
+    /// Caret to the start of the text block after the block at `place`,
+    /// created if the next block is not a paragraph or heading.
+    pub(super) fn leave_block(&mut self, place: Place) -> bool {
+        if let Some(next) = self.doc.sibling(place, 1)
+            && next.kind.inlines().is_some()
         {
-            let caret = self.doc.block_start(b + 1);
+            let caret = self.doc.start_of(next);
             return self.jump(caret);
         }
-        self.paragraph_after(b)
+        self.paragraph_after(place)
     }
 
-    pub(super) fn paragraph_after(&mut self, b: usize) -> bool {
+    pub(super) fn paragraph_after(&mut self, place: Place) -> bool {
         let block = self.doc.paragraph(vec![]);
         let after = cursor(block.id, vec![Step::Index(0)], 0);
         let op = Op::Insert {
-            seq: Seq::Blocks,
-            index: b + 1,
+            seq: place.seq(),
+            index: place.index + 1,
             items: Items::Blocks(vec![block]),
         };
         self.commit(vec![op], after, Last::Other)
     }
 
-    /// Insert an empty paragraph before block `b`; the caret stays.
-    fn paragraph_before(&mut self, b: usize) -> bool {
+    /// Insert an empty paragraph before the block at `place`; the caret
+    /// stays.
+    fn paragraph_before(&mut self, place: Place) -> bool {
         let block = self.doc.paragraph(vec![]);
         let op = Op::Insert {
-            seq: Seq::Blocks,
-            index: b,
+            seq: place.seq(),
+            index: place.index,
             items: Items::Blocks(vec![block]),
         };
         let after = self.caret.clone();
@@ -55,19 +53,24 @@ impl Editor {
     }
 
     /// Escape: drop the selection, else leave the innermost structure (caret
-    /// just after it), else leave the formula.
+    /// just after it), else leave the formula, else leave the environment.
     pub fn escape(&mut self) -> bool {
         self.finish_word();
         if self.selected.take().is_some() {
             return true;
         }
         if self.source_block().is_some()
-            && let Some(b) = self.doc.block_index(self.caret.block)
+            && let Some(place) = self.doc.place(self.caret.block)
         {
-            return self.leave_block(b);
+            return self.leave_block(place);
         }
         let Some(p) = self.row_pos() else {
-            return false;
+            // In the text of an environment: leave it.
+            let env = self.doc.place(self.caret.block).and_then(|p| p.parent);
+            return match env.and_then(|env| self.doc.place(env)) {
+                Some(place) => self.leave_block(place),
+                None => false,
+            };
         };
         self.groups.remove(&p.row);
         match p.parent() {
@@ -90,21 +93,41 @@ impl Editor {
                 };
                 self.caret = cursor(p.block, vec![Step::Index(i + 1)], 0);
             } else {
-                return self.paragraph_after(p.block_index);
+                return self.paragraph_after(p.place);
             }
         }
         let Some(pos) = self.text_pos() else {
-            let Some(b) = self.doc.block_index(self.caret.block) else {
+            let Some(place) = self.doc.place(self.caret.block) else {
                 return false;
             };
             // At the start of a raw/diagram block: a paragraph before it, as
             // Enter at the start of a line; the caret stays on the block.
             if self.source_block().is_some() && self.caret.offset == 0 {
-                return self.paragraph_before(b);
+                return self.paragraph_before(place);
             }
-            return self.paragraph_after(b);
+            return self.paragraph_after(place);
         };
-        let (b, i, c, len) = (pos.block_index, pos.inline, pos.offset, pos.len);
+        if let Some(env) = pos.place.parent
+            && is_empty_text_block(pos.block)
+            && self.doc.sibling(pos.place, 1).is_none()
+            && pos.place.index > 0
+        {
+            // An empty last paragraph of an environment: it moves out, after
+            // the environment (as Enter on an empty list item).
+            let block = pos.block.clone();
+            let after = self.caret.clone();
+            let outer = self.doc.place(env).expect("environment of the caret");
+            let ops = vec![
+                delete_block(pos.place),
+                Op::Insert {
+                    seq: outer.seq(),
+                    index: outer.index + 1,
+                    items: Items::Blocks(vec![block]),
+                },
+            ];
+            return self.commit(ops, after, Last::Other);
+        }
+        let (place, i, c, len) = (pos.place, pos.inline, pos.offset, pos.len);
         let block_id = pos.block.id;
         let inlines = pos.inlines;
         let n = inlines.len();
@@ -141,8 +164,8 @@ impl Editor {
         };
         let after = cursor(block.id, vec![Step::Index(0)], 0);
         ops.push(Op::Insert {
-            seq: Seq::Blocks,
-            index: b + 1,
+            seq: place.seq(),
+            index: place.index + 1,
             items: Items::Blocks(vec![block]),
         });
         self.commit(ops, after, Last::Other)
@@ -153,31 +176,33 @@ impl Editor {
     pub fn set_heading(&mut self, level: Option<u8>) -> bool {
         self.finish_word();
         self.selected = None;
-        let Some(b) = self.doc.block_index(self.caret.block) else {
+        let Some(place) = self.doc.place(self.caret.block) else {
             return false;
         };
-        let current = match &self.doc.blocks[b].kind {
-            Block::Heading { level, .. } => Some(*level),
-            Block::Paragraph(_) => None,
+        let current = match &self.doc.at(place).map(|b| &b.kind) {
+            Some(Block::Heading { level, .. }) => Some(*level),
+            Some(Block::Paragraph(_)) => None,
             _ => return false,
         };
         if current == level {
             return false;
         }
         let after = self.caret.clone();
-        self.retype(b, level, 0, after)
+        self.retype(place, level, 0, after)
     }
 
-    /// Replace text block `b` by a heading/paragraph with the same inlines
-    /// (and ids), minus the first `strip` chars.
+    /// Replace the text block at `place` by a heading/paragraph with the
+    /// same inlines (and ids), minus the first `strip` chars.
     pub(super) fn retype(
         &mut self,
-        b: usize,
+        place: Place,
         level: Option<u8>,
         strip: usize,
         after: CursorPath,
     ) -> bool {
-        let block = &self.doc.blocks[b];
+        let Some(block) = self.doc.at(place) else {
+            return false;
+        };
         let Some(inlines) = block.kind.inlines() else {
             return false;
         };
@@ -202,8 +227,8 @@ impl Editor {
             None => Block::Paragraph(inlines),
         };
         let op = Op::Replace {
-            seq: Seq::Blocks,
-            index: b,
+            seq: place.seq(),
+            index: place.index,
             count: 1,
             items: Items::Blocks(vec![BlockNode { id: block.id, kind }]),
         };
@@ -215,7 +240,7 @@ impl Editor {
     pub fn insert_block(&mut self, kind: NewBlock) -> bool {
         self.finish_word();
         self.selected = None;
-        let Some(b) = self.doc.block_index(self.caret.block) else {
+        let Some(place) = self.doc.place(self.caret.block) else {
             return false;
         };
         let block = match kind {
@@ -223,9 +248,10 @@ impl Editor {
             NewBlock::RawTypst => self.doc.raw(""),
         };
         let after = cursor(block.id, vec![], 0);
-        let replace = is_empty_text_block(&self.doc.blocks[b]);
+        let replace = self.doc.at(place).is_some_and(is_empty_text_block);
+        let b = place.index;
         let op = Op::Replace {
-            seq: Seq::Blocks,
+            seq: place.seq(),
             index: if replace { b } else { b + 1 },
             count: usize::from(replace),
             items: Items::Blocks(vec![block]),

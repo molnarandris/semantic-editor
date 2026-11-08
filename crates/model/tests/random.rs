@@ -86,7 +86,7 @@ fn all_cursors(doc: &Document) -> Vec<CursorPath> {
         }
     }
     let mut out = vec![];
-    for b in &doc.blocks {
+    for b in doc.leaves() {
         match &b.kind {
             Block::Paragraph(inlines) | Block::Heading { inlines, .. } => {
                 for (i, inline) in inlines.iter().enumerate() {
@@ -110,6 +110,7 @@ fn all_cursors(doc: &Document) -> Vec<CursorPath> {
                     offset: o,
                 })
             }),
+            Block::Env { .. } => unreachable!("leaves are not environments"),
         }
     }
     out

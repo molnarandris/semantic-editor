@@ -98,6 +98,15 @@ impl SemEditor {
         }
     }
 
+    /// Start an environment: a paragraph with `#` for its name (`lemma`,
+    /// then space).
+    pub fn start_env(&self) {
+        let imp = self.imp();
+        if imp.editor.borrow_mut().start_env() {
+            imp.after_command(true);
+        }
+    }
+
     /// The source of a raw/diagram block.
     pub fn block_source(&self, block: NodeId) -> Option<String> {
         self.imp()

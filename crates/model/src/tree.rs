@@ -30,6 +30,14 @@ pub enum Block {
     RawTypst(String),
     /// A CeTZ drawing: the body of `cetz.canvas({ import cetz.draw: * … })`.
     Diagram(String),
+    /// A call of a document function with a body of blocks, `#lemma[…]`:
+    /// theorem-like environments, proofs, … The function (from the header or
+    /// a code block) adds the label, number and formatting; the body is
+    /// edited in place. The body is never empty.
+    Env {
+        name: String,
+        body: Vec<BlockNode>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -95,6 +103,21 @@ impl Block {
             _ => None,
         }
     }
+
+    /// The blocks of an environment's body.
+    pub fn body(&self) -> Option<&Vec<BlockNode>> {
+        match self {
+            Block::Env { body, .. } => Some(body),
+            _ => None,
+        }
+    }
+
+    pub fn body_mut(&mut self) -> Option<&mut Vec<BlockNode>> {
+        match self {
+            Block::Env { body, .. } => Some(body),
+            _ => None,
+        }
+    }
 }
 
 impl BlockNode {
@@ -109,7 +132,7 @@ impl BlockNode {
                     Inline::Text(_) => None,
                 })
                 .collect(),
-            Block::RawTypst(_) | Block::Diagram(_) => vec![],
+            Block::RawTypst(_) | Block::Diagram(_) | Block::Env { .. } => vec![],
         }
     }
 
@@ -123,7 +146,7 @@ impl BlockNode {
                     Inline::Text(_) => None,
                 })
                 .collect(),
-            Block::RawTypst(_) | Block::Diagram(_) => vec![],
+            Block::RawTypst(_) | Block::Diagram(_) | Block::Env { .. } => vec![],
         }
     }
 
@@ -134,8 +157,56 @@ impl BlockNode {
             Block::DisplayMath(_) => "display math",
             Block::RawTypst(_) => "raw typst",
             Block::Diagram(_) => "diagram",
+            Block::Env { .. } => "environment",
         }
     }
+
+    /// Whether `id` is this block or inside it.
+    pub fn contains(&self, id: NodeId) -> bool {
+        self.id == id
+            || self
+                .kind
+                .body()
+                .is_some_and(|body| body.iter().any(|b| b.contains(id)))
+    }
+}
+
+/// Where a block sits: at `index` in the document's block list (`parent`
+/// `None`) or in the body of environment `parent`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Place {
+    pub parent: Option<NodeId>,
+    pub index: usize,
+}
+
+/// Blocks in document order, environments before their bodies.
+fn all_blocks<'a>(blocks: &'a [BlockNode], out: &mut Vec<&'a BlockNode>) {
+    for block in blocks {
+        out.push(block);
+        if let Some(body) = block.kind.body() {
+            all_blocks(body, out);
+        }
+    }
+}
+
+fn leaves_mut<'a>(blocks: &'a mut [BlockNode], out: &mut Vec<&'a mut BlockNode>) {
+    for block in blocks {
+        if matches!(block.kind, Block::Env { .. }) {
+            leaves_mut(block.kind.body_mut().expect("environment"), out);
+        } else {
+            out.push(block);
+        }
+    }
+}
+
+fn place_in(blocks: &[BlockNode], parent: Option<NodeId>, id: NodeId) -> Option<Place> {
+    blocks.iter().enumerate().find_map(|(index, b)| {
+        if b.id == id {
+            Some(Place { parent, index })
+        } else {
+            place_in(b.kind.body()?, Some(b.id), id)
+        }
+    })
 }
 
 impl MathNode {
@@ -232,7 +303,7 @@ impl MathRow {
     }
 }
 
-/// The whole document: a flat list of blocks.
+/// The whole document: a list of blocks; environments hold blocks of their own.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Document {
     /// Typst code compiled before every block and at the top of the export:
@@ -277,43 +348,55 @@ impl Document {
     /// Assign new ids to every node, e.g. after deserialization, and restore
     /// the structural invariants.
     pub fn regenerate_ids(&mut self) {
-        let mut next = 1;
-        let mut f = |id: &mut NodeId| {
-            *id = NodeId(next);
-            next += 1;
-        };
-        for block in &mut self.blocks {
-            f(&mut block.id);
-            if let Some(inlines) = block.kind.inlines_mut() {
-                for inline in inlines.iter_mut() {
-                    f(&mut inline.id);
-                    if let Inline::Math(row) = &mut inline.kind {
-                        row.visit_ids(&mut f);
+        fn visit(blocks: &mut [BlockNode], f: &mut impl FnMut(&mut NodeId)) {
+            for block in blocks {
+                f(&mut block.id);
+                match &mut block.kind {
+                    Block::Paragraph(inlines) | Block::Heading { inlines, .. } => {
+                        for inline in inlines.iter_mut() {
+                            f(&mut inline.id);
+                            if let Inline::Math(row) = &mut inline.kind {
+                                row.visit_ids(f);
+                            }
+                        }
                     }
+                    Block::DisplayMath(row) => row.visit_ids(f),
+                    Block::Env { body, .. } => visit(body, f),
+                    Block::RawTypst(_) | Block::Diagram(_) => {}
                 }
-            } else if let Block::DisplayMath(row) = &mut block.kind {
-                row.visit_ids(&mut f);
             }
         }
+        let mut next = 1;
+        visit(&mut self.blocks, &mut |id: &mut NodeId| {
+            *id = NodeId(next);
+            next += 1;
+        });
         self.next_id = next;
         self.normalize();
     }
 
     /// Enforce the paragraph invariant: inlines alternate Text, Math, Text, …,
     /// starting and ending with (possibly empty) Text. Keeps a caret position
-    /// before and after every inline formula. A document always has a block.
+    /// before and after every inline formula. A document and every
+    /// environment body always have a block.
     pub fn normalize(&mut self) {
         let mut blocks = std::mem::take(&mut self.blocks);
-        for block in &mut blocks {
+        self.normalize_blocks(&mut blocks);
+        self.blocks = blocks;
+    }
+
+    fn normalize_blocks(&mut self, blocks: &mut Vec<BlockNode>) {
+        for block in blocks.iter_mut() {
             if let Some(inlines) = block.kind.inlines_mut() {
                 let old = std::mem::take(inlines);
                 *inlines = self.normalized_inlines(old);
+            } else if let Some(body) = block.kind.body_mut() {
+                self.normalize_blocks(body);
             }
         }
         if blocks.is_empty() {
             blocks.push(self.paragraph(vec![]));
         }
-        self.blocks = blocks;
     }
 
     fn normalized_inlines(&mut self, inlines: Vec<InlineNode>) -> Vec<InlineNode> {
@@ -381,8 +464,13 @@ impl Document {
             }
             Ok(())
         }
-        for block in &self.blocks {
+        let mut all = vec![];
+        all_blocks(&self.blocks, &mut all);
+        for block in all {
             check(block.id)?;
+            if block.kind.body().is_some_and(|b| b.is_empty()) {
+                return Err(format!("environment {:?} has an empty body", block.id));
+            }
             if let Some(inlines) = block.kind.inlines() {
                 for (i, inline) in inlines.iter().enumerate() {
                     check(inline.id)?;
@@ -411,24 +499,79 @@ impl Document {
         Ok(())
     }
 
+    /// The block with this id, at any depth.
     pub fn block(&self, id: NodeId) -> Option<&BlockNode> {
-        self.blocks.iter().find(|b| b.id == id)
+        let place = self.place(id)?;
+        self.siblings(place.parent)?.get(place.index)
     }
 
-    pub fn block_index(&self, id: NodeId) -> Option<usize> {
-        self.blocks.iter().position(|b| b.id == id)
+    pub fn block_mut(&mut self, id: NodeId) -> Option<&mut BlockNode> {
+        let place = self.place(id)?;
+        self.siblings_mut(place.parent)?.get_mut(place.index)
+    }
+
+    /// Where the block with this id sits.
+    pub fn place(&self, id: NodeId) -> Option<Place> {
+        place_in(&self.blocks, None, id)
+    }
+
+    /// The document's blocks (`None`) or an environment's body.
+    pub fn siblings(&self, parent: Option<NodeId>) -> Option<&Vec<BlockNode>> {
+        match parent {
+            None => Some(&self.blocks),
+            Some(env) => self.block(env)?.kind.body(),
+        }
+    }
+
+    fn siblings_mut(&mut self, parent: Option<NodeId>) -> Option<&mut Vec<BlockNode>> {
+        match parent {
+            None => Some(&mut self.blocks),
+            Some(env) => self.block_mut(env)?.kind.body_mut(),
+        }
+    }
+
+    /// The block at `place`.
+    pub fn at(&self, place: Place) -> Option<&BlockNode> {
+        self.siblings(place.parent)?.get(place.index)
+    }
+
+    /// The block next to the one at `place` (`delta` -1 or +1), in the same
+    /// list.
+    pub fn sibling(&self, place: Place, delta: isize) -> Option<&BlockNode> {
+        let index = place.index.checked_add_signed(delta)?;
+        self.siblings(place.parent)?.get(index)
+    }
+
+    /// Index of the top-level block that is or contains `id`.
+    pub fn top_index(&self, id: NodeId) -> Option<usize> {
+        self.blocks.iter().position(|b| b.contains(id))
+    }
+
+    /// The blocks the caret can be in (all but environments), in document
+    /// order.
+    pub fn leaves(&self) -> Vec<&BlockNode> {
+        let mut all = vec![];
+        all_blocks(&self.blocks, &mut all);
+        all.retain(|b| !matches!(b.kind, Block::Env { .. }));
+        all
+    }
+
+    pub fn leaves_mut(&mut self) -> Vec<&mut BlockNode> {
+        let mut out = vec![];
+        leaves_mut(&mut self.blocks, &mut out);
+        out
     }
 
     pub fn find_row(&self, id: NodeId) -> Option<&MathRow> {
-        self.blocks
-            .iter()
+        self.leaves()
+            .into_iter()
             .flat_map(|b| b.rows())
             .find_map(|r| r.find_row(id))
     }
 
     pub fn find_row_mut(&mut self, id: NodeId) -> Option<&mut MathRow> {
-        self.blocks
-            .iter_mut()
+        self.leaves_mut()
+            .into_iter()
             .flat_map(|b| b.rows_mut())
             .find_map(|r| r.find_row_mut(id))
     }
@@ -534,6 +677,20 @@ impl Document {
         BlockNode {
             id: self.fresh_id(),
             kind: Block::Diagram(source.into()),
+        }
+    }
+
+    /// An environment (`#name[…]`); an empty body gets an empty paragraph.
+    pub fn env(&mut self, name: &str, mut body: Vec<BlockNode>) -> BlockNode {
+        if body.is_empty() {
+            body.push(self.paragraph(vec![]));
+        }
+        BlockNode {
+            id: self.fresh_id(),
+            kind: Block::Env {
+                name: name.into(),
+                body,
+            },
         }
     }
 }

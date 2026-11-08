@@ -56,7 +56,7 @@ fn code_of(block: &BlockNode) -> Option<&str> {
 /// Whether a block may read or change counters.
 pub fn counter_sensitive(block: &BlockNode) -> bool {
     match &block.kind {
-        Block::Heading { .. } | Block::DisplayMath(_) => true,
+        Block::Heading { .. } | Block::DisplayMath(_) | Block::Env { .. } => true,
         Block::RawTypst(source) => !is_code(source),
         Block::Paragraph(_) | Block::Diagram(_) => false,
     }

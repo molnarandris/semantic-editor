@@ -12,7 +12,7 @@ pub struct Selection {
 /// A normalized, ordered selection range.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SelRange {
-    /// Whole blocks `start..end` (by index).
+    /// Whole top-level blocks `start..end` (by index).
     Blocks { start: usize, end: usize },
     /// Chars `start..end` of one text inline or raw block at `path`.
     Text {
@@ -56,7 +56,7 @@ impl Selection {
             return None;
         }
         if a.block != h.block {
-            let (i, j) = (doc.block_index(a.block)?, doc.block_index(h.block)?);
+            let (i, j) = (doc.top_index(a.block)?, doc.top_index(h.block)?);
             return Some(SelRange::Blocks {
                 start: i.min(j),
                 end: i.max(j) + 1,
@@ -242,7 +242,7 @@ mod tests {
             })
         );
         let s = Selection {
-            anchor: doc.block_start(1),
+            anchor: doc.start_of(&doc.blocks[1]),
             head: cur(&doc, vec![Step::Index(0)], 0),
         };
         assert_eq!(

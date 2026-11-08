@@ -15,7 +15,9 @@ use crate::cursor::{CursorPath, Step, Target};
 use crate::history::History;
 use crate::ops::{Items, Op, Seq};
 use crate::symbols;
-use crate::tree::{Block, BlockNode, Document, Inline, InlineNode, MathKind, MathNode, NodeId};
+use crate::tree::{
+    Block, BlockNode, Document, Inline, InlineNode, MathKind, MathNode, NodeId, Place,
+};
 
 mod delete;
 mod input;
@@ -90,7 +92,7 @@ pub type SymbolResolver = fn(&str) -> Option<String>;
 
 /// Position of a text caret inside a paragraph or heading.
 struct TextPos<'a> {
-    block_index: usize,
+    place: Place,
     block: &'a BlockNode,
     inlines: &'a [InlineNode],
     inline: usize,
@@ -107,7 +109,7 @@ impl TextPos<'_> {
 /// Position of a caret in a math row.
 #[derive(Clone, Debug)]
 struct RowPos {
-    block_index: usize,
+    place: Place,
     block: NodeId,
     /// Length of the path prefix before the formula's row path (1 for an
     /// inline formula, 0 for display math).
@@ -206,7 +208,7 @@ impl Default for Editor {
 
 impl Editor {
     pub fn new(doc: Document) -> Self {
-        let caret = doc.block_start(0);
+        let caret = doc.doc_start();
         Self {
             doc,
             caret,
@@ -295,8 +297,8 @@ impl Editor {
 
     fn text_pos(&self) -> Option<TextPos<'_>> {
         let c = &self.caret;
-        let block_index = self.doc.block_index(c.block)?;
-        let block = &self.doc.blocks[block_index];
+        let place = self.doc.place(c.block)?;
+        let block = self.doc.at(place)?;
         let inlines = block.kind.inlines()?;
         let [Step::Index(inline)] = c.path[..] else {
             return None;
@@ -305,7 +307,7 @@ impl Editor {
             return None;
         };
         Some(TextPos {
-            block_index,
+            place,
             block,
             inlines,
             inline,
@@ -316,13 +318,13 @@ impl Editor {
 
     fn row_pos(&self) -> Option<RowPos> {
         let c = &self.caret;
-        let block_index = self.doc.block_index(c.block)?;
-        let block = &self.doc.blocks[block_index];
+        let place = self.doc.place(c.block)?;
+        let block = self.doc.at(place)?;
         let Ok(Target::Row { row }) = self.doc.walk(block, &c.path) else {
             return None;
         };
         Some(RowPos {
-            block_index,
+            place,
             block: block.id,
             base: usize::from(block.kind.inlines().is_some()),
             path: c.path.clone(),
@@ -534,8 +536,51 @@ impl Editor {
             }
             (None, Some(p)) if p.nested() => "Tab → next slot · Esc → leave structure",
             (None, Some(_)) => "/ fraction · ^ _ scripts · Esc or $ → leave formula",
-            (None, None) => "$ → formula · = and space at the start → section",
+            (None, None) if self.typing_env_name() => "space → environment (e.g. #lemma, #proof)",
+            (None, None) if self.in_env() => {
+                "Esc → leave environment · Enter on an empty last paragraph → leave"
+            }
+            (None, None) => {
+                "$ → formula · = and space at the start → section · #name and space → environment"
+            }
         }
+    }
+
+    /// Whether the caret is inside an environment.
+    fn in_env(&self) -> bool {
+        self.doc
+            .place(self.caret.block)
+            .is_some_and(|p| p.parent.is_some())
+    }
+
+    /// Whether the caret's paragraph is `#name` so far, with the caret at
+    /// its end (space would make it an environment).
+    fn typing_env_name(&self) -> bool {
+        self.text_pos().is_some_and(|pos| {
+            pos.inlines.len() == 1
+                && pos.offset == pos.len
+                && matches!(pos.block.kind, Block::Paragraph(_))
+                && input::env_name(&pos.chars()).is_some()
+        })
+    }
+
+    /// Start an environment: a paragraph with `#` (after the caret's block,
+    /// or the caret's empty paragraph itself) for the name to be typed.
+    pub fn start_env(&mut self) -> bool {
+        self.finish_word();
+        self.selected = None;
+        let empty_here = self.text_pos().is_some_and(|pos| {
+            matches!(pos.block.kind, Block::Paragraph(_)) && is_empty_text_block(pos.block)
+        });
+        if !empty_here {
+            let Some(place) = self.doc.place(self.caret.block) else {
+                return false;
+            };
+            if !self.paragraph_after(place) {
+                return false;
+            }
+        }
+        self.insert_text("#")
     }
 }
 
@@ -546,10 +591,10 @@ fn is_empty_text_block(block: &BlockNode) -> bool {
     )
 }
 
-fn delete_block(index: usize) -> Op {
+fn delete_block(place: Place) -> Op {
     Op::Delete {
-        seq: Seq::Blocks,
-        index,
+        seq: place.seq(),
+        index: place.index,
         count: 1,
     }
 }

@@ -104,7 +104,7 @@ impl Document {
             Block::RawTypst(text) | Block::Diagram(text) if path.is_empty() => {
                 Ok(Target::Raw { block, text })
             }
-            Block::RawTypst(_) | Block::Diagram(_) => Err(0),
+            Block::RawTypst(_) | Block::Diagram(_) | Block::Env { .. } => Err(0),
         }
     }
 
@@ -117,9 +117,12 @@ impl Document {
             .is_some_and(|t| cursor.offset <= t.len())
     }
 
-    /// The first caret position of block `index`.
-    pub fn block_start(&self, index: usize) -> CursorPath {
-        let block = &self.blocks[index];
+    /// The first caret position in `block` (in an environment: of its first
+    /// block).
+    pub fn start_of(&self, block: &BlockNode) -> CursorPath {
+        if let Some(first) = block.kind.body().and_then(|b| b.first()) {
+            return self.start_of(first);
+        }
         let path = if block.kind.inlines().is_some() {
             vec![Step::Index(0)]
         } else {
@@ -132,9 +135,11 @@ impl Document {
         }
     }
 
-    /// The last caret position of block `index`.
-    pub fn block_end(&self, index: usize) -> CursorPath {
-        let block = &self.blocks[index];
+    /// The last caret position in `block`.
+    pub fn end_of(&self, block: &BlockNode) -> CursorPath {
+        if let Some(last) = block.kind.body().and_then(|b| b.last()) {
+            return self.end_of(last);
+        }
         let path = match block.kind.inlines() {
             Some(inlines) => vec![Step::Index(inlines.len().saturating_sub(1))],
             None => vec![],
@@ -147,13 +152,24 @@ impl Document {
         }
     }
 
+    /// The first and last caret positions of the document.
+    pub fn doc_start(&self) -> CursorPath {
+        self.start_of(&self.blocks[0])
+    }
+
+    pub fn doc_end(&self) -> CursorPath {
+        self.end_of(self.blocks.last().expect("a document has a block"))
+    }
+
     /// Repair a cursor that may have been invalidated by an edit: keep the
     /// longest valid path prefix and clamp the offset.
     pub fn fix_cursor(&self, cursor: &CursorPath) -> CursorPath {
-        let Some(index) = self.block_index(cursor.block) else {
-            return self.block_start(0);
+        let Some(block) = self.block(cursor.block) else {
+            return self.doc_start();
         };
-        let block = &self.blocks[index];
+        if block.kind.body().is_some() {
+            return self.start_of(block);
+        }
         match self.walk(block, &cursor.path) {
             Ok(t) => CursorPath {
                 offset: cursor.offset.min(t.len()),
@@ -171,8 +187,8 @@ impl Document {
                         path,
                         offset: hint.min(t.len()),
                     },
-                    Err(_) if hint > 0 => self.block_end(index),
-                    Err(_) => self.block_start(index),
+                    Err(_) if hint > 0 => self.end_of(block),
+                    Err(_) => self.start_of(block),
                 }
             }
         }
@@ -209,6 +225,11 @@ impl Document {
                 out.push(at(vec![], 0));
                 out.push(at(vec![], s.chars().count()));
             }
+            Block::Env { body, .. } => {
+                for child in body {
+                    out.extend(self.positions(child));
+                }
+            }
         }
         out
     }
@@ -241,7 +262,7 @@ impl Document {
                 consumed = 1;
                 row
             }
-            Block::RawTypst(_) | Block::Diagram(_) => return crumbs,
+            Block::RawTypst(_) | Block::Diagram(_) | Block::Env { .. } => return crumbs,
         };
         while let [Step::Index(k), child, rest @ ..] = path {
             let Some(node) = row.nodes.get(*k) else { break };
@@ -386,12 +407,12 @@ mod tests {
             path: vec![Step::Index(9)],
             offset: 0,
         };
-        assert_eq!(doc.fix_cursor(&far), doc.block_end(0));
+        assert_eq!(doc.fix_cursor(&far), doc.end_of(&doc.blocks[0]));
         let gone = CursorPath {
             block: NodeId(999),
             path: vec![],
             offset: 0,
         };
-        assert_eq!(doc.fix_cursor(&gone), doc.block_start(0));
+        assert_eq!(doc.fix_cursor(&gone), doc.doc_start());
     }
 }
