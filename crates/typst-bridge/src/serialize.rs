@@ -4,7 +4,9 @@
 
 use std::ops::Range;
 
-use model::{Block, BlockNode, Document, Inline, InlineNode, MathKind, MathNode, MathRow, NodeId};
+use model::{
+    Block, BlockNode, Document, Inline, InlineNode, ListKind, MathKind, MathNode, MathRow, NodeId,
+};
 
 /// Shared definitions and styles. Prepended to every block document and to
 /// the exported `.typ` file.
@@ -180,6 +182,11 @@ struct Writer {
     /// Depth of function-call arguments (`attach(…)`), where a literal comma
     /// would end the argument.
     args: usize,
+    /// Written after every line break: list item bodies are indented.
+    indent: String,
+    /// The number of a numbered item rendered on its own (Edit style), so
+    /// it shows its place in the list: `3. …` instead of `+ …`.
+    number: Option<usize>,
 }
 
 impl Writer {
@@ -190,6 +197,27 @@ impl Writer {
         self.map.entries.push((id, start..start));
         f(self);
         self.map.entries[index].1.end = self.out.len();
+    }
+
+    /// A line break, indented to the current list level.
+    fn nl(&mut self) {
+        self.out.push('\n');
+        let indent = self.indent.clone();
+        self.out.push_str(&indent);
+    }
+
+    /// The blocks of a body, a blank line apart; consecutive items (and an
+    /// item right after text) are a line apart, so the list stays tight.
+    fn blocks(&mut self, blocks: &[BlockNode]) {
+        for (i, child) in blocks.iter().enumerate() {
+            if i > 0 {
+                if !matches!(child.kind, Block::Item { .. }) {
+                    self.out.push('\n');
+                }
+                self.nl();
+            }
+            self.block(child);
+        }
     }
 
     fn block(&mut self, block: &BlockNode) {
@@ -207,18 +235,26 @@ impl Writer {
                 w.row(row);
                 w.out.push_str(" $");
             }
-            Block::RawTypst(src) => w.verbatim(block.id, src, ""),
+            Block::RawTypst(src) => {
+                let indent = w.indent.clone();
+                w.verbatim(block.id, src, &indent);
+            }
             Block::Diagram(src) => {
                 if w.style == Style::Edit {
                     // Standalone block documents import CeTZ themselves; the
                     // whole document imports it once at the top.
                     w.out.push_str(CETZ_IMPORT);
-                    w.out.push('\n');
+                    w.nl();
                 }
-                w.out
-                    .push_str("#align(center, cetz.canvas({\n  import cetz.draw: *\n  ");
-                w.verbatim(block.id, src, "  ");
-                w.out.push_str("\n}))");
+                w.out.push_str("#align(center, cetz.canvas({");
+                w.nl();
+                w.out.push_str("  import cetz.draw: *");
+                w.nl();
+                w.out.push_str("  ");
+                let indent = format!("{}  ", w.indent);
+                w.verbatim(block.id, src, &indent);
+                w.nl();
+                w.out.push_str("}))");
             }
             Block::Env { name, title, body } => {
                 w.out.push('#');
@@ -232,14 +268,29 @@ impl Writer {
                     w.text_block(title, false);
                     w.out.push(']');
                 }
-                w.out.push_str("[\n");
-                for (i, child) in body.iter().enumerate() {
-                    if i > 0 {
-                        w.out.push_str("\n\n");
+                w.out.push('[');
+                w.nl();
+                w.blocks(body);
+                w.nl();
+                w.out.push(']');
+            }
+            Block::Item { kind, term, body } => {
+                let number = w.number.take().filter(|_| w.style == Style::Edit);
+                match (kind, number) {
+                    (ListKind::Bullet, _) => w.out.push_str("- "),
+                    (ListKind::Numbered, Some(n)) => w.out.push_str(&format!("{n}. ")),
+                    (ListKind::Numbered, None) => w.out.push_str("+ "),
+                    (ListKind::Term, _) => {
+                        w.out.push_str("/ ");
+                        w.text_block(term, false);
+                        w.out.push_str(": ");
                     }
-                    w.block(child);
                 }
-                w.out.push_str("\n]");
+                // The body's lines are indented past the marker.
+                let outer = w.indent.clone();
+                w.indent.push_str("  ");
+                w.blocks(body);
+                w.indent = outer;
             }
         });
     }
@@ -589,11 +640,23 @@ pub fn serialize_block(block: &BlockNode) -> (String, SpanMap) {
 
 /// Serialize one block in the given style.
 pub fn serialize_block_styled(block: &BlockNode, style: Style) -> (String, SpanMap) {
+    serialize_with(block, style, None)
+}
+
+/// Serialize one block for the editor; a numbered list item shows `number`
+/// (its place in the list, as the block is rendered on its own).
+pub fn serialize_block_numbered(block: &BlockNode, number: Option<usize>) -> (String, SpanMap) {
+    serialize_with(block, Style::Edit, number)
+}
+
+fn serialize_with(block: &BlockNode, style: Style, number: Option<usize>) -> (String, SpanMap) {
     let mut w = Writer {
         out: String::new(),
         map: SpanMap::default(),
         style,
         args: 0,
+        indent: String::new(),
+        number,
     };
     w.block(block);
     (w.out, w.map)
@@ -621,8 +684,13 @@ pub fn serialize_document_mapped(doc: &Document) -> (String, SpanMap) {
         out.push('\n');
     }
     let mut map = SpanMap::default();
-    for block in &doc.blocks {
-        out.push('\n');
+    let item = |b: &BlockNode| matches!(b.kind, Block::Item { .. });
+    for (i, block) in doc.blocks.iter().enumerate() {
+        // Consecutive items stay one tight list.
+        if i == 0 || !(item(block) && item(&doc.blocks[i - 1])) {
+            out.push('\n');
+        }
+
         let (snippet, mut block_map) = serialize_block_styled(block, Style::Readable);
         block_map.shift(out.len());
         map.entries.append(&mut block_map.entries);
@@ -918,6 +986,59 @@ mod tests {
         let (src, _) = block_document(&Around::default(), &snippet, 300.0);
         compile(&mut world, &src).unwrap();
         compile(&mut world, &doc).unwrap();
+    }
+
+    /// Lists are Typst markup: item bodies indented past the marker, a
+    /// tight list one item per line, nesting by indentation. Compiled, the
+    /// structure is what the model says.
+    #[test]
+    fn lists() {
+        let mut d = Document::empty();
+        let p = |d: &mut Document, s: &str| {
+            let t = d.text(s);
+            d.paragraph(vec![t])
+        };
+        let (a, b, c, e) = (
+            p(&mut d, "a"),
+            p(&mut d, "b"),
+            p(&mut d, "c"),
+            p(&mut d, "e"),
+        );
+        let x = d.ident("x");
+        let math = d.display(vec![x]);
+        let nested = d.item(ListKind::Numbered, vec![b]);
+        let first = d.item(ListKind::Bullet, vec![a, nested, c, math]);
+        let second = d.item(ListKind::Bullet, vec![e]);
+        let (t, desc) = (d.text("T"), p(&mut d, "desc"));
+        let mut term = d.item(ListKind::Term, vec![desc]);
+        if let Block::Item { term: tt, .. } = &mut term.kind {
+            *tt = vec![t];
+        }
+        d.blocks = vec![first, second, term];
+        let doc = serialize_document(&d);
+        assert!(
+            doc.ends_with("\n- a\n  + b\n\n  c\n\n  $ x $\n- e\n/ T: desc\n"),
+            "{doc}"
+        );
+        use typst::foundations::{Element, Selector};
+        use typst::introspection::Introspector;
+        use typst::model::{EnumElem, ListElem};
+        let mut world = BridgeWorld::new();
+        let compiled = compile(&mut world, &doc).unwrap();
+        let lists = compiled
+            .introspector()
+            .query(&Selector::Elem(Element::of::<ListElem>(), None));
+        assert_eq!(lists.len(), 1, "one bullet list (tight, two items)");
+        let enums = compiled
+            .introspector()
+            .query(&Selector::Elem(Element::of::<EnumElem>(), None));
+        assert_eq!(enums.len(), 1);
+
+        // Rendered on its own, a numbered item shows its place in the list.
+        let one = p(&mut d, "third");
+        let item = d.item(ListKind::Numbered, vec![one]);
+        assert_eq!(serialize_block_numbered(&item, Some(3)).0, "3. third");
+        assert_eq!(serialize_block_styled(&item, Style::Readable).0, "+ third");
     }
 
     #[test]

@@ -189,6 +189,7 @@ fn text_in(blocks: &mut [BlockNode], id: NodeId) -> Result<SeqMut<'_>, OpError> 
             Block::Paragraph(inlines)
             | Block::Heading { inlines, .. }
             | Block::Env { title: inlines, .. }
+            | Block::Item { term: inlines, .. }
                 if inlines.iter().any(|i| i.id == id) =>
             {
                 let inline = inlines.iter_mut().find(|i| i.id == id).expect("found");
@@ -197,7 +198,7 @@ fn text_in(blocks: &mut [BlockNode], id: NodeId) -> Result<SeqMut<'_>, OpError> 
                     Inline::Math(_) => Err(OpError::KindMismatch),
                 };
             }
-            Block::Env { body, .. } => {
+            Block::Env { body, .. } | Block::Item { body, .. } => {
                 if let Ok(seq) = text_in(body, id) {
                     return Ok(seq);
                 }

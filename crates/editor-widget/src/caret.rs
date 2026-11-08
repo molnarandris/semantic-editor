@@ -171,6 +171,11 @@ fn block_stops(block: &BlockNode, l: &BlockLayout, top: bool) -> Vec<Stop> {
                 stop(block, vec![], n, r.right(), r.y, r.bottom(), line),
             ]
         }
+        Block::Item { term, body, .. } => {
+            let mut out = inline_stops(block, term, l);
+            out.extend(body.iter().flat_map(|b| block_stops(b, l, false)));
+            out
+        }
         Block::Env { title, body, .. } => {
             let mut inner = inline_stops(block, title, l);
             inner.extend(body.iter().flat_map(|b| block_stops(b, l, false)));
@@ -469,7 +474,7 @@ pub fn nearest_in_row<'a>(stops: &'a [Stop], path: &[Step], x: f64) -> Option<&'
 #[cfg(test)]
 mod tests {
     use super::*;
-    use model::Document;
+    use model::{Document, ListKind};
     use typst_bridge::{Around, BridgeWorld, block_document, compile, raw_layout, serialize_block};
 
     fn layout_of(block: &BlockNode, width: f64) -> BlockLayout {
@@ -617,6 +622,36 @@ mod tests {
                 in_title.last().unwrap().x
             );
         }
+    }
+
+    /// A list item's text has its stops after the marker; a nested item's
+    /// further in, on the next line; an empty item has one.
+    #[test]
+    fn stops_in_list_items() {
+        let layout = |block: &BlockNode| {
+            let mut world = BridgeWorld::new();
+            let (snippet, map) = serialize_block(block);
+            let (src, offset) = block_document(&Around::default(), &snippet, 300.0);
+            let doc = compile(&mut world, &src).unwrap();
+            raw_layout(&world, &doc.pages()[0], offset).resolve(&map)
+        };
+        let mut d = Document::empty();
+        let (a, b) = (d.text("Outer"), d.text("Inner"));
+        let (pa, pb) = (d.paragraph(vec![a]), d.paragraph(vec![b]));
+        let (ida, idb) = (pa.id, pb.id);
+        let inner = d.item(ListKind::Bullet, vec![pb]);
+        let outer = d.item(ListKind::Bullet, vec![pa, inner]);
+        let s = stops(&outer, Some(&layout(&outer)));
+        let first = |id| s.iter().find(|s| s.cursor.block == id).unwrap();
+        assert_eq!(s.len(), "Outer".len() + "Inner".len() + 2);
+        assert!(first(ida).x > 5.0, "after the bullet: {}", first(ida).x);
+        assert!(first(idb).x > first(ida).x + 5.0);
+        assert!(first(idb).top > first(ida).bottom - 0.1);
+
+        let empty = d.item(ListKind::Bullet, vec![]);
+        let s = stops(&empty, Some(&layout(&empty)));
+        assert_eq!(s.len(), 1);
+        assert!(s[0].x > 5.0, "after the bullet: {}", s[0].x);
     }
 
     /// The acceptance check of the prose milestone: clicking anywhere on a

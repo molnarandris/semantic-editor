@@ -19,7 +19,8 @@ pub use counters::{CounterState, chain_code, initial_state, tracked_counters};
 pub use layout::{BlockLayout, GlyphBox, RawLayout, Rect, raw_layout};
 pub use serialize::{
     CETZ_IMPORT, CETZ_VERSION, DEFAULT_HEADER, HEADER_SPECIMEN, PREAMBLE, SpanMap, Style,
-    serialize_block, serialize_block_styled, serialize_document, serialize_document_mapped,
+    serialize_block, serialize_block_numbered, serialize_block_styled, serialize_document,
+    serialize_document_mapped,
 };
 pub use symbols::resolve_symbol;
 pub use worker::{CompileJob, CompileResult, Rendered, Worker};

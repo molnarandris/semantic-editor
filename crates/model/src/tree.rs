@@ -42,6 +42,26 @@ pub enum Block {
         title: Vec<InlineNode>,
         body: Vec<BlockNode>,
     },
+    /// A list item, `- …`, `+ …` or `/ Term: …`. As in Typst, consecutive
+    /// items make a list and there is no list node; an item inside an item's
+    /// body is nested. The body is never empty. `term` is used by term items
+    /// only (alternating like a paragraph's inlines; empty for the others).
+    Item {
+        kind: ListKind,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        term: Vec<InlineNode>,
+        body: Vec<BlockNode>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ListKind {
+    /// `- item`
+    Bullet,
+    /// `+ item`, numbered by Typst.
+    Numbered,
+    /// `/ Term: description`
+    Term,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -108,12 +128,12 @@ impl Block {
         }
     }
 
-    /// The inlines the caret can type in: a paragraph's or heading's, or an
-    /// environment's title.
+    /// The inlines the caret can type in: a paragraph's or heading's, an
+    /// environment's title or a term item's term.
     pub fn text_inlines(&self) -> Option<&Vec<InlineNode>> {
         match self {
             Block::Paragraph(inlines) | Block::Heading { inlines, .. } => Some(inlines),
-            Block::Env { title, .. } => Some(title),
+            Block::Env { title, .. } | Block::Item { term: title, .. } => Some(title),
             _ => None,
         }
     }
@@ -121,22 +141,22 @@ impl Block {
     pub fn text_inlines_mut(&mut self) -> Option<&mut Vec<InlineNode>> {
         match self {
             Block::Paragraph(inlines) | Block::Heading { inlines, .. } => Some(inlines),
-            Block::Env { title, .. } => Some(title),
+            Block::Env { title, .. } | Block::Item { term: title, .. } => Some(title),
             _ => None,
         }
     }
 
-    /// The blocks of an environment's body.
+    /// The blocks of a container: an environment's or list item's body.
     pub fn body(&self) -> Option<&Vec<BlockNode>> {
         match self {
-            Block::Env { body, .. } => Some(body),
+            Block::Env { body, .. } | Block::Item { body, .. } => Some(body),
             _ => None,
         }
     }
 
     pub fn body_mut(&mut self) -> Option<&mut Vec<BlockNode>> {
         match self {
-            Block::Env { body, .. } => Some(body),
+            Block::Env { body, .. } | Block::Item { body, .. } => Some(body),
             _ => None,
         }
     }
@@ -149,7 +169,8 @@ impl BlockNode {
             Block::DisplayMath(row) => vec![row],
             Block::Paragraph(inlines)
             | Block::Heading { inlines, .. }
-            | Block::Env { title: inlines, .. } => inlines
+            | Block::Env { title: inlines, .. }
+            | Block::Item { term: inlines, .. } => inlines
                 .iter()
                 .filter_map(|i| match &i.kind {
                     Inline::Math(row) => Some(row),
@@ -165,7 +186,8 @@ impl BlockNode {
             Block::DisplayMath(row) => vec![row],
             Block::Paragraph(inlines)
             | Block::Heading { inlines, .. }
-            | Block::Env { title: inlines, .. } => inlines
+            | Block::Env { title: inlines, .. }
+            | Block::Item { term: inlines, .. } => inlines
                 .iter_mut()
                 .filter_map(|i| match &mut i.kind {
                     Inline::Math(row) => Some(row),
@@ -184,6 +206,7 @@ impl BlockNode {
             Block::RawTypst(_) => "raw typst",
             Block::Diagram(_) => "diagram",
             Block::Env { .. } => "environment",
+            Block::Item { .. } => "list item",
         }
     }
 
@@ -217,8 +240,8 @@ fn all_blocks<'a>(blocks: &'a [BlockNode], out: &mut Vec<&'a BlockNode>) {
 
 fn leaves_mut<'a>(blocks: &'a mut [BlockNode], out: &mut Vec<&'a mut BlockNode>) {
     for block in blocks {
-        if matches!(block.kind, Block::Env { .. }) {
-            leaves_mut(block.kind.body_mut().expect("environment"), out);
+        if block.kind.body().is_some() {
+            leaves_mut(block.kind.body_mut().expect("container"), out);
         } else {
             out.push(block);
         }
@@ -408,7 +431,10 @@ impl Document {
                         inline_ids(inlines, f);
                     }
                     Block::DisplayMath(row) => row.visit_ids(f),
-                    Block::Env { title, body, .. } => {
+                    Block::Env { title, body, .. }
+                    | Block::Item {
+                        term: title, body, ..
+                    } => {
                         inline_ids(title, f);
                         visit(body, f);
                     }
@@ -440,7 +466,11 @@ impl Document {
             if let Some(inlines) = block.kind.inlines_mut() {
                 let old = std::mem::take(inlines);
                 *inlines = self.normalized_inlines(old);
-            } else if let Block::Env { title, body, .. } = &mut block.kind {
+            } else if let Block::Env { title, body, .. }
+            | Block::Item {
+                term: title, body, ..
+            } = &mut block.kind
+            {
                 if !title.is_empty() {
                     let old = std::mem::take(title);
                     *title = self.normalized_inlines(old);
@@ -526,7 +556,7 @@ impl Document {
                 return Err(format!("environment {:?} has an empty body", block.id));
             }
             if let Some(inlines) = block.kind.text_inlines()
-                && !(inlines.is_empty() && matches!(block.kind, Block::Env { .. }))
+                && !(inlines.is_empty() && block.kind.body().is_some())
             {
                 for (i, inline) in inlines.iter().enumerate() {
                     check(inline.id)?;
@@ -603,12 +633,12 @@ impl Document {
         self.blocks.iter().position(|b| b.contains(id))
     }
 
-    /// The blocks the caret can be in (all but environments), in document
+    /// The blocks the caret can be in (all but containers), in document
     /// order.
     pub fn leaves(&self) -> Vec<&BlockNode> {
         let mut all = vec![];
         all_blocks(&self.blocks, &mut all);
-        all.retain(|b| !matches!(b.kind, Block::Env { .. }));
+        all.retain(|b| b.kind.body().is_none());
         all
     }
 
@@ -628,6 +658,27 @@ impl Document {
 
     pub fn find_row_mut(&mut self, id: NodeId) -> Option<&mut MathRow> {
         find_row_in(&mut self.blocks, id)
+    }
+
+    /// Whether `id` is a list item.
+    pub fn is_item(&self, id: NodeId) -> bool {
+        matches!(self.block(id).map(|b| &b.kind), Some(Block::Item { .. }))
+    }
+
+    /// Whether `id` is an environment.
+    pub fn is_env(&self, id: NodeId) -> bool {
+        matches!(self.block(id).map(|b| &b.kind), Some(Block::Env { .. }))
+    }
+
+    /// The innermost environment that is or contains block `id`.
+    pub fn env_around(&self, id: NodeId) -> Option<NodeId> {
+        let mut id = id;
+        loop {
+            if self.is_env(id) {
+                return Some(id);
+            }
+            id = self.place(id)?.parent?;
+        }
     }
 
     // ----- Builders. They allocate fresh ids from this document. -----
@@ -731,6 +782,22 @@ impl Document {
         BlockNode {
             id: self.fresh_id(),
             kind: Block::Diagram(source.into()),
+        }
+    }
+
+    /// A list item; an empty body gets an empty paragraph, a term item an
+    /// empty term.
+    pub fn item(&mut self, kind: ListKind, mut body: Vec<BlockNode>) -> BlockNode {
+        if body.is_empty() {
+            body.push(self.paragraph(vec![]));
+        }
+        let term = match kind {
+            ListKind::Term => vec![self.text("")],
+            _ => vec![],
+        };
+        BlockNode {
+            id: self.fresh_id(),
+            kind: Block::Item { kind, term, body },
         }
     }
 

@@ -110,7 +110,7 @@ fn all_cursors(doc: &Document) -> Vec<CursorPath> {
                     offset: o,
                 })
             }),
-            Block::Env { .. } => unreachable!("leaves are not environments"),
+            Block::Env { .. } | Block::Item { .. } => unreachable!("leaves are not containers"),
         }
     }
     out

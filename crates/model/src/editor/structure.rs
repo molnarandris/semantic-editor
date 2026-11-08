@@ -83,10 +83,11 @@ impl Editor {
             }
             // In the text of an environment, or at the edge of a nested one:
             // to just after the (enclosing) environment, outside it.
-            let env = match self.edge() {
+            let parent = match self.edge() {
                 Some((place, _)) => place.parent,
                 None => self.doc.place(self.caret.block).and_then(|p| p.parent),
             };
+            let env = parent.and_then(|p| self.doc.env_around(p));
             return env.is_some_and(|env| self.jump(cursor(env, vec![], 1)));
         };
         self.groups.remove(&p.row);
@@ -130,6 +131,7 @@ impl Editor {
             return self.paragraph_after(place);
         };
         if let Some(env) = pos.place.parent
+            && self.doc.is_env(env)
             && is_empty_text_block(pos.block)
             && self.doc.sibling(pos.place, 1).is_none()
             && pos.place.index > 0

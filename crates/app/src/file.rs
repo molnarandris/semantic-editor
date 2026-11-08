@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 
 /// Version of the file format written by this build. 2: the header.
 /// 3: environments (`Env` blocks), with an optional `title` (absent when
-/// empty, so older version-3 files load unchanged).
-pub const FORMAT_VERSION: u32 = 3;
+/// empty, so older version-3 files load unchanged). 4: list items (`Item`).
+pub const FORMAT_VERSION: u32 = 4;
 
 #[derive(Serialize)]
 struct SemFileOut<'a> {
@@ -76,7 +76,7 @@ mod tests {
         let loaded = from_json(&saved).unwrap();
         assert_eq!(serialize_document(&loaded), serialize_document(&doc));
         assert_eq!(to_json(&loaded), saved);
-        assert!(saved.contains("\"version\": 3"));
+        assert!(saved.contains("\"version\": 4"));
         assert!(saved.contains("\"header\": \"#set heading"));
         assert!(saved.contains(&format!("\"typst\": \"{}\"", typst_bridge::TYPST_VERSION)));
     }

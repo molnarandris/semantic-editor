@@ -18,10 +18,10 @@
 
 use std::sync::Arc;
 
-use model::{Block, BlockNode};
+use model::{Block, BlockNode, ListKind};
 use typst_bridge::{
     Around, CounterState, SpanMap, chain_code, code_display, initial_state, is_code,
-    serialize_block, tracked_counters,
+    serialize_block_numbered, tracked_counters,
 };
 
 /// What was last submitted for a block, and how its counters ended.
@@ -56,7 +56,9 @@ fn code_of(block: &BlockNode) -> Option<&str> {
 /// Whether a block may read or change counters.
 pub fn counter_sensitive(block: &BlockNode) -> bool {
     match &block.kind {
-        Block::Heading { .. } | Block::DisplayMath(_) | Block::Env { .. } => true,
+        Block::Heading { .. } | Block::DisplayMath(_) | Block::Env { .. } | Block::Item { .. } => {
+            true
+        }
         Block::RawTypst(source) => !is_code(source),
         Block::Paragraph(_) | Block::Diagram(_) => false,
     }
@@ -83,7 +85,16 @@ pub fn stale_blocks(
     // Header and code blocks so far.
     let mut context: Arc<str> = header.into();
     let mut jobs = vec![];
+    // Place of a numbered item in its list (items are rendered one by one).
+    let mut number = 0;
     for (index, block) in blocks.iter().enumerate() {
+        number = match block.kind {
+            Block::Item {
+                kind: ListKind::Numbered,
+                ..
+            } => number + 1,
+            _ => 0,
+        };
         let sensitive = code[index].is_none() && counter_sensitive(block);
         let mut around = Around {
             header: context.clone(),
@@ -102,7 +113,7 @@ pub fn stale_blocks(
         } else {
             None
         };
-        let (snippet, map) = serialize_block(block);
+        let (snippet, map) = serialize_block_numbered(block, (number > 0).then_some(number));
         let prev = submitted.get(index);
         let current =
             prev.is_some_and(|p| *p.around == around && p.snippet == snippet && *p.map == map);
@@ -188,7 +199,7 @@ mod tests {
         assert!(submit(&d.blocks, "", &mut views).is_empty());
         let snippet = views[0].snippet.clone();
         d.regenerate_ids();
-        assert_eq!(serialize_block(&d.blocks[0]).0, snippet);
+        assert_eq!(typst_bridge::serialize_block(&d.blocks[0]).0, snippet);
         assert_eq!(submit(&d.blocks, "", &mut views), [0, 1]);
     }
 
@@ -263,6 +274,42 @@ mod tests {
     /// Code blocks apply to the blocks after them and are not part of the
     /// counter chain; editing one recompiles only what follows it, and the
     /// view switch re-renders only code blocks.
+    /// Items are rendered one by one, so a numbered item is written with its
+    /// place in the list; any other block ends the list.
+    #[test]
+    fn numbered_items_know_their_place() {
+        let mut d = Document::empty();
+        let item = |d: &mut Document, s: &str, kind| {
+            let t = d.text(s);
+            let p = d.paragraph(vec![t]);
+            d.item(kind, vec![p])
+        };
+        let t = d.text("text");
+        let blocks = vec![
+            item(&mut d, "a", ListKind::Numbered),
+            item(&mut d, "b", ListKind::Numbered),
+            d.paragraph(vec![t]),
+            item(&mut d, "c", ListKind::Numbered),
+            item(&mut d, "d", ListKind::Bullet),
+        ];
+        // Items are counter-sensitive: render them in turn as the chain
+        // moves on.
+        let mut views: Vec<View> = (0..blocks.len()).map(|_| View::default()).collect();
+        for _ in 0..blocks.len() {
+            for job in stale_blocks(&blocks, "", false, &submitted(&views)) {
+                // As if rendered, with the counters unchanged.
+                views[job.index] = View {
+                    end: job.start.clone(),
+                    around: job.around,
+                    snippet: job.snippet,
+                    map: job.map,
+                };
+            }
+        }
+        let got: Vec<&str> = views.iter().map(|v| v.snippet.as_str()).collect();
+        assert_eq!(got, ["1. a", "2. b", "text", "1. c", "- d"]);
+    }
+
     #[test]
     fn code_blocks_apply_to_later_blocks() {
         let mut d = Document::empty();

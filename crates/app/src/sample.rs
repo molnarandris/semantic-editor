@@ -1,6 +1,6 @@
 //! A hard-coded document for the viewer milestone.
 
-use model::{Document, InlineNode, MathNode};
+use model::{Document, InlineNode, ListKind, MathNode};
 
 /// Short helpers so the sample reads roughly like the formulas it builds.
 struct B(Document);
@@ -110,6 +110,26 @@ for i in range(3) {
   line(\"A\" + str(i) + \".east\", \"A\" + str(i + 1) + \".west\")
 }",
     ));
+    let t = b.t("Two cases to keep in mind:");
+    blocks.push(b.0.paragraph(vec![t]));
+    let t1 = b.t("Product states have ");
+    let (chi, eq, one) = (b.s("χ"), b.s("="), b.n("1"));
+    let m = b.m(vec![chi, eq, one]);
+    let t2 = b.t(" and carry no entanglement.");
+    let p = b.0.paragraph(vec![t1, m, t2]);
+    blocks.push(b.0.item(ListKind::Bullet, vec![p]));
+    let t = b.t("Small entangled examples:");
+    let p = b.0.paragraph(vec![t]);
+    let mut examples = vec![p];
+    for s in [
+        "the GHZ state, with bond dimension 2;",
+        "the AKLT state, the ground state of a spin-1 chain.",
+    ] {
+        let t = b.t(s);
+        let p = b.0.paragraph(vec![t]);
+        examples.push(b.0.item(ListKind::Numbered, vec![p]));
+    }
+    blocks.push(b.0.item(ListKind::Bullet, examples));
 
     // ----- 2 Transfer matrix -----
     let t = b.t("The transfer matrix");

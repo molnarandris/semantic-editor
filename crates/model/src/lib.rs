@@ -15,5 +15,6 @@ pub use history::History;
 pub use ops::{Items, Op, OpError, Seq};
 pub use selection::{SelRange, Selection};
 pub use tree::{
-    Block, BlockNode, Document, Inline, InlineNode, MathKind, MathNode, MathRow, NodeId, Place,
+    Block, BlockNode, Document, Inline, InlineNode, ListKind, MathKind, MathNode, MathRow, NodeId,
+    Place,
 };

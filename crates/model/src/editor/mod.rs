@@ -657,7 +657,9 @@ impl Editor {
     fn in_env(&self) -> bool {
         self.doc
             .place(self.caret.block)
-            .is_some_and(|p| p.parent.is_some())
+            .and_then(|p| p.parent)
+            .and_then(|p| self.doc.env_around(p))
+            .is_some()
     }
 
     /// The environment to outline: the one the caret is just before/after
@@ -672,8 +674,8 @@ impl Editor {
         if let Some(env) = self.title_env() {
             return Some((env, true));
         }
-        let env = self.doc.place(self.caret.block)?.parent?;
-        Some((env, true))
+        let parent = self.doc.place(self.caret.block)?.parent?;
+        Some((self.doc.env_around(parent)?, true))
     }
 
     /// Whether the next Backspace unwraps the focused environment.

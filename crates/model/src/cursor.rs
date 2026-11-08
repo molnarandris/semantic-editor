@@ -10,6 +10,8 @@
 //! - Environment: empty path, `offset` 0 is just before it, 1 just after it
 //!   (outside it; inside, the caret is in one of its blocks). Its title is
 //!   addressed like a paragraph's inlines, `[Index(i)]`.
+//! - List item: no position of its own; a term item's term is addressed
+//!   like a paragraph's inlines.
 //! - Row path: pairs `Index(k), <child>` descending into node `k`'s child row
 //!   (`Num`, `Den`, `Base`, `Sup`, `Sub`); `offset` is a position `0..=len`
 //!   between the row's nodes.
@@ -100,7 +102,8 @@ impl Document {
             Block::Env { .. } if path.is_empty() => Ok(Target::Edge { block }),
             Block::Paragraph(inlines)
             | Block::Heading { inlines, .. }
-            | Block::Env { title: inlines, .. } => {
+            | Block::Env { title: inlines, .. }
+            | Block::Item { term: inlines, .. } => {
                 let Some(Step::Index(i)) = path.first() else {
                     return Err(0);
                 };
@@ -129,8 +132,18 @@ impl Document {
     }
 
     /// The first caret position of `block` (of an environment: just before
-    /// it).
+    /// it; of a list item: in its term or its first block).
     pub fn start_of(&self, block: &BlockNode) -> CursorPath {
+        if let Block::Item { term, body, .. } = &block.kind {
+            return match (term.is_empty(), body.first()) {
+                (true, Some(first)) => self.start_of(first),
+                _ => CursorPath {
+                    block: block.id,
+                    path: vec![Step::Index(0)],
+                    offset: 0,
+                },
+            };
+        }
         let path = if block.kind.inlines().is_some() {
             vec![Step::Index(0)]
         } else {
@@ -146,6 +159,12 @@ impl Document {
     /// The last caret position of `block` (of an environment: just after
     /// it).
     pub fn end_of(&self, block: &BlockNode) -> CursorPath {
+        if let Some(last) = match &block.kind {
+            Block::Item { body, .. } => body.last(),
+            _ => None,
+        } {
+            return self.end_of(last);
+        }
         let path = match block.kind.inlines() {
             Some(inlines) => vec![Step::Index(inlines.len().saturating_sub(1))],
             None => vec![],
@@ -237,6 +256,12 @@ impl Document {
                 }
                 out.push(at(vec![], 1));
             }
+            Block::Item { term, body, .. } => {
+                inline_positions(term, &mut out);
+                for child in body {
+                    out.extend(self.positions(child));
+                }
+            }
         }
         out
     }
@@ -256,15 +281,18 @@ impl Document {
             Block::DisplayMath(row) => row,
             Block::Paragraph(inlines)
             | Block::Heading { inlines, .. }
-            | Block::Env { title: inlines, .. } => {
+            | Block::Env { title: inlines, .. }
+            | Block::Item { term: inlines, .. } => {
                 let Some(Step::Index(i)) = path.first() else {
                     return crumbs;
                 };
-                if matches!(block.kind, Block::Env { .. }) {
-                    crumbs.push(Crumb {
-                        label: "title",
-                        path_len: 0,
-                    });
+                let label = match block.kind {
+                    Block::Env { .. } => Some("title"),
+                    Block::Item { .. } => Some("term"),
+                    _ => None,
+                };
+                if let Some(label) = label {
+                    crumbs.push(Crumb { label, path_len: 0 });
                 }
                 let Some(Inline::Math(row)) = inlines.get(*i).map(|n| &n.kind) else {
                     return crumbs;

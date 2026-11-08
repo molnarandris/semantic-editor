@@ -457,5 +457,19 @@ Done before M11–M13, at the user's request (2026-11-08). Implementation notes:
     does not give a compile error. Until function detection (later in M14b), clicking
     the heading of a function without a title parameter shows a compile error until
     the empty title goes.
+- Lists (2026-11-08). Model as in Typst: no list node, a list item is a container
+  block, `Block::Item { kind: Bullet | Numbered | Term, term, body }`; consecutive
+  items make a list, an item in an item's body is nested. So nothing has to split or
+  merge lists. A term item's term is addressed like a title. Items have no caret
+  position of their own (no edges, no outline). `Document::env_around` finds the
+  environment around a block, so Esc, the outline and Enter-on-empty-last-paragraph
+  keep meaning environments only. File format 4.
+  - Typst markup in both styles: `- `, `+ `, `/ Term: `; the body's further lines are
+    indented two spaces (`Writer::indent`, `nl`, also inside raw/diagram source);
+    items are a line apart (a tight list), other blocks a blank line apart. Top-level
+    items render one by one, so a numbered one is written `3. …` in the editor's
+    renders with its place in the list (`serialize_block_numbered`, counted in
+    `stale_blocks`); spacing between top-level items is the editor's block spacing,
+    not the list's. Items are counter-sensitive (they may hold equations).
 
 Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing.

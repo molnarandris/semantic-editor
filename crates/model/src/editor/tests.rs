@@ -1,5 +1,5 @@
 use super::*;
-use crate::tree::MathKind;
+use crate::tree::{ListKind, MathKind};
 
 /// "ab $x$ cd" / "ef" / display "y" / "gh"
 fn sample() -> Editor {
@@ -44,6 +44,15 @@ fn block_text(b: &BlockNode) -> String {
                 false => format!("({})", inline_text(title)),
             };
             format!("#{name}{title}[{}]", inner.join("|"))
+        }
+        Block::Item { kind, term, body } => {
+            let inner: Vec<String> = body.iter().map(block_text).collect();
+            let marker = match kind {
+                ListKind::Bullet => "-".into(),
+                ListKind::Numbered => "+".into(),
+                ListKind::Term => format!("/{}:", inline_text(term)),
+            };
+            format!("{marker}[{}]", inner.join("|"))
         }
     }
 }
