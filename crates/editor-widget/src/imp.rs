@@ -8,7 +8,7 @@ use gtk::glib::subclass::Signal;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, glib, graphene, gsk};
-use model::{CursorPath, Document, Editor, NodeId};
+use model::{Block, CursorPath, Document, Editor, NodeId};
 use typst_bridge::{
     Around, BLOCK_PAD_PT, BlockLayout, CompileJob, CompileResult, CounterState, HEADER_SPECIMEN,
     Raster, SpanMap, Worker,
@@ -679,8 +679,27 @@ impl SemEditor {
             })
         };
         let blue = |a: f32| gdk::RGBA::new(0.21, 0.52, 0.89, a);
+        // A display equation's shading spans its whole line (the page, or
+        // the environment it is in), so it stays symmetric with a number.
+        let line = |r: graphene::Rect| {
+            let block = ed.caret().block;
+            if !matches!(
+                ed.doc().block(block).map(|b| &b.kind),
+                Some(Block::DisplayMath(_))
+            ) {
+                return r;
+            }
+            let (x, w) = match ed.doc().place(block).and_then(|p| p.parent) {
+                Some(env) => match layout.box_of(env) {
+                    Some(e) => (e.x, e.w),
+                    None => return r,
+                },
+                None => (0.0, layout.width),
+            };
+            graphene::Rect::new((x0 + x * zoom) as f32, r.y(), (w * zoom) as f32, r.height())
+        };
         if let Some(r) = context.first().and_then(|&id| rect(id, 2.0)) {
-            snapshot.append_color(&blue(0.07), &r);
+            snapshot.append_color(&blue(0.07), &line(r));
         }
         if context.len() > 1
             && let Some(r) = context.last().and_then(|&id| rect(id, 1.5))

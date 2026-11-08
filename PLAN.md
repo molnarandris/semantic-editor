@@ -419,6 +419,8 @@ Done before M11–M13, at the user's request (2026-11-08). Implementation notes:
   inside (`Editor::env_focus`, `snapshot_env_outline`); edge stops sit just outside the
   outline on the first/last line, and Home/End skip them (`Stop::edge`).
 - Follow-up (user remarks, 2026-11-08):
+  - The caret shading of a display equation spans the whole line (the page width, or
+    the environment's box), not just the formula, so it is symmetric with a number.
   - `^`/`_` after a large operator (∑, ∏, ∫, ⋃, ⨁, …) attach to it
     (`symbols::is_large_op`); they used to start an empty base. Other operators
     still get an empty base, and `/` still does not take a large operator.
