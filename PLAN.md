@@ -428,7 +428,27 @@ Done before M11–M13, at the user's request (2026-11-08). Implementation notes:
   - `^`/`_` after a large operator (∑, ∏, ∫, ⋃, ⨁, …) attach to it
     (`symbols::is_large_op`); they used to start an empty base. Other operators
     still get an empty base, and `/` still does not take a large operator.
-- Not yet (M14b): titles (`#theorem[Title][…]`), lists, environments by Typst function
-  detection (any `#identifier` is accepted; an unknown one shows a compile error).
+- Not yet (M14b): lists, environments by Typst function detection (any `#identifier`
+  is accepted; an unknown one shows a compile error).
+
+## M14b — Environment titles, lists, block-level calls
+
+- Titles (2026-11-08). Popular packages checked first: ctheorems, theorion, thmbox and
+  frame-it take the title as the first content argument, `#theorem[Title][Body]`
+  (great-theorems and theorion also accept `title:`, lemmify `name:`), so that is what
+  the editor writes. `Block::Env.title` holds inlines like a paragraph's, empty when
+  there is none (serde default, so version-3 files load unchanged). The caret
+  addresses it on the environment itself, `[Index(i)]`, between "just before" and the
+  body (`Block::text_inlines`, used wherever a caret can type). The sample's `theorem`
+  takes `..args` and shows the title as its figure caption: "Theorem 1 (Title)."
+  - Typing `#lemma(` starts an environment with the caret in its title; `)` at the end
+    of the title (no `(` left open in it) or Enter goes on to the body; Esc goes just
+    after the environment. Backspace/Delete at the ends of a title never reach the
+    blocks around; Backspace in an empty title removes it. `$$` in a title leaves the
+    formula instead of making a display formula.
+  - An empty title is shown only in the editor (a transparent `x` keeps the caret
+    between the parentheses) and goes, as its own undo step, when the caret leaves it
+    (`Editor::drop_left_title`, from `jump` and `set_caret`). `Editor::edit_title`
+    adds one (for the click on the heading).
 
 Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing.

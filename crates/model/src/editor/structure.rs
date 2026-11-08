@@ -78,6 +78,9 @@ impl Editor {
             return self.leave_block(place);
         }
         let Some(p) = self.row_pos() else {
+            if let Some(env) = self.title_env() {
+                return self.jump(cursor(env, vec![], 1));
+            }
             // In the text of an environment, or at the edge of a nested one:
             // to just after the (enclosing) environment, outside it.
             let env = match self.edge() {
@@ -109,6 +112,10 @@ impl Editor {
             } else {
                 return self.paragraph_after(p.place);
             }
+        }
+        // In a title: on to the body.
+        if let Some(env) = self.title_env() {
+            return self.body_start(env).is_some_and(|c| self.jump(c));
         }
         let Some(pos) = self.text_pos() else {
             let Some(place) = self.doc.place(self.caret.block) else {

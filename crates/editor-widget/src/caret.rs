@@ -171,8 +171,9 @@ fn block_stops(block: &BlockNode, l: &BlockLayout, top: bool) -> Vec<Stop> {
                 stop(block, vec![], n, r.right(), r.y, r.bottom(), line),
             ]
         }
-        Block::Env { body, .. } => {
-            let inner: Vec<Stop> = body.iter().flat_map(|b| block_stops(b, l, false)).collect();
+        Block::Env { title, body, .. } => {
+            let mut inner = inline_stops(block, title, l);
+            inner.extend(body.iter().flat_map(|b| block_stops(b, l, false)));
             let r = match (top, l.box_of(block.id)) {
                 (true, _) => Rect {
                     x: 0.0,
@@ -553,6 +554,52 @@ mod tests {
             of(id2)[0].top > of(id1)[0].bottom - 0.1,
             "second paragraph below"
         );
+    }
+
+    /// A title's stops come between "just before" and the body, inside the
+    /// parentheses; an empty title (being typed) has one.
+    #[test]
+    fn stops_in_environment_titles() {
+        let header = "#let lemma(..args) = {
+  let (title, body) = if args.pos().len() > 1 { args.pos() } else { (none, ..args.pos()) }
+  block(width: 100%)[*Lemma 1#if title != none [ (#title)].* #emph(body)]
+}";
+        let layout = |block: &BlockNode| {
+            let mut world = BridgeWorld::new();
+            let (snippet, map) = serialize_block(block);
+            let around = Around {
+                header: header.into(),
+                ..Around::default()
+            };
+            let (src, offset) = block_document(&around, &snippet, 300.0);
+            let doc = compile(&mut world, &src).unwrap();
+            raw_layout(&world, &doc.pages()[0], offset).resolve(&map)
+        };
+        let mut d = Document::empty();
+        for title in ["", "Key"] {
+            let text = d.text("Text");
+            let p = d.paragraph(vec![text]);
+            let body = p.id;
+            let mut env = d.env("lemma", vec![p]);
+            let t = d.text(title);
+            if let Block::Env { title, .. } = &mut env.kind {
+                title.push(t);
+            }
+            let s = stops(&env, Some(&layout(&env)));
+            let in_title: Vec<&Stop> = s
+                .iter()
+                .filter(|s| s.cursor.block == env.id && !s.cursor.path.is_empty())
+                .collect();
+            assert_eq!(in_title.len(), title.len() + 1, "title {title:?}");
+            let body_x = s.iter().find(|s| s.cursor.block == body).unwrap().x;
+            assert!(s[0].edge && s[1] == *in_title[0]);
+            assert!(
+                30.0 < in_title[0].x && in_title.last().unwrap().x + 5.0 < body_x,
+                "title {title:?}: {} .. {}, body at {body_x}",
+                in_title[0].x,
+                in_title.last().unwrap().x
+            );
+        }
     }
 
     /// The acceptance check of the prose milestone: clicking anywhere on a

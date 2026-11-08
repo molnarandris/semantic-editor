@@ -6,7 +6,8 @@ use model::{BlockNode, Document};
 use serde::{Deserialize, Serialize};
 
 /// Version of the file format written by this build. 2: the header.
-/// 3: environments (`Env` blocks).
+/// 3: environments (`Env` blocks), with an optional `title` (absent when
+/// empty, so older version-3 files load unchanged).
 pub const FORMAT_VERSION: u32 = 3;
 
 #[derive(Serialize)]

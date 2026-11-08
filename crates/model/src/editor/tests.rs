@@ -18,25 +18,32 @@ fn sample() -> Editor {
 }
 
 /// The top-level blocks as short strings; an environment as
-/// `#name[block|block]`.
+/// `#name[block|block]`, with a title `#name(title)[…]`.
 fn texts(e: &Editor) -> Vec<String> {
     e.doc().blocks.iter().map(block_text).collect()
 }
 
+fn inline_text(v: &[InlineNode]) -> String {
+    v.iter()
+        .map(|i| match &i.kind {
+            Inline::Text(s) => s.clone(),
+            Inline::Math(_) => "$".into(),
+        })
+        .collect()
+}
+
 fn block_text(b: &BlockNode) -> String {
     match &b.kind {
-        Block::Paragraph(v) | Block::Heading { inlines: v, .. } => v
-            .iter()
-            .map(|i| match &i.kind {
-                Inline::Text(s) => s.clone(),
-                Inline::Math(_) => "$".into(),
-            })
-            .collect(),
+        Block::Paragraph(v) | Block::Heading { inlines: v, .. } => inline_text(v),
         Block::DisplayMath(_) => "$$".into(),
         Block::RawTypst(s) | Block::Diagram(s) => s.clone(),
-        Block::Env { name, body } => {
+        Block::Env { name, title, body } => {
             let inner: Vec<String> = body.iter().map(block_text).collect();
-            format!("#{name}[{}]", inner.join("|"))
+            let title = match title.is_empty() {
+                true => String::new(),
+                false => format!("({})", inline_text(title)),
+            };
+            format!("#{name}{title}[{}]", inner.join("|"))
         }
     }
 }
@@ -308,6 +315,89 @@ fn environments() {
     // Not an identifier: stays text.
     e.insert_text(" #1 ");
     assert_eq!(texts(&e)[2], "After #1 ");
+}
+
+/// An environment's optional title: `#name(` starts one, `)` or Enter goes
+/// on to the body, an empty title goes when the caret leaves it, and keys at
+/// its ends never reach the blocks around.
+#[test]
+fn environment_titles() {
+    let mut d = Document::empty();
+    let t = d.text("Before");
+    d.blocks = vec![d.paragraph(vec![t])];
+    let mut e = Editor::new(d);
+    caret_at(&mut e, 0, 0, 6);
+    e.enter();
+    e.insert_text("#lemma(Gap (spectral)) Text.");
+    assert_eq!(texts(&e), ["Before", "#lemma(Gap (spectral))[Text.]"]);
+    e.doc().check_invariants().unwrap();
+    let env = e.doc().blocks[1].id;
+    let title_start = cursor(env, vec![Step::Index(0)], 0);
+
+    // ← from the body: through the title, then just before the environment.
+    e.set_caret(e.doc().start_of(&e.doc().blocks[1].kind.body().unwrap()[0]));
+    assert!(e.move_left());
+    assert_eq!(e.caret(), &cursor(env, vec![Step::Index(0)], 14));
+    e.set_caret(title_start.clone());
+    assert!(e.move_left());
+    assert_eq!(e.caret(), &cursor(env, vec![], 0));
+
+    // Keys at the ends of the title stay in it; Esc leaves the environment.
+    e.set_caret(title_start.clone());
+    assert!(!e.backspace());
+    e.set_caret(cursor(env, vec![Step::Index(0)], 14));
+    assert!(!e.delete());
+    assert_eq!(texts(&e), ["Before", "#lemma(Gap (spectral))[Text.]"]);
+    assert!(e.escape());
+    assert_eq!(e.caret(), &cursor(env, vec![], 1));
+
+    // A formula in the title; `$$` in it does not make a display formula.
+    e.set_caret(cursor(env, vec![Step::Index(0)], 3));
+    e.insert_text("$$x");
+    assert_eq!(texts(&e)[1], "#lemma(Gap$x (spectral))[Text.]");
+    e.doc().check_invariants().unwrap();
+    while e.undo() {}
+
+    // Adding a title to an environment that has none, and leaving it empty.
+    let mut d = Document::empty();
+    let t = d.text("Text.");
+    let p = d.paragraph(vec![t]);
+    d.blocks = vec![d.env("lemma", vec![p])];
+    let mut e = Editor::new(d);
+    let env = e.doc().blocks[0].id;
+    assert!(e.edit_title(env));
+    assert_eq!(texts(&e), ["#lemma()[Text.]"]);
+    assert_eq!(e.env_focus(), Some((env, true)));
+    assert!(e.move_right());
+    assert_eq!(texts(&e), ["#lemma[Text.]"], "an empty title goes");
+    assert_eq!(
+        e.caret(),
+        &e.doc().start_of(&e.doc().blocks[0].kind.body().unwrap()[0])
+    );
+    e.doc().check_invariants().unwrap();
+
+    // Typed, then edited again (the caret goes to its end); Enter → body.
+    e.edit_title(env);
+    e.insert_text("Key");
+    e.set_caret(e.doc().doc_end());
+    assert_eq!(texts(&e), ["#lemma(Key)[Text.]"]);
+    e.edit_title(env);
+    assert_eq!(e.caret(), &cursor(env, vec![Step::Index(0)], 3));
+    e.enter();
+    assert_eq!(
+        e.caret(),
+        &e.doc().start_of(&e.doc().blocks[0].kind.body().unwrap()[0])
+    );
+
+    // Backspace in an empty title removes it.
+    e.edit_title(env);
+    for _ in 0..3 {
+        e.backspace();
+    }
+    assert_eq!(texts(&e), ["#lemma()[Text.]"]);
+    e.backspace();
+    assert_eq!(texts(&e), ["#lemma[Text.]"]);
+    e.doc().check_invariants().unwrap();
 }
 
 /// Enter on a raw/diagram block adds a paragraph: after it at its end (also

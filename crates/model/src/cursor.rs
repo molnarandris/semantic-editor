@@ -8,7 +8,8 @@
 //! - Display math: the path is a row path from the block's row.
 //! - Raw Typst: empty path, `offset` counts chars.
 //! - Environment: empty path, `offset` 0 is just before it, 1 just after it
-//!   (outside it; inside, the caret is in one of its blocks).
+//!   (outside it; inside, the caret is in one of its blocks). Its title is
+//!   addressed like a paragraph's inlines, `[Index(i)]`.
 //! - Row path: pairs `Index(k), <child>` descending into node `k`'s child row
 //!   (`Num`, `Den`, `Base`, `Sup`, `Sub`); `offset` is a position `0..=len`
 //!   between the row's nodes.
@@ -96,7 +97,10 @@ impl Document {
     /// length of the longest valid prefix that leads to a container (or 0).
     pub fn walk<'a>(&'a self, block: &'a BlockNode, path: &[Step]) -> Result<Target<'a>, usize> {
         match &block.kind {
-            Block::Paragraph(inlines) | Block::Heading { inlines, .. } => {
+            Block::Env { .. } if path.is_empty() => Ok(Target::Edge { block }),
+            Block::Paragraph(inlines)
+            | Block::Heading { inlines, .. }
+            | Block::Env { title: inlines, .. } => {
                 let Some(Step::Index(i)) = path.first() else {
                     return Err(0);
                 };
@@ -111,8 +115,7 @@ impl Document {
             Block::RawTypst(text) | Block::Diagram(text) if path.is_empty() => {
                 Ok(Target::Raw { block, text })
             }
-            Block::Env { .. } if path.is_empty() => Ok(Target::Edge { block }),
-            Block::RawTypst(_) | Block::Diagram(_) | Block::Env { .. } => Err(0),
+            Block::RawTypst(_) | Block::Diagram(_) => Err(0),
         }
     }
 
@@ -205,28 +208,30 @@ impl Document {
             path,
             offset,
         };
-        match &block.kind {
-            Block::Paragraph(inlines) | Block::Heading { inlines, .. } => {
-                for (i, inline) in inlines.iter().enumerate() {
-                    match &inline.kind {
-                        Inline::Text(s) => {
-                            for k in 0..=s.chars().count() {
-                                out.push(at(vec![Step::Index(i)], k));
-                            }
-                        }
-                        Inline::Math(row) => {
-                            row_positions(block.id, vec![Step::Index(i)], row, &mut out)
+        let inline_positions = |inlines: &[InlineNode], out: &mut Vec<CursorPath>| {
+            for (i, inline) in inlines.iter().enumerate() {
+                match &inline.kind {
+                    Inline::Text(s) => {
+                        for k in 0..=s.chars().count() {
+                            out.push(at(vec![Step::Index(i)], k));
                         }
                     }
+                    Inline::Math(row) => row_positions(block.id, vec![Step::Index(i)], row, out),
                 }
+            }
+        };
+        match &block.kind {
+            Block::Paragraph(inlines) | Block::Heading { inlines, .. } => {
+                inline_positions(inlines, &mut out);
             }
             Block::DisplayMath(row) => row_positions(block.id, vec![], row, &mut out),
             Block::RawTypst(s) | Block::Diagram(s) => {
                 out.push(at(vec![], 0));
                 out.push(at(vec![], s.chars().count()));
             }
-            Block::Env { body, .. } => {
+            Block::Env { title, body, .. } => {
                 out.push(at(vec![], 0));
+                inline_positions(title, &mut out);
                 for child in body {
                     out.extend(self.positions(child));
                 }
@@ -249,10 +254,18 @@ impl Document {
         let mut consumed = 0;
         let mut row = match &block.kind {
             Block::DisplayMath(row) => row,
-            Block::Paragraph(inlines) | Block::Heading { inlines, .. } => {
+            Block::Paragraph(inlines)
+            | Block::Heading { inlines, .. }
+            | Block::Env { title: inlines, .. } => {
                 let Some(Step::Index(i)) = path.first() else {
                     return crumbs;
                 };
+                if matches!(block.kind, Block::Env { .. }) {
+                    crumbs.push(Crumb {
+                        label: "title",
+                        path_len: 0,
+                    });
+                }
                 let Some(Inline::Math(row)) = inlines.get(*i).map(|n| &n.kind) else {
                     return crumbs;
                 };
@@ -264,7 +277,7 @@ impl Document {
                 consumed = 1;
                 row
             }
-            Block::RawTypst(_) | Block::Diagram(_) | Block::Env { .. } => return crumbs,
+            Block::RawTypst(_) | Block::Diagram(_) => return crumbs,
         };
         while let [Step::Index(k), child, rest @ ..] = path {
             let Some(node) = row.nodes.get(*k) else { break };

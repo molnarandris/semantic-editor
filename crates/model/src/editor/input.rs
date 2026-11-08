@@ -65,6 +65,13 @@ impl Editor {
         if c == '$' {
             return self.insert_formula();
         }
+        // `)` at the end of a title with no `(` open in it: on to the body.
+        if c == ')'
+            && let Some(env) = self.title_env()
+            && self.at_title_end(env)
+        {
+            return self.body_start(env).is_some_and(|c| self.jump(c));
+        }
         self.text_insert(&c.to_string())
     }
 
@@ -89,8 +96,8 @@ impl Editor {
             return self.retype(place, Some(level as u8), level, after);
         }
         // `#name ` as the whole paragraph makes it an environment `#name[…]`
-        // with the caret in its body.
-        if s == " "
+        // with the caret in its body; `#name(` one with a title, caret in it.
+        if (s == " " || s == "(")
             && pos.inlines.len() == 1
             && pos.offset == pos.len
             && matches!(pos.block.kind, Block::Paragraph(_))
@@ -98,8 +105,15 @@ impl Editor {
         {
             let place = pos.place;
             let body = self.doc.paragraph(vec![]);
-            let after = self.doc.start_of(&body);
-            let env = self.doc.env(&name, vec![body]);
+            let mut after = self.doc.start_of(&body);
+            let mut env = self.doc.env(&name, vec![body]);
+            if s == "(" {
+                let text = self.doc.text("");
+                if let Block::Env { title, .. } = &mut env.kind {
+                    title.push(text);
+                }
+                after = cursor(env.id, vec![Step::Index(0)], 0);
+            }
             let op = Op::Replace {
                 seq: place.seq(),
                 index: place.index,
@@ -420,10 +434,10 @@ impl Editor {
             return false;
         };
         let block_id = block.id;
-        let inlines = block
-            .kind
-            .inlines()
-            .expect("inline formula in a text block");
+        // In an environment's title the formula stays inline.
+        let Some(inlines) = block.kind.inlines() else {
+            return self.leave_formula(p);
+        };
         let n = inlines.len();
         let mut tail: Vec<InlineNode> = inlines[i + 1..].to_vec();
         let before_empty = i == 1 && text_of(&inlines[0]).is_empty();

@@ -220,9 +220,18 @@ impl Writer {
                 w.verbatim(block.id, src, "  ");
                 w.out.push_str("\n}))");
             }
-            Block::Env { name, body } => {
+            Block::Env { name, title, body } => {
                 w.out.push('#');
                 w.out.push_str(name);
+                // The title is the first content argument, as in ctheorems
+                // and theorion: `#lemma[Title][…]`. An empty one (being
+                // typed) shows only in the editor.
+                let empty = matches!(&title[..], [InlineNode { kind: Inline::Text(s), .. }] if s.is_empty());
+                if !title.is_empty() && !(empty && w.style == Style::Readable) {
+                    w.out.push('[');
+                    w.text_block(title, false);
+                    w.out.push(']');
+                }
                 w.out.push_str("[\n");
                 for (i, child) in body.iter().enumerate() {
                     if i > 0 {

@@ -91,7 +91,7 @@ impl Selection {
         }
 
         let prefix = &a.path[..d];
-        if let Some(inlines) = block.kind.inlines().filter(|_| d == 0) {
+        if let Some(inlines) = block.kind.text_inlines().filter(|_| d == 0) {
             let bound = |c: &CursorPath| -> Option<((usize, usize), (usize, usize))> {
                 let Some(Step::Index(i)) = c.path.first() else {
                     return None;

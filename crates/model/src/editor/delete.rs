@@ -24,7 +24,8 @@ impl Editor {
                 self.commit(vec![op], cursor(block, path, start), Last::Other)
             }
             Selected::Formula { block, inline } => {
-                let Some(inlines) = self.doc.block(block).and_then(|b| b.kind.inlines()) else {
+                let Some(inlines) = self.doc.block(block).and_then(|b| b.kind.text_inlines())
+                else {
                     return false;
                 };
                 let (ops, after) = remove_formula(block, inlines, inline);
@@ -122,6 +123,17 @@ impl Editor {
                 inline: pos.inline - 1,
             });
         }
+        if let Block::Env { title, .. } = &pos.block.kind {
+            // The start of a title: an empty one goes, caret into the body.
+            if !is_empty_text(title) {
+                return false;
+            }
+            let (Some(op), Some(after)) = (self.remove_title(block_id), self.body_start(block_id))
+            else {
+                return false;
+            };
+            return self.commit(vec![op], after, Last::Other);
+        }
         let place = pos.place;
         let Some(before) = self.doc.sibling(place, -1) else {
             // The start of an environment: mark it (the next press unwraps
@@ -207,7 +219,7 @@ impl Editor {
             let inlines = self
                 .doc
                 .at(place)
-                .and_then(|b| b.kind.inlines())
+                .and_then(|b| b.kind.text_inlines())
                 .expect("text block");
             let (ops, after) = remove_formula(p.block, inlines, i);
             return self.commit(ops, after, Last::Other);
@@ -357,6 +369,9 @@ impl Editor {
                 block: block_id,
                 inline: pos.inline + 1,
             });
+        }
+        if matches!(pos.block.kind, Block::Env { .. }) {
+            return false; // the end of a title
         }
         let place = pos.place;
         let Some(next) = self.doc.sibling(place, 1) else {

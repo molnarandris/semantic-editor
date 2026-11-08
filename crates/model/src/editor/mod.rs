@@ -255,8 +255,9 @@ impl Editor {
     pub fn set_caret(&mut self, caret: CursorPath) {
         self.finish_word();
         self.selected = None;
-        self.caret = self.doc.fix_cursor(&caret);
+        let old = std::mem::replace(&mut self.caret, self.doc.fix_cursor(&caret));
         self.last = Last::Other;
+        self.drop_left_title(&old);
     }
 
     pub fn can_undo(&self) -> bool {
@@ -302,7 +303,7 @@ impl Editor {
         let c = &self.caret;
         let place = self.doc.place(c.block)?;
         let block = self.doc.at(place)?;
-        let inlines = block.kind.inlines()?;
+        let inlines = block.kind.text_inlines()?;
         let [Step::Index(inline)] = c.path[..] else {
             return None;
         };
@@ -329,7 +330,7 @@ impl Editor {
         Some(RowPos {
             place,
             block: block.id,
-            base: usize::from(block.kind.inlines().is_some()),
+            base: usize::from(block.kind.text_inlines().is_some()),
             path: c.path.clone(),
             row: row.id,
             offset: c.offset,
@@ -386,8 +387,97 @@ impl Editor {
         self.last = Last::Other;
         self.selected = None;
         let changed = caret != self.caret;
-        self.caret = caret;
+        let old = std::mem::replace(&mut self.caret, caret);
+        self.drop_left_title(&old);
         changed
+    }
+
+    // ----- Environment titles -----
+
+    /// The environment whose title the caret is in (its text or a formula
+    /// in it).
+    fn title_env(&self) -> Option<NodeId> {
+        let block = self.doc.block(self.caret.block)?;
+        (matches!(block.kind, Block::Env { .. }) && !self.caret.path.is_empty()).then_some(block.id)
+    }
+
+    /// Whether the caret is at the end of the title of `env`, with every `(`
+    /// typed in the title closed.
+    fn at_title_end(&self, env: NodeId) -> bool {
+        let Some(Block::Env { title, .. }) = self.doc.block(env).map(|b| &b.kind) else {
+            return false;
+        };
+        let text: String = title.iter().map(text_of).collect();
+        let open = text.matches('(').count() as isize - text.matches(')').count() as isize;
+        let end = title.last().map_or(0, |t| text_of(t).chars().count());
+        open <= 0 && self.caret.path == [Step::Index(title.len() - 1)] && self.caret.offset == end
+    }
+
+    /// The first caret position of an environment's body.
+    fn body_start(&self, env: NodeId) -> Option<CursorPath> {
+        let first = self.doc.block(env)?.kind.body()?.first()?;
+        Some(self.doc.start_of(first))
+    }
+
+    /// Put the caret in the title of environment `env` (at its end), adding
+    /// an empty title if it has none; an empty title goes again when the
+    /// caret leaves it.
+    pub fn edit_title(&mut self, env: NodeId) -> bool {
+        self.finish_word();
+        let Some(Block::Env { title, .. }) = self.doc.block(env).map(|b| &b.kind) else {
+            return false;
+        };
+        if let Some(last) = title.last() {
+            let end = text_of(last).chars().count();
+            return self.jump(cursor(env, vec![Step::Index(title.len() - 1)], end));
+        }
+        let text = self.doc.text("");
+        let op = Op::Insert {
+            seq: Seq::Inlines(env),
+            index: 0,
+            items: Items::Inlines(vec![text]),
+        };
+        self.commit(vec![op], cursor(env, vec![Step::Index(0)], 0), Last::Other)
+    }
+
+    /// Ops that remove the title of environment `env`.
+    fn remove_title(&self, env: NodeId) -> Option<Op> {
+        let title = match &self.doc.block(env)?.kind {
+            Block::Env { title, .. } if !title.is_empty() => title,
+            _ => return None,
+        };
+        Some(Op::Delete {
+            seq: Seq::Inlines(env),
+            index: 0,
+            count: title.len(),
+        })
+    }
+
+    /// After the caret moved from `old`: if `old` was in an empty title and
+    /// the caret is no longer in it, remove the title (its own undo step).
+    fn drop_left_title(&mut self, old: &CursorPath) {
+        let still_in = old.block == self.caret.block && !self.caret.path.is_empty();
+        if old.path.is_empty() || still_in {
+            return;
+        }
+        let empty = match self.doc.block(old.block).map(|b| &b.kind) {
+            Some(Block::Env { title, .. }) => is_empty_text(title),
+            _ => false,
+        };
+        if !empty {
+            return;
+        }
+        let Some(op) = self.remove_title(old.block) else {
+            return;
+        };
+        let after = self.caret.clone();
+        if self
+            .history
+            .apply(&mut self.doc, vec![op], old.clone(), after.clone())
+            .is_ok()
+        {
+            self.caret = self.doc.fix_cursor(&after);
+        }
     }
 
     /// Select a subtree (the first Backspace/Delete on a structure, a
@@ -437,7 +527,7 @@ impl Editor {
         let Some(block) = self.doc.block(c.block) else {
             return false;
         };
-        let inline_formula = block.kind.inlines().is_some();
+        let inline_formula = block.kind.text_inlines().is_some();
         let prefix = &c.path[..path_len.min(c.path.len())];
         let sel = match prefix {
             [] => return false,
@@ -486,7 +576,7 @@ impl Editor {
             Some(Selected::Formula { block, inline }) => self
                 .doc
                 .block(*block)
-                .and_then(|b| b.kind.inlines())
+                .and_then(|b| b.kind.text_inlines())
                 .and_then(|v| v.get(*inline))
                 .map_or(vec![], |i| vec![i.id]),
             Some(Selected::Block { block }) => vec![*block],
@@ -505,12 +595,15 @@ impl Editor {
         };
         let (mut row, formula) = match (&block.kind, p.path.first()) {
             (Block::DisplayMath(row), _) => (row, row.id),
-            (Block::Paragraph(v) | Block::Heading { inlines: v, .. }, Some(Step::Index(i))) => {
-                match v.get(*i).map(|n| (&n.kind, n.id)) {
-                    Some((Inline::Math(row), id)) => (row, id),
-                    _ => return vec![],
-                }
-            }
+            (
+                Block::Paragraph(v)
+                | Block::Heading { inlines: v, .. }
+                | Block::Env { title: v, .. },
+                Some(Step::Index(i)),
+            ) => match v.get(*i).map(|n| (&n.kind, n.id)) {
+                Some((Inline::Math(row), id)) => (row, id),
+                _ => return vec![],
+            },
             _ => return vec![],
         };
         let mut out = vec![formula];
@@ -542,7 +635,12 @@ impl Editor {
             }
             (None, Some(p)) if p.nested() => "Tab → next slot · Esc → leave structure",
             (None, Some(_)) => "/ fraction · ^ _ scripts · Esc or $ → leave formula",
-            (None, None) if self.typing_env_name() => "space → environment (e.g. #lemma, #proof)",
+            (None, None) if self.typing_env_name() => {
+                "space → environment (e.g. #lemma, #proof) · ( → with a title"
+            }
+            (None, _) if self.title_env().is_some() => {
+                "title · Enter or ) → on to the text · Esc → just after the environment"
+            }
             (None, None) if self.edge().is_some() => {
                 "outside the environment: typing or Enter → new paragraph · Backspace → select it"
             }
@@ -570,6 +668,9 @@ impl Editor {
         }
         if self.edge().is_some() {
             return Some((self.caret.block, false));
+        }
+        if let Some(env) = self.title_env() {
+            return Some((env, true));
         }
         let env = self.doc.place(self.caret.block)?.parent?;
         Some((env, true))
@@ -612,10 +713,12 @@ impl Editor {
 }
 
 fn is_empty_text_block(block: &BlockNode) -> bool {
-    matches!(
-        block.kind.inlines().map(|v| v.as_slice()),
-        Some([InlineNode { kind: Inline::Text(s), .. }]) if s.is_empty()
-    )
+    block.kind.inlines().is_some_and(|v| is_empty_text(v))
+}
+
+/// Inlines holding only an empty text.
+fn is_empty_text(inlines: &[InlineNode]) -> bool {
+    matches!(inlines, [InlineNode { kind: Inline::Text(s), .. }] if s.is_empty())
 }
 
 fn delete_block(place: Place) -> Op {

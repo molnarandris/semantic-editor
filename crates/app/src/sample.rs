@@ -272,12 +272,15 @@ line((0, 0.25), (0, -0.25))",
     );
     blocks.push(b.0.paragraph(vec![t1]));
     blocks.push(b.0.raw(
-        "// Theorems: figures of their own kind, numbered on their own.
-#let theorem(body) = figure(
-  kind: \"theorem\", supplement: \"Theorem\", numbering: \"1\", outlined: false, body,
-)
+        "// Theorems: figures of their own kind, numbered on their own, with an
+// optional title: #theorem[Title][Statement] (as in ctheorems).
+#let theorem(..args) = {
+  let (title, body) = if args.pos().len() > 1 { args.pos() } else { (none, ..args.pos()) }
+  figure(kind: \"theorem\", supplement: \"Theorem\", numbering: \"1\", outlined: false,
+    caption: title, body)
+}
 #show figure.where(kind: \"theorem\"): it => block(width: 100%, above: 1em, below: 1em,
-  align(left)[*Theorem #it.counter.display(it.numbering).* #emph(it.body)])
+  align(left)[*Theorem #it.counter.display(it.numbering)#if it.caption != none [ (#it.caption.body)].* #emph(it.body)])
 #let proof(body) = block(width: 100%)[_Proof._ #body #h(1fr) $square$]",
     ));
 
@@ -320,7 +323,12 @@ line((0, 0.25), (0, -0.25))",
     let t6 = b.t(".");
     let statement =
         b.0.paragraph(vec![t1, m1, t2, m2, t3, m3, t4, m4, t5, m5, t6]);
-    blocks.push(b.0.env("theorem", vec![statement]));
+    let mut theorem = b.0.env("theorem", vec![statement]);
+    let title = b.t("Fundamental theorem of MPS");
+    if let model::Block::Env { title: t, .. } = &mut theorem.kind {
+        t.push(title);
+    }
+    blocks.push(theorem);
 
     let t1 = b.t(
         "Equal states have equal transfer matrices, which fixes the tensors up to a gauge \

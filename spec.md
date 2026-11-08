@@ -319,6 +319,9 @@ any paragraph; the environment only contributes "Theorem", the number and the fo
 (bold, italic, …). The body is the call's content argument. Moved before M11 at the
 user's request. Split: **M14a** environments with a body of blocks (done 2026-11-08, see
 PLAN.md; created by typing `#lemma` + space); **M14b** titles, lists, block-level calls.
+Titles decided 2026-11-08: optional, never added by default; positional
+`#theorem[Title][…]` as in the popular packages; added by clicking the heading
+("Theorem 2.1.") or by typing `#lemma(` instead of `#lemma` + space.
 
 - Theorem, lemma, definition, proof, … as a container block holding paragraphs and
   equations (the model is a flat block list today, so nesting is the main change:
