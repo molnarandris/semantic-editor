@@ -75,7 +75,7 @@ impl Window {
         *self.block_editor.borrow_mut() = Some(ed.clone());
 
         // Start at the page's scale; the preview asks for its own once laid out.
-        let ppp = self.editor.zoom() * self.window.scale_factor() as f64;
+        let ppp = self.editor.zoom() * editor_widget::pixels::device_scale(&self.window);
         self.editor.set_preview(Some((block, ppp)));
         let editor = self.editor.downgrade();
         ed.preview.connect_wants_scale(move |ppp| {
@@ -393,18 +393,26 @@ fn follow_style_scheme(buffer: &sourceview5::Buffer) {
 }
 
 mod preview {
-    //! Shows the preview render scaled to fill the widget (keeping its
-    //! aspect ratio), centred. When the scale it is drawn at differs from
-    //! the one it was rendered at, it asks for a new render at that scale.
+    //! Shows the preview render as large as fits the widget (keeping its
+    //! aspect ratio), centred. Drawn like the editor's blocks: one texture
+    //! pixel per device pixel, on the device pixel grid. When the render
+    //! does not fit (dialog resized, other monitor) it asks for a render at
+    //! the fitting scale and shows the old one scaled until it arrives.
 
     use std::cell::{Cell, RefCell};
 
+    use editor_widget::pixels;
     use gtk::prelude::*;
     use gtk::subclass::prelude::*;
     use gtk::{gdk, glib, graphene, gsk};
 
-    /// Re-render when the drawn scale is off by more than this fraction.
-    const RESCALE_TOLERANCE: f64 = 0.04;
+    /// A render is drawn as is when its scale is within this band of the
+    /// fitting scale (at most that much smaller, never larger than the
+    /// widget).
+    const FIT_BAND: (f64, f64) = (0.97, 1.0 + 1e-6);
+    /// Renders are requested slightly below the fitting scale, inside the
+    /// band, so rounding of the texture size cannot push them out of it.
+    const ASK_AT: f64 = 0.99;
 
     type ScaleCallback = Box<dyn Fn(f64)>;
 
@@ -428,7 +436,15 @@ mod preview {
             type ParentType = gtk::Widget;
         }
 
-        impl ObjectImpl for Preview {}
+        impl ObjectImpl for Preview {
+            fn constructed(&self) {
+                self.parent_constructed();
+                pixels::on_device_scale_change(&*self.obj(), |obj| {
+                    obj.imp().ask_for_scale();
+                    obj.queue_draw();
+                });
+            }
+        }
 
         impl WidgetImpl for Preview {
             fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
@@ -442,26 +458,24 @@ mod preview {
                 };
                 let Some(fit) = self.fit() else { return };
                 let widget = self.obj();
-                let sf = widget.scale_factor() as f64;
+                let ds = pixels::device_scale(&*widget);
                 let ppp = self.pixel_per_pt.get();
-                // Logical size; one texture pixel per device pixel when the
-                // render is at the drawn scale, so it stays sharp.
-                let (w, h) = if (fit * sf / ppp - 1.0).abs() <= RESCALE_TOLERANCE {
-                    (texture.width() as f64 / sf, texture.height() as f64 / sf)
+                let (tw, th) = (texture.width() as f64, texture.height() as f64);
+                let (aw, ah) = (widget.width() as f64, widget.height() as f64);
+                let (w, h, filter) = if fits(ppp, fit * ds) {
+                    // One texture pixel per device pixel: no resampling.
+                    (tw / ds, th / ds, gsk::ScalingFilter::Linear)
                 } else {
+                    // Stopgap until the render at the fitting scale arrives.
                     (
-                        texture.width() as f64 / ppp * fit,
-                        texture.height() as f64 / ppp * fit,
+                        tw / ppp * fit,
+                        th / ppp * fit,
+                        gsk::ScalingFilter::Trilinear,
                     )
                 };
-                let (aw, ah) = (widget.width() as f64, widget.height() as f64);
-                let rect = graphene::Rect::new(
-                    ((aw - w) / 2.0 * sf).round() as f32 / sf as f32,
-                    ((ah - h) / 2.0 * sf).round() as f32 / sf as f32,
-                    w as f32,
-                    h as f32,
-                );
-                snapshot.append_scaled_texture(&texture, gsk::ScalingFilter::Trilinear, &rect);
+                let (x, y) = pixels::pixel_snapper(&*widget)((aw - w) / 2.0, (ah - h) / 2.0);
+                let rect = graphene::Rect::new(x as f32, y as f32, w as f32, h as f32);
+                snapshot.append_scaled_texture(&texture, filter, &rect);
             }
         }
 
@@ -482,17 +496,24 @@ mod preview {
 
             pub fn ask_for_scale(&self) {
                 let Some(fit) = self.fit() else { return };
-                let wanted = fit * self.obj().scale_factor() as f64;
-                let near = |a: f64, b: f64| (a / b - 1.0).abs() <= RESCALE_TOLERANCE;
-                if near(wanted, self.pixel_per_pt.get()) || near(wanted, self.asked.get()) {
+                let target = fit * pixels::device_scale(&*self.obj());
+                if fits(self.pixel_per_pt.get(), target) || fits(self.asked.get(), target) {
                     return;
                 }
+                let wanted = target * ASK_AT;
                 self.asked.set(wanted);
                 if let Some(f) = self.wants_scale.borrow().as_ref() {
                     f(wanted);
                 }
             }
         }
+    }
+
+    /// Whether a render at `ppp` device pixels per point can be drawn as is
+    /// where `target` would fill the widget exactly.
+    fn fits(ppp: f64, target: f64) -> bool {
+        let r = ppp / target;
+        (FIT_BAND.0..=FIT_BAND.1).contains(&r)
     }
 
     glib::wrapper! {
