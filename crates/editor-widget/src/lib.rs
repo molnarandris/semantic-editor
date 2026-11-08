@@ -111,10 +111,25 @@ impl SemEditor {
         self.imp().block_error(block)
     }
 
-    /// A block's current render (the last good one if its last compile
-    /// failed) and the logical pixels per texture pixel at the current zoom.
-    pub fn block_texture(&self, block: NodeId) -> Option<(gtk::gdk::Texture, f64)> {
-        self.imp().block_texture(block)
+    /// Keep a render of `block` at `pixel_per_pt` device pixels per point,
+    /// cropped to its ink, up to date for a preview (`None` stops it). Read
+    /// it with [`Self::preview_texture`] on `preview-rendered`.
+    pub fn set_preview(&self, target: Option<(NodeId, f64)>) {
+        self.imp().set_preview(target);
+    }
+
+    /// The preview render and its device pixels per point.
+    pub fn preview_texture(&self) -> Option<(gtk::gdk::Texture, f64)> {
+        self.imp().preview_texture()
+    }
+
+    /// The preview render changed.
+    pub fn connect_preview_rendered<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+        self.connect_local("preview-rendered", false, move |args| {
+            let obj = args[0].get::<Self>().expect("SemEditor");
+            f(&obj);
+            None
+        })
     }
 
     /// A raw/diagram block should be opened for editing (Enter or double

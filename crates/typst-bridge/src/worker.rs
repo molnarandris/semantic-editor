@@ -42,6 +42,9 @@ pub struct CompileJob {
     pub pixel_per_pt: f64,
     /// Keep the render in the disk cache too (slow blocks).
     pub persist: bool,
+    /// One-off render (e.g. a zoomed preview): not added to any cache, so renders
+    /// at arbitrary scales do not pile up.
+    pub transient: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -172,6 +175,9 @@ fn run(
                     }
                 };
                 result.inspect(|(raster, raw)| {
+                    if job.transient {
+                        return;
+                    }
                     if cache.len() >= CACHE_CAPACITY {
                         cache.clear();
                     }
@@ -234,6 +240,7 @@ mod tests {
             width_pt: 200.0,
             pixel_per_pt: 1.0,
             persist: false,
+            transient: false,
         }
     }
 
@@ -248,6 +255,7 @@ mod tests {
         let job = CompileJob {
             map,
             persist: true,
+            transient: false,
             ..job(g.id, 1, &snippet)
         };
         let mut layouts = vec![];

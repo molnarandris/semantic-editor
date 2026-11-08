@@ -207,6 +207,8 @@ Chosen approach: **counter state chained through blocks** (no whole-document com
   Proposed: an `adw::Dialog` (or window) with a GtkSourceView and a preview picture fed
   by the same worker. Simpler than doing it in-page, since the block can be anywhere on
   the page. Effort: small. The same dialog edits the document header in M9a.
+- Later: Typst syntax highlighting in the source dialog (GtkSourceView 5 has no Typst
+  language). Borrow the language definition from Typesetter (check its license).
 
 ### M9a — Header and numbering engine (items 1, 4)
 

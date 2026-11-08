@@ -138,6 +138,12 @@ impl Window {
                 this.block_rendered(block);
             }
         });
+        let weak = Rc::downgrade(self);
+        self.editor.connect_preview_rendered(move |_| {
+            if let Some(this) = weak.upgrade() {
+                this.refresh_block_preview();
+            }
+        });
 
         let weak = Rc::downgrade(self);
         self.window.connect_close_request(move |_| {

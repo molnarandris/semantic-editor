@@ -89,6 +89,7 @@ mod tests {
                     width_pt: 300.0,
                     pixel_per_pt: 1.0,
                     persist: job.persist,
+                    transient: false,
                 });
             }
             for _ in &jobs {

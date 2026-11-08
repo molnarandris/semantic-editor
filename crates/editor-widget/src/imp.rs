@@ -81,10 +81,30 @@ impl BlockView {
     }
 }
 
+/// Job id of preview renders (never a real node).
+const PREVIEW_ID: NodeId = NodeId(u64::MAX);
+/// Largest device pixels per point a preview is rendered at.
+const MAX_PREVIEW_PPP: f64 = 12.0;
+
+/// A zoomed render of one block for the source editor's preview, cropped
+/// to its ink.
+#[derive(Default)]
+struct Preview {
+    block: Option<NodeId>,
+    pixel_per_pt: f64,
+    /// Snippet, page width and scale of the last submitted job.
+    submitted: Option<(String, f64, f64)>,
+    /// Generation of the last submitted job and of the result shown.
+    generation: u64,
+    shown: u64,
+    texture: Option<(gdk::Texture, f64)>,
+}
+
 #[derive(Default)]
 pub struct SemEditor {
     pub(crate) editor: RefCell<Editor>,
     views: RefCell<Vec<BlockView>>,
+    preview: RefCell<Preview>,
     worker: OnceCell<Worker>,
     generation: Cell<u64>,
     /// Page width and pixels per point the current renders were requested at.
@@ -152,6 +172,8 @@ impl ObjectImpl for SemEditor {
                 Signal::builder("block-rendered")
                     .param_types([u64::static_type()])
                     .build(),
+                // The preview render (see `set_preview`) changed.
+                Signal::builder("preview-rendered").build(),
             ]
         })
     }
@@ -545,15 +567,6 @@ impl SemEditor {
             .and_then(|v| v.error.clone())
     }
 
-    /// A block's current texture and its size in logical pixels per
-    /// texture pixel (at the current zoom).
-    pub(crate) fn block_texture(&self, block: NodeId) -> Option<(gdk::Texture, f64)> {
-        let views = self.views.borrow();
-        let view = views.iter().find(|v| v.id == block)?;
-        let texture = view.texture.clone()?;
-        Some((texture, self.zoom() / view.texture_ppp))
-    }
-
     /// Select the structure of breadcrumb entry `path_len`.
     pub(crate) fn select_crumb(&self, path_len: usize) {
         let changed = self.editor.borrow_mut().select_crumb(path_len);
@@ -912,11 +925,92 @@ impl SemEditor {
                 width_pt: self.page_width_pt.get(),
                 pixel_per_pt: self.pixel_per_pt.get(),
                 persist: job.persist,
+                transient: false,
             });
         }
+        drop((ed, views));
+        self.submit_preview();
+    }
+
+    /// Render `block` for a preview at `pixel_per_pt` (device pixels per
+    /// point), kept up to date with its source; `None` stops it.
+    pub(crate) fn set_preview(&self, target: Option<(NodeId, f64)>) {
+        {
+            let mut preview = self.preview.borrow_mut();
+            match target {
+                None => *preview = Preview::default(),
+                Some((block, ppp)) => {
+                    if preview.block != Some(block) {
+                        *preview = Preview::default();
+                        preview.block = Some(block);
+                    }
+                    preview.pixel_per_pt = ppp.clamp(0.25, MAX_PREVIEW_PPP);
+                }
+            }
+        }
+        self.submit_preview();
+    }
+
+    pub(crate) fn preview_texture(&self) -> Option<(gdk::Texture, f64)> {
+        self.preview.borrow().texture.clone()
+    }
+
+    /// Submit the preview job if its block, size or scale changed.
+    fn submit_preview(&self) {
+        let width = self.page_width_pt.get();
+        let mut preview = self.preview.borrow_mut();
+        let Some(block) = preview.block else { return };
+        let views = self.views.borrow();
+        let Some(view) = views.iter().find(|v| v.id == block) else {
+            return;
+        };
+        if width <= 0.0 || view.snippet.is_empty() {
+            return;
+        }
+        let key = (view.snippet.clone(), width, preview.pixel_per_pt);
+        if preview.submitted.as_ref() == Some(&key) {
+            return;
+        }
+        let generation = self.generation.get() + 1;
+        self.generation.set(generation);
+        preview.generation = generation;
+        preview.submitted = Some(key);
+        self.worker.get().expect("worker").submit(CompileJob {
+            block: PREVIEW_ID,
+            generation,
+            snippet: view.snippet.clone(),
+            map: view.map.clone(),
+            width_pt: width,
+            pixel_per_pt: preview.pixel_per_pt,
+            persist: false,
+            transient: true,
+        });
+    }
+
+    fn on_preview_result(&self, result: CompileResult) {
+        {
+            let mut preview = self.preview.borrow_mut();
+            if preview.block.is_none() || result.generation < preview.shown {
+                return;
+            }
+            let Ok(rendered) = result.outcome else {
+                return; // The page shows the error; keep the last preview.
+            };
+            preview.shown = result.generation;
+            let raster = match rendered.raster.ink_bounds() {
+                Some(bounds) => Arc::new(rendered.raster.crop(bounds)),
+                None => rendered.raster,
+            };
+            preview.texture = Some((texture(raster), rendered.pixel_per_pt));
+        }
+        self.obj().emit_by_name::<()>("preview-rendered", &[]);
     }
 
     fn on_result(&self, result: CompileResult) {
+        if result.block == PREVIEW_ID {
+            self.on_preview_result(result);
+            return;
+        }
         {
             let mut views = self.views.borrow_mut();
             let Some(view) = views.iter_mut().find(|v| v.id == result.block) else {

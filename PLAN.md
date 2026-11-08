@@ -263,9 +263,19 @@ Implementation notes (done):
   preview. A fresh dialog per open; Done or Esc closes it. Edits still apply 300 ms
   after the last key (one undo step per block); pending edits are applied before
   save, export, closing the window and discarding.
-- The preview shows the page's own texture (`SemEditor::block_texture`, refreshed on
-  `block-rendered`), at the page's zoom, shrunk to fit and centred. After a failed
-  compile it keeps the last good render, like the page.
+- Preview: its own render of the block, cropped to the ink (`Raster::ink_bounds` /
+  `crop`) and scaled to fill the panel, centred. `SemEditor::set_preview(block, ppp)`
+  submits it to the same worker (job id `NodeId(u64::MAX)`, resubmitted when the
+  block's snippet or the page width changes; `preview-rendered` signal). The preview
+  widget asks for a re-render whenever the scale it draws at is more than 4 % off
+  the rendered one (dialog/pane resize), so it stays sharp; until then the old
+  render is scaled. Capped at 12 device px/pt. Such jobs are `transient`: never
+  added to the worker's memory or disk cache, so renders at arbitrary scales don't
+  pile up. After a failed compile the preview keeps the last good render.
+- The source wraps (`WordChar`, no horizontal scroll) with a hanging indent: each
+  indented line gets a tag `indent-N` with `indent = -N × space width`, so wrapped
+  continuation lines start under the line's first non-blank character. Tags are
+  recomputed on every buffer change (block sources are short).
 - The dialog closes itself when its block disappears (undo of the insert, new
   document) and reloads its text when the source changes from outside.
 

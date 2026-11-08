@@ -44,6 +44,42 @@ impl std::fmt::Debug for Raster {
     }
 }
 
+impl Raster {
+    /// The smallest rectangle `(x, y, width, height)` holding every pixel
+    /// with ink (alpha > 0), or `None` if the raster is blank.
+    pub fn ink_bounds(&self) -> Option<(u32, u32, u32, u32)> {
+        let (w, h) = (self.width as usize, self.height as usize);
+        let inked = |x: usize, y: usize| self.data[(y * w + x) * 4 + 3] > 0;
+        let row_inked = |y: usize| (0..w).any(|x| inked(x, y));
+        let top = (0..h).find(|&y| row_inked(y))?;
+        let bottom = (0..h).rev().find(|&y| row_inked(y))?;
+        let col_inked = |x: usize| (top..=bottom).any(|y| inked(x, y));
+        let left = (0..w).find(|&x| col_inked(x))?;
+        let right = (0..w).rev().find(|&x| col_inked(x))?;
+        Some((
+            left as u32,
+            top as u32,
+            (right - left + 1) as u32,
+            (bottom - top + 1) as u32,
+        ))
+    }
+
+    /// A copy of the rectangle `(x, y, width, height)`.
+    pub fn crop(&self, (x, y, cw, ch): (u32, u32, u32, u32)) -> Raster {
+        let stride = self.width as usize * 4;
+        let mut data = Vec::with_capacity(cw as usize * ch as usize * 4);
+        for row in y as usize..(y + ch) as usize {
+            let start = row * stride + x as usize * 4;
+            data.extend_from_slice(&self.data[start..start + cw as usize * 4]);
+        }
+        Raster {
+            width: cw,
+            height: ch,
+            data,
+        }
+    }
+}
+
 /// Rasterize a page at `pixel_per_pt` (zoom × device scale).
 pub fn render_page(page: &Page, pixel_per_pt: f64) -> Raster {
     let opts = typst_render::RenderOptions {
@@ -70,6 +106,32 @@ pub fn compile_pdf(source: &str) -> Result<Vec<u8>, Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ink_bounds_and_crop() {
+        let (w, h) = (6u32, 5u32);
+        let mut data = vec![0u8; (w * h * 4) as usize];
+        for (x, y) in [(2, 1), (4, 3)] {
+            data[((y * w + x) * 4 + 3) as usize] = 255;
+        }
+        let raster = Raster {
+            width: w,
+            height: h,
+            data,
+        };
+        let bounds = raster.ink_bounds();
+        assert_eq!(bounds, Some((2, 1, 3, 3)));
+        let cropped = raster.crop(bounds.unwrap());
+        assert_eq!((cropped.width, cropped.height), (3, 3));
+        assert_eq!(cropped.data[3], 255);
+        assert_eq!(cropped.data[(2 * 3 + 2) * 4 + 3], 255);
+        let blank = Raster {
+            width: 2,
+            height: 2,
+            data: vec![0; 16],
+        };
+        assert_eq!(blank.ink_bounds(), None);
+    }
 
     #[test]
     fn formula_compiles_and_renders_ink() {

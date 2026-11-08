@@ -1,7 +1,7 @@
 //! Source editor for diagram and raw Typst blocks: a dialog with the source
 //! on the left and the block's live render on the right. Edits apply to the
-//! model after a short pause; the editor widget's worker renders them and
-//! the preview shows the same texture as the page.
+//! model after a short pause; the editor widget's worker renders the block
+//! for the page and, cropped and at the preview's own scale, for the dialog.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -61,18 +61,30 @@ impl Window {
         let Some(source) = self.editor.block_source(block) else {
             return;
         };
-        let title = match self.editor.document().block(block).map(|b| &b.kind) {
-            Some(Block::Diagram(_)) => "Diagram",
-            _ => "Raw Typst",
-        };
-        let subtitle = match self.editor.document().block(block).map(|b| &b.kind) {
-            Some(Block::Diagram(_)) => "CeTZ drawing code",
-            _ => "Typst markup",
+        let diagram = matches!(
+            self.editor.document().block(block).map(|b| &b.kind),
+            Some(Block::Diagram(_))
+        );
+        let (title, subtitle) = if diagram {
+            ("Diagram", "CeTZ drawing code")
+        } else {
+            ("Raw Typst", "Typst markup")
         };
         let ed = Rc::new(build(title, subtitle, block));
         ed.set_text(&source);
         *self.block_editor.borrow_mut() = Some(ed.clone());
+
+        // Start at the page's scale; the preview asks for its own once laid out.
+        let ppp = self.editor.zoom() * self.window.scale_factor() as f64;
+        self.editor.set_preview(Some((block, ppp)));
+        let editor = self.editor.downgrade();
+        ed.preview.connect_wants_scale(move |ppp| {
+            if let Some(editor) = editor.upgrade() {
+                editor.set_preview(Some((block, ppp)));
+            }
+        });
         self.refresh_block_preview();
+        self.show_block_error();
 
         let weak = Rc::downgrade(self);
         ed.view.buffer().connect_changed(move |_| {
@@ -107,11 +119,18 @@ impl Window {
             .borrow()
             .as_ref()
             .is_some_and(|cur| Rc::ptr_eq(cur, ed));
-        if !is_current {
-            return;
+        if is_current {
+            self.apply_block_edit();
+            self.forget_block_editor();
         }
-        self.apply_block_edit();
-        self.block_editor.borrow_mut().take();
+    }
+
+    /// Drop the dialog state (no apply) and stop its preview renders.
+    fn forget_block_editor(&self) {
+        if let Some(ed) = self.block_editor.borrow_mut().take() {
+            ed.cancel_debounce();
+        }
+        self.editor.set_preview(None);
         self.editor.grab_focus();
     }
 
@@ -152,10 +171,8 @@ impl Window {
         };
         match self.editor.block_source(ed.block) {
             None => {
-                ed.cancel_debounce();
-                self.block_editor.borrow_mut().take();
+                self.forget_block_editor();
                 ed.dialog.close();
-                self.editor.grab_focus();
             }
             Some(source)
                 if ed.debounce.borrow().is_none() && !ed.loading.get() && ed.text() != source =>
@@ -166,21 +183,27 @@ impl Window {
         }
     }
 
-    /// A render or error arrived; update the preview if it is our block.
+    /// A page render or error arrived; update the error if it is our block.
     pub(super) fn block_rendered(&self, block: NodeId) {
         if self
             .current_block_editor()
             .is_some_and(|ed| ed.block == block)
         {
-            self.refresh_block_preview();
+            self.show_block_error();
         }
     }
 
-    fn refresh_block_preview(&self) {
+    /// The zoomed preview render arrived.
+    pub(super) fn refresh_block_preview(&self) {
+        if let Some(ed) = self.current_block_editor() {
+            ed.preview.set_texture(self.editor.preview_texture());
+        }
+    }
+
+    fn show_block_error(&self) {
         let Some(ed) = self.current_block_editor() else {
             return;
         };
-        ed.preview.set_texture(self.editor.block_texture(ed.block));
         let error = self.editor.block_error(ed.block);
         ed.error.set_visible(error.is_some());
         ed.error.set_label(error.as_deref().unwrap_or(""));
@@ -210,16 +233,20 @@ fn build(title: &str, subtitle: &str, block: NodeId) -> BlockEditor {
     view.set_tab_width(2);
     view.set_indent_width(2);
     view.set_insert_spaces_instead_of_tabs(true);
+    view.set_wrap_mode(gtk::WrapMode::WordChar);
     view.set_top_margin(8);
     view.set_bottom_margin(8);
     view.set_left_margin(6);
+    hanging_indent(&view);
     let source = gtk::ScrolledWindow::builder()
         .child(&view)
+        .hscrollbar_policy(gtk::PolicyType::Never)
         .hexpand(true)
         .vexpand(true)
         .build();
 
     let preview = Preview::default();
+    preview.set_hexpand(true);
     preview.set_vexpand(true);
     preview.set_margin_start(12);
     preview.set_margin_end(12);
@@ -247,15 +274,15 @@ fn build(title: &str, subtitle: &str, block: NodeId) -> BlockEditor {
         .end_child(&right)
         .shrink_start_child(false)
         .shrink_end_child(false)
-        .position(520)
+        .position(440)
         .build();
 
     let content = adw::ToolbarView::new();
     content.add_top_bar(&header);
     content.set_content(Some(&paned));
     let dialog = adw::Dialog::builder()
-        .content_width(1040)
-        .content_height(640)
+        .content_width(1100)
+        .content_height(720)
         .child(&content)
         .build();
     let weak = dialog.downgrade();
@@ -274,6 +301,65 @@ fn build(title: &str, subtitle: &str, block: NodeId) -> BlockEditor {
         loading: Cell::new(false),
         debounce: RefCell::new(None),
     }
+}
+
+/// Wrapped lines start under the first non-blank character of their line:
+/// each line gets a tag with the negative of its indentation as `indent`,
+/// which GTK applies as a hanging indent to the continuation lines.
+fn hanging_indent(view: &sourceview5::View) {
+    let update = {
+        let view = view.downgrade();
+        move || {
+            let Some(view) = view.upgrade() else { return };
+            let buffer = view.buffer();
+            let table = buffer.tag_table();
+            let (start, end) = buffer.bounds();
+            let mut names = vec![];
+            table.foreach(|tag| {
+                if let Some(name) = tag.name().filter(|n| n.starts_with("indent-")) {
+                    names.push(name);
+                }
+            });
+            for name in names {
+                buffer.remove_tag_by_name(&name, &start, &end);
+            }
+
+            let layout = view.create_pango_layout(Some(" "));
+            let space = layout.pixel_size().0;
+            let tab = view.tab_width() as i32;
+            for line in 0..buffer.line_count() {
+                let Some(a) = buffer.iter_at_line(line) else {
+                    continue;
+                };
+                let mut columns = 0;
+                let mut b = a;
+                while !b.ends_line() {
+                    match b.char() {
+                        ' ' => columns += 1,
+                        '\t' => columns += tab - columns % tab,
+                        _ => break,
+                    }
+                    b.forward_char();
+                }
+                if columns == 0 {
+                    continue;
+                }
+                let name = format!("indent-{columns}");
+                if table.lookup(&name).is_none() {
+                    let width = columns * space;
+                    let tag = gtk::TextTag::builder().name(&name).indent(-width).build();
+                    table.add(&tag);
+                }
+                let mut line_end = a;
+                if !line_end.ends_line() {
+                    line_end.forward_to_line_end();
+                }
+                buffer.apply_tag_by_name(&name, &a, &line_end);
+            }
+        }
+    };
+    update();
+    view.buffer().connect_changed(move |_| update());
 }
 
 /// Light or dark source colours, following the system style.
@@ -307,8 +393,9 @@ fn follow_style_scheme(buffer: &sourceview5::Buffer) {
 }
 
 mod preview {
-    //! Shows a block texture at its page size (same zoom as the page), shrunk
-    //! to fit and centred.
+    //! Shows the preview render scaled to fill the widget (keeping its
+    //! aspect ratio), centred. When the scale it is drawn at differs from
+    //! the one it was rendered at, it asks for a new render at that scale.
 
     use std::cell::{Cell, RefCell};
 
@@ -316,14 +403,22 @@ mod preview {
     use gtk::subclass::prelude::*;
     use gtk::{gdk, glib, graphene, gsk};
 
+    /// Re-render when the drawn scale is off by more than this fraction.
+    const RESCALE_TOLERANCE: f64 = 0.04;
+
+    type ScaleCallback = Box<dyn Fn(f64)>;
+
     mod imp {
         use super::*;
 
         #[derive(Default)]
         pub struct Preview {
             pub texture: RefCell<Option<gdk::Texture>>,
-            /// Logical pixels per texture pixel.
-            pub scale: Cell<f64>,
+            /// Device pixels per point the texture was rendered at.
+            pub pixel_per_pt: Cell<f64>,
+            /// Last scale asked for, to ask only once.
+            pub asked: Cell<f64>,
+            pub wants_scale: RefCell<Option<ScaleCallback>>,
         }
 
         #[glib::object_subclass]
@@ -336,46 +431,66 @@ mod preview {
         impl ObjectImpl for Preview {}
 
         impl WidgetImpl for Preview {
-            fn measure(
-                &self,
-                orientation: gtk::Orientation,
-                _for_size: i32,
-            ) -> (i32, i32, i32, i32) {
-                let natural = self.texture.borrow().as_ref().map_or(0, |t| {
-                    let px = match orientation {
-                        gtk::Orientation::Horizontal => t.width(),
-                        _ => t.height(),
-                    };
-                    (px as f64 * self.scale.get()).ceil() as i32
-                });
-                (0, natural, -1, -1)
+            fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
+                self.parent_size_allocate(width, height, baseline);
+                self.ask_for_scale();
             }
 
             fn snapshot(&self, snapshot: &gtk::Snapshot) {
                 let Some(texture) = self.texture.borrow().clone() else {
                     return;
                 };
+                let Some(fit) = self.fit() else { return };
                 let widget = self.obj();
+                let sf = widget.scale_factor() as f64;
+                let ppp = self.pixel_per_pt.get();
+                // Logical size; one texture pixel per device pixel when the
+                // render is at the drawn scale, so it stays sharp.
+                let (w, h) = if (fit * sf / ppp - 1.0).abs() <= RESCALE_TOLERANCE {
+                    (texture.width() as f64 / sf, texture.height() as f64 / sf)
+                } else {
+                    (
+                        texture.width() as f64 / ppp * fit,
+                        texture.height() as f64 / ppp * fit,
+                    )
+                };
                 let (aw, ah) = (widget.width() as f64, widget.height() as f64);
-                let w = texture.width() as f64 * self.scale.get();
-                let h = texture.height() as f64 * self.scale.get();
-                if w <= 0.0 || h <= 0.0 {
-                    return;
-                }
-                let fit = (aw / w).min(ah / h).min(1.0);
-                let (w, h) = (w * fit, h * fit);
                 let rect = graphene::Rect::new(
-                    ((aw - w) / 2.0).round() as f32,
-                    ((ah - h) / 2.0).round() as f32,
+                    ((aw - w) / 2.0 * sf).round() as f32 / sf as f32,
+                    ((ah - h) / 2.0 * sf).round() as f32 / sf as f32,
                     w as f32,
                     h as f32,
                 );
-                let filter = if fit < 1.0 {
-                    gsk::ScalingFilter::Trilinear
-                } else {
-                    gsk::ScalingFilter::Linear
-                };
-                snapshot.append_scaled_texture(&texture, filter, &rect);
+                snapshot.append_scaled_texture(&texture, gsk::ScalingFilter::Trilinear, &rect);
+            }
+        }
+
+        impl Preview {
+            /// Logical pixels per point that make the render fill the widget.
+            pub fn fit(&self) -> Option<f64> {
+                let texture = self.texture.borrow();
+                let texture = texture.as_ref()?;
+                let ppp = self.pixel_per_pt.get();
+                let (w_pt, h_pt) = (texture.width() as f64 / ppp, texture.height() as f64 / ppp);
+                let widget = self.obj();
+                let (aw, ah) = (widget.width() as f64, widget.height() as f64);
+                if w_pt <= 0.0 || h_pt <= 0.0 || aw <= 0.0 || ah <= 0.0 {
+                    return None;
+                }
+                Some((aw / w_pt).min(ah / h_pt))
+            }
+
+            pub fn ask_for_scale(&self) {
+                let Some(fit) = self.fit() else { return };
+                let wanted = fit * self.obj().scale_factor() as f64;
+                let near = |a: f64, b: f64| (a / b - 1.0).abs() <= RESCALE_TOLERANCE;
+                if near(wanted, self.pixel_per_pt.get()) || near(wanted, self.asked.get()) {
+                    return;
+                }
+                self.asked.set(wanted);
+                if let Some(f) = self.wants_scale.borrow().as_ref() {
+                    f(wanted);
+                }
             }
         }
     }
@@ -393,13 +508,20 @@ mod preview {
     }
 
     impl Preview {
-        /// Show `texture` with `scale` logical pixels per texture pixel.
+        /// Show `texture`, rendered at `pixel_per_pt` device pixels per point.
         pub fn set_texture(&self, texture: Option<(gdk::Texture, f64)>) {
             let imp = self.imp();
-            let (texture, scale) = texture.map_or((None, 1.0), |(t, s)| (Some(t), s));
+            let (texture, ppp) = texture.map_or((None, 1.0), |(t, p)| (Some(t), p));
             imp.texture.replace(texture);
-            imp.scale.set(scale);
-            self.queue_resize();
+            imp.pixel_per_pt.set(ppp);
+            imp.ask_for_scale();
+            self.queue_draw();
+        }
+
+        /// Called with the device pixels per point the preview should be
+        /// rendered at to fill the widget.
+        pub fn connect_wants_scale(&self, f: impl Fn(f64) + 'static) {
+            self.imp().wants_scale.replace(Some(Box::new(f)));
         }
     }
 }
