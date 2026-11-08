@@ -11,6 +11,11 @@ pub(super) fn is_operand(node: &MathNode) -> bool {
     }
 }
 
+/// Whether `^`/`_` attach to `node`: an operand, or a large operator.
+fn is_script_base(node: &MathNode) -> bool {
+    is_operand(node) || matches!(&node.kind, MathKind::Sym(s) if symbols::is_large_op(s))
+}
+
 /// If the node before `offset` is `)`, the index of its matching `(`.
 pub(super) fn group_before(nodes: &[MathNode], offset: usize) -> Option<usize> {
     let close = offset.checked_sub(1)?;
@@ -384,7 +389,7 @@ impl Editor {
             );
         } else if let Some(open) = group_before(&nodes, p.offset) {
             (open, p.offset - open)
-        } else if p.offset > 0 && is_operand(&nodes[p.offset - 1]) {
+        } else if p.offset > 0 && is_script_base(&nodes[p.offset - 1]) {
             (p.offset - 1, 1)
         } else {
             let op = row_insert(p.row, p.offset, wrapper);

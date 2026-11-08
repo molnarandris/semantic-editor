@@ -418,6 +418,10 @@ Done before M11–M13, at the user's request (2026-11-08). Implementation notes:
   rounded outline around the environment the caret is next to, tinted when the caret is
   inside (`Editor::env_focus`, `snapshot_env_outline`); edge stops sit just outside the
   outline on the first/last line, and Home/End skip them (`Stop::edge`).
+- Follow-up (user remarks, 2026-11-08):
+  - `^`/`_` after a large operator (∑, ∏, ∫, ⋃, ⨁, …) attach to it
+    (`symbols::is_large_op`); they used to start an empty base. Other operators
+    still get an empty base, and `/` still does not take a large operator.
 - Not yet (M14b): titles (`#theorem[Title][…]`), lists, environments by Typst function
   detection (any `#identifier` is accepted; an unknown one shows a compile error).
 

@@ -564,6 +564,15 @@ fn scripts_and_slot_removal() {
     assert_eq!(display_of(&e, 0), "x^(2)");
     assert_eq!(e.caret().path, Vec::<Step>::new());
     assert_eq!(e.caret().offset, 1);
+
+    // Large operators take scripts too (limits on `sum`).
+    let mut e = empty_display();
+    e.set_symbol_resolver(|n| (n == "sum").then(|| "∑".into()));
+    e.insert_text("sum_i");
+    assert_eq!(display_of(&e, 0), "∑_(i)");
+    let mut e = empty_display();
+    e.insert_text("+_");
+    assert_eq!(display_of(&e, 0), "+ _()", "an operator does not");
 }
 
 #[test]

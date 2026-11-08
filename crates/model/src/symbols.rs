@@ -157,6 +157,16 @@ pub fn is_letterlike(s: &str) -> bool {
         .all(|c| c.is_alphanumeric() || matches!(c, '∞' | '∂' | '∇' | '∅' | 'ℏ' | 'ℓ' | '†'))
 }
 
+/// Large operators (∑, ∏, ∫, ⋃, ⨁, …): they take limits or scripts, so
+/// `^` and `_` attach to them (but `/` does not take them as numerator).
+pub fn is_large_op(s: &str) -> bool {
+    let mut chars = s.chars();
+    let (Some(c), None) = (chars.next(), chars.next()) else {
+        return false;
+    };
+    matches!(c, '∏' | '∐' | '∑' | '∫'..='∳' | '⋀'..='⋃' | '⨀'..='⨜')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,5 +181,7 @@ mod tests {
         assert_eq!(pair("<", '='), Some("≤"));
         assert_eq!(pair("≤", '='), None);
         assert!(is_letterlike("χ") && is_letterlike("∞") && !is_letterlike("+"));
+        assert!(is_large_op("∑") && is_large_op("∮") && is_large_op("⨁"));
+        assert!(!is_large_op("+") && !is_large_op("∑∑"));
     }
 }
