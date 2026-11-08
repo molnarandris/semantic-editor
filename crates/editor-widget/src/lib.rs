@@ -133,6 +133,12 @@ impl SemEditor {
         self.imp().preview_error()
     }
 
+    /// Show code blocks (raw Typst that only defines things) as their
+    /// source instead of a marker.
+    pub fn set_show_code(&self, show: bool) {
+        self.imp().set_show_code(show);
+    }
+
     /// The document header.
     pub fn header(&self) -> String {
         self.imp().editor.borrow().doc().header.clone()

@@ -267,13 +267,23 @@ line((0, 0.25), (0, -0.25))",
     blocks.push(b.0.heading(2, vec![t]));
     let t1 = b.t(
         "Different tensors can generate the same state. Theorem-like environments are not \
-         modelled yet, so the statement below is a raw Typst block:",
+         modelled yet: the statement below is raw Typst, and its environment is defined in \
+         the code block just before it (the marker; double-click to edit it).",
     );
     blocks.push(b.0.paragraph(vec![t1]));
     blocks.push(b.0.raw(
-        "#block(above: 1em, below: 1em)[*Theorem* (Fundamental theorem). _If two MPS with \
-         injective tensors $A$ and $B$ generate the same state for every system size, then \
-         $B^i = e^(i phi) X A^i X^(-1)$ for an invertible matrix $X$ and a phase $phi$._]",
+        "// Theorems: figures of their own kind, numbered on their own.
+#let theorem(title, body) = figure(
+  kind: \"theorem\", supplement: \"Theorem\", numbering: \"1\", outlined: false,
+  caption: title, body,
+)
+#show figure.where(kind: \"theorem\"): it => block(width: 100%, above: 1em, below: 1em,
+  align(left)[*Theorem #it.counter.display(it.numbering)* (#it.caption.body). #emph(it.body)])",
+    ));
+    blocks.push(b.0.raw(
+        "#theorem[Fundamental theorem][If two MPS with injective tensors $A$ and $B$ \
+         generate the same state for every system size, then $B^i = e^(i phi) X A^i X^(-1)$ \
+         for an invertible matrix $X$ and a phase $phi$.]",
     ));
 
     b.0.blocks = blocks;

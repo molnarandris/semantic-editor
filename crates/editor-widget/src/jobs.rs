@@ -1,19 +1,27 @@
 //! Which blocks need a compile: those whose Typst source, span map or
-//! surrounding code (header, counter state) changed since it was last
-//! submitted. Unchanged blocks, such as diagrams next to edited prose, are
-//! never recompiled. A changed map with the same source (node ids replaced,
-//! same text) is a cache hit in the worker, but its layout must be resolved
-//! against the new ids. No GTK here, so it can be tested directly.
+//! surrounding code (header, code blocks before it, counter state) changed
+//! since it was last submitted. Unchanged blocks, such as diagrams next to
+//! edited prose, are never recompiled. A changed map with the same source
+//! (node ids replaced, same text) is a cache hit in the worker, but its
+//! layout must be resolved against the new ids. No GTK here, so it can be
+//! tested directly.
+//!
+//! Code blocks (raw Typst that only defines things) apply to every block
+//! after them: their code is compiled before those blocks, after the header.
+//! On the page they show a marker (or their source, with `show_code`).
 //!
 //! Counters are chained through the counter-sensitive blocks (headings,
-//! display math, raw Typst): each starts from the counters the previous one
-//! ended with. A sensitive block is submitted only once that end state is
-//! known, so a change ripples down one compile at a time and stops at the
-//! first block whose end state comes out unchanged.
+//! display math, raw Typst with content): each starts from the counters the
+//! previous one ended with. A sensitive block is submitted only once that
+//! end state is known, so a change ripples down one compile at a time and
+//! stops at the first block whose end state comes out unchanged.
+
+use std::sync::Arc;
 
 use model::{Block, BlockNode};
 use typst_bridge::{
-    Around, CounterState, SpanMap, chain_code, initial_state, serialize_block, tracked_counters,
+    Around, CounterState, SpanMap, chain_code, code_display, initial_state, is_code,
+    serialize_block, tracked_counters,
 };
 
 /// What was last submitted for a block, and how its counters ended.
@@ -37,34 +45,59 @@ pub struct Job {
     pub start: Option<CounterState>,
 }
 
+/// The source of a code block.
+fn code_of(block: &BlockNode) -> Option<&str> {
+    match &block.kind {
+        Block::RawTypst(source) if is_code(source) => Some(source),
+        _ => None,
+    }
+}
+
 /// Whether a block may read or change counters.
 pub fn counter_sensitive(block: &BlockNode) -> bool {
-    matches!(
-        block.kind,
-        Block::Heading { .. } | Block::DisplayMath(_) | Block::RawTypst(_)
-    )
+    match &block.kind {
+        Block::Heading { .. } | Block::DisplayMath(_) => true,
+        Block::RawTypst(source) => !is_code(source),
+        Block::Paragraph(_) | Block::Diagram(_) => false,
+    }
 }
 
 /// Jobs for the blocks that differ from `submitted` (the last submitted
 /// ones per block, same order). Sensitive blocks wait for the end state of
-/// the previous sensitive block.
-pub fn stale_blocks(blocks: &[BlockNode], header: &str, submitted: &[Submitted]) -> Vec<Job> {
-    let tracked = tracked_counters(header);
+/// the previous sensitive block. `show_code` shows code blocks' source
+/// instead of a marker.
+pub fn stale_blocks(
+    blocks: &[BlockNode],
+    header: &str,
+    show_code: bool,
+    submitted: &[Submitted],
+) -> Vec<Job> {
+    let code: Vec<Option<&str>> = blocks.iter().map(code_of).collect();
+    let all_code: String = code
+        .iter()
+        .flatten()
+        .fold(header.to_string(), |all, c| all + c);
     // Counters at the current position; `None` while a block before is
     // still being compiled.
-    let mut chain = Some(initial_state(&tracked));
+    let mut chain = Some(initial_state(&tracked_counters(&all_code)));
+    // Header and code blocks so far.
+    let mut context: Arc<str> = header.into();
     let mut jobs = vec![];
     for (index, block) in blocks.iter().enumerate() {
-        let sensitive = counter_sensitive(block);
+        let sensitive = code[index].is_none() && counter_sensitive(block);
         let mut around = Around {
-            header: header.into(),
+            header: context.clone(),
             ..Around::default()
         };
+        if let Some(source) = code[index] {
+            around.suffix = code_display(source, show_code);
+            context = format!("{context}\n{source}\n").into();
+        }
         let start = if sensitive {
             let Some(start) = chain.take() else {
                 continue;
             };
-            (around.prefix, around.suffix) = chain_code(&tracked, &start);
+            (around.prefix, around.suffix) = chain_code(&start);
             Some(start)
         } else {
             None
@@ -119,10 +152,18 @@ mod tests {
             .collect()
     }
 
+    /// Heading and equation counters with these values.
+    fn counters(heading: &[i64], equation: &[i64]) -> CounterState {
+        vec![
+            ("counter(heading)".into(), heading.to_vec()),
+            ("counter(math.equation)".into(), equation.to_vec()),
+        ]
+    }
+
     /// Submit what is stale; returns the indices submitted.
     fn submit(blocks: &[BlockNode], header: &str, views: &mut Vec<View>) -> Vec<usize> {
         views.resize_with(blocks.len(), View::default);
-        let jobs = stale_blocks(blocks, header, &submitted(views));
+        let jobs = stale_blocks(blocks, header, false, &submitted(views));
         for job in &jobs {
             views[job.index] = View {
                 around: job.around.clone(),
@@ -143,7 +184,7 @@ mod tests {
         d.blocks = vec![d.paragraph(vec![t]), d.display(vec![x])];
         let mut views = vec![];
         assert_eq!(submit(&d.blocks, "", &mut views), [0, 1]);
-        views[1].end = Some(vec![vec![0], vec![1]]);
+        views[1].end = Some(counters(&[0], &[1]));
         assert!(submit(&d.blocks, "", &mut views).is_empty());
         let snippet = views[0].snippet.clone();
         d.regenerate_ids();
@@ -180,7 +221,7 @@ mod tests {
             },
         ];
         d.blocks = blocks;
-        let state = |h: i64| vec![vec![h], vec![0]];
+        let state = |h: i64| counters(&[h], &[0]);
         let mut views = vec![];
         assert_eq!(submit(&d.blocks, "", &mut views), [0, 1, 4]);
         assert!(
@@ -219,6 +260,115 @@ mod tests {
         assert_eq!(submit(&d.blocks, header, &mut views), [0, 1, 3, 6]);
     }
 
+    /// Code blocks apply to the blocks after them and are not part of the
+    /// counter chain; editing one recompiles only what follows it, and the
+    /// view switch re-renders only code blocks.
+    #[test]
+    fn code_blocks_apply_to_later_blocks() {
+        let mut d = Document::empty();
+        let paragraph = |d: &mut Document, s: &str| {
+            let t = d.text(s);
+            d.paragraph(vec![t])
+        };
+        let heading = |d: &mut Document, s: &str| {
+            let t = d.text(s);
+            d.heading(1, vec![t])
+        };
+        d.blocks = vec![
+            paragraph(&mut d, "Before"),
+            d.raw("#let a = 1"),
+            paragraph(&mut d, "After"),
+            heading(&mut d, "One"),
+            d.raw("// appendix\n#set heading(numbering: \"A.1\")"),
+            heading(&mut d, "Two"),
+        ];
+        let mut views = vec![];
+        assert_eq!(submit(&d.blocks, "H", &mut views), [0, 1, 2, 3, 4]);
+        assert_eq!(&*views[0].around.header, "H");
+        assert_eq!(
+            &*views[1].around.header, "H",
+            "a code block runs after the code before it"
+        );
+        assert!(views[1].around.suffix.contains("let a"), "marker");
+        assert!(views[2].around.header.ends_with("#let a = 1\n"));
+        assert!(views[3].around.header.ends_with("#let a = 1\n"));
+        views[3].end = Some(counters(&[1], &[0]));
+        assert_eq!(submit(&d.blocks, "H", &mut views), [5]);
+        assert!(views[5].around.header.contains("numbering: \"A.1\""));
+        assert!(views[5].around.prefix.contains("update((1,))"));
+        views[5].end = Some(counters(&[2], &[0]));
+        assert!(submit(&d.blocks, "H", &mut views).is_empty());
+
+        // Editing the first code block: everything after it, nothing before.
+        d.blocks[1] = d.raw("#let a = 2");
+        assert_eq!(submit(&d.blocks, "H", &mut views), [1, 2, 3, 4]);
+        views[3].end = Some(counters(&[1], &[0]));
+        assert_eq!(submit(&d.blocks, "H", &mut views), [5]);
+        views[5].end = Some(counters(&[2], &[0]));
+
+        // Showing code: only the code blocks.
+        views.resize_with(d.blocks.len(), View::default);
+        let jobs = stale_blocks(&d.blocks, "H", true, &submitted(&views));
+        let indices: Vec<usize> = jobs.iter().map(|j| j.index).collect();
+        assert_eq!(indices, [1, 4]);
+        assert!(jobs[0].around.suffix.contains("raw(block: true"));
+    }
+
+    /// With the compiler: a definition works in the blocks after its code
+    /// block, not before.
+    #[test]
+    fn definitions_reach_later_blocks_only() {
+        let mut d = Document::empty();
+        d.blocks = vec![
+            d.raw("#greet"),
+            d.raw("#let greet = [Hello]"),
+            d.raw("#greet"),
+        ];
+        let (tx, rx) = mpsc::channel();
+        let worker = Worker::spawn(None, move |r| tx.send(r).unwrap());
+        let mut views = vec![];
+        let mut ok = [None; 3];
+        loop {
+            views.resize_with(d.blocks.len(), View::default);
+            let jobs = stale_blocks(&d.blocks, "", false, &submitted(&views));
+            if jobs.is_empty() {
+                break;
+            }
+            for job in &jobs {
+                views[job.index] = View {
+                    around: job.around.clone(),
+                    snippet: job.snippet.clone(),
+                    map: job.map.clone(),
+                    end: None,
+                };
+                worker.submit(CompileJob {
+                    block: model::NodeId(job.index as u64),
+                    generation: 1,
+                    around: job.around.clone(),
+                    snippet: job.snippet.clone(),
+                    map: job.map.clone(),
+                    width_pt: 300.0,
+                    pixel_per_pt: 1.0,
+                    persist: false,
+                    transient: false,
+                });
+            }
+            for _ in &jobs {
+                let r = rx.recv_timeout(Duration::from_secs(120)).unwrap();
+                let i = r.block.0 as usize;
+                ok[i] = Some(r.outcome.is_ok());
+                // As the widget does: a failed block passes its start on.
+                let end = r.outcome.ok().and_then(|r| r.end_state);
+                views[i].end = end.or_else(|| job_start(&jobs, i));
+            }
+        }
+        assert_eq!(ok, [Some(false), Some(true), Some(true)]);
+    }
+
+    fn job_start(jobs: &[Job], index: usize) -> Option<CounterState> {
+        jobs.iter().find(|j| j.index == index)?.start.clone()
+    }
+
     /// A forced re-render (zoom, width) clears the submitted snippets; blocks
     /// waiting for the chain are still re-rendered when it reaches them, even
     /// though their counters did not change.
@@ -231,7 +381,7 @@ mod tests {
             d.paragraph(vec![b]),
             d.heading(1, vec![c]),
         ];
-        let state = |h: i64| vec![vec![h], vec![0]];
+        let state = |h: i64| counters(&[h], &[0]);
         let mut views = vec![];
         assert_eq!(submit(&d.blocks, "", &mut views), [0, 1]);
         views[0].end = Some(state(1));
@@ -281,7 +431,7 @@ mod tests {
             let mut rounds = 0;
             loop {
                 views.resize_with(d.blocks.len(), View::default);
-                let jobs = stale_blocks(&d.blocks, header, &submitted(views));
+                let jobs = stale_blocks(&d.blocks, header, false, &submitted(views));
                 if jobs.is_empty() {
                     return rounds;
                 }
@@ -318,8 +468,8 @@ mod tests {
         let mut views = vec![];
         // One round per sensitive block (the first takes the prose along).
         assert_eq!(settle(&mut views), 5);
-        assert_eq!(views[5].end, Some(vec![vec![2], vec![2]]));
-        assert_eq!(views[2].end, Some(vec![vec![1, 1], vec![1]]));
+        assert_eq!(views[5].end, Some(counters(&[2], &[2])));
+        assert_eq!(views[2].end, Some(counters(&[1, 1], &[1])));
         // Again from scratch: all cache hits, same result.
         let mut again = vec![];
         let compiles = worker.compiles();
@@ -347,7 +497,7 @@ mod tests {
         let submit = |editor: &Editor, views: &mut Vec<View>| {
             let blocks = &editor.doc().blocks;
             views.resize_with(blocks.len(), View::default);
-            let jobs = stale_blocks(blocks, "", &submitted(views));
+            let jobs = stale_blocks(blocks, "", false, &submitted(views));
             for job in &jobs {
                 views[job.index] = View {
                     around: job.around.clone(),

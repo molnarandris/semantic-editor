@@ -124,6 +124,8 @@ pub struct SemEditor {
     pixel_per_pt: Cell<f64>,
     /// Logical pixels per point.
     zoom: Cell<f64>,
+    /// Show code blocks' source instead of a marker.
+    show_code: Cell<bool>,
     /// Zoom when a pinch gesture began.
     pinch_start: Cell<f64>,
 
@@ -653,6 +655,14 @@ impl SemEditor {
             .collect();
     }
 
+    /// Show code blocks' source (`true`) or a marker. Only code blocks
+    /// re-render.
+    pub(crate) fn set_show_code(&self, show: bool) {
+        if self.show_code.replace(show) != show {
+            self.submit_blocks(false);
+        }
+    }
+
     pub(crate) fn zoom(&self) -> f64 {
         self.zoom.get()
     }
@@ -920,7 +930,12 @@ impl SemEditor {
                     end: v.end.as_ref(),
                 })
                 .collect();
-            jobs::stale_blocks(&ed.doc().blocks, &ed.doc().header, &submitted)
+            jobs::stale_blocks(
+                &ed.doc().blocks,
+                &ed.doc().header,
+                self.show_code.get(),
+                &submitted,
+            )
         };
         for job in jobs {
             let (block, view) = (&ed.doc().blocks[job.index], &mut views[job.index]);
@@ -995,7 +1010,7 @@ impl SemEditor {
             }
             PreviewTarget::Header => {
                 let around = Around {
-                    header: self.editor.borrow().doc().header.clone(),
+                    header: self.editor.borrow().doc().header.as_str().into(),
                     ..Around::default()
                 };
                 (around, HEADER_SPECIMEN.to_string(), SpanMap::default())

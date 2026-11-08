@@ -269,6 +269,8 @@ functions and packages.
   keys include the accumulated code.
 - Also: figure counters (`counter(figure.where(kind: …))`) in the counter chain, for
   theorems built as figures.
+- Done 2026-11-08 (see PLAN.md). The marker is drawn by Typst (a dashed bar listing the
+  definitions); "Show Code" in the main menu shows the source instead.
 
 ### M11 — Inline code: diagrams inside formulas and text
 

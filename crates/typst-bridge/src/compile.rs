@@ -1,5 +1,7 @@
 //! Per-block compilation and rasterization.
 
+use std::sync::Arc;
+
 use typst_layout::{Page, PagedDocument};
 
 use crate::serialize::PREAMBLE;
@@ -13,8 +15,9 @@ pub const BLOCK_PAD_PT: f64 = 8.0;
 /// Typst code compiled around a block's snippet.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Around {
-    /// The document header.
-    pub header: String,
+    /// The document header and the code blocks before the block: definitions
+    /// and rules in force. Shared between blocks (it can be large).
+    pub header: Arc<str>,
     /// Right before the snippet (e.g. restoring counters).
     pub prefix: String,
     /// Right after the snippet (e.g. reporting counters).

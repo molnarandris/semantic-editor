@@ -209,6 +209,20 @@ impl Window {
             });
             self.window.add_action(&action);
         }
+
+        let show_code = gio::SimpleAction::new_stateful("show-code", None, &false.to_variant());
+        let weak = Rc::downgrade(self);
+        show_code.connect_activate(move |action, _| {
+            let show = !action
+                .state()
+                .and_then(|s| s.get::<bool>())
+                .unwrap_or(false);
+            action.set_state(&show.to_variant());
+            if let Some(this) = weak.upgrade() {
+                this.editor.set_show_code(show);
+            }
+        });
+        self.window.add_action(&show_code);
     }
 
     fn insert_block(self: Rc<Self>, kind: NewBlock) {
@@ -282,6 +296,7 @@ fn main_menu() -> gio::Menu {
     zoom.append(Some("Zoom _In"), Some("win.zoom-in"));
     zoom.append(Some("Zoom _Out"), Some("win.zoom-out"));
     zoom.append(Some("_Reset Zoom"), Some("win.zoom-reset"));
+    zoom.append(Some("Show _Code"), Some("win.show-code"));
     menu.append_section(None, &zoom);
     let insert = gio::Menu::new();
     insert.append(Some("Document _Header…"), Some("win.edit-header"));

@@ -349,4 +349,33 @@ Implementation notes (done):
   block's visible box (the number) plus a space; an empty paragraph has no box and
   keeps x = 0.
 
+## M10 — Code blocks
+
+Implementation notes (done):
+
+- No model change: a code block is a `Block::RawTypst` whose top level (parsed with
+  `typst::syntax`) is only `let`/`set`/`show`/`import` and comments
+  (`typst_bridge::is_code`; `#{ let … }` is local, so not code). A raw block becomes a
+  code block, or back, as it is edited. Export is unchanged (verbatim).
+- `stale_blocks` accumulates the context: each block's `Around.header` is the header
+  plus the code blocks before it (an `Arc<str>`, shared by the blocks between two code
+  blocks, so the per-keystroke cost stays small). Editing a code block recompiles the
+  blocks after it, nothing before. Code blocks are not counter-sensitive.
+- Display, drawn by Typst (no widget code): the code block's `Around.suffix` is
+  `code_display`: a slim dashed bar naming what it defines (`{ }  let ct, sl · set
+  heading`), or with "Show Code" (main menu, `win.show-code`, `SemEditor::set_show_code`)
+  the source as a `raw(lang: "typ")` listing. Explicit styles keep the document's rules
+  from restyling it much. Caret, clicks, double click → source dialog (titled "Code"),
+  and error markers work as for any raw block. Toggling re-renders only code blocks
+  (their suffix changes).
+- Counter chain rework: `CounterState` is a list of (Typst expression, value). It starts
+  with heading, equation and every `counter("…")` in header + code blocks; the suffix
+  adds `counter(figure.where(kind: …))` for every figure kind the block contains
+  (`query(figure)`, values via `eval`). So theorems built as figures of their own kind
+  (as in real papers) are numbered on without the editor knowing the kinds. The test
+  against a full-document compile now includes two theorem kinds.
+- Sample: a code block defines a `theorem` environment, used by the raw block after it.
+- A failing code block makes the blocks after it fail too (they include its code); their
+  last good renders stay, with error markers.
+
 Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing.

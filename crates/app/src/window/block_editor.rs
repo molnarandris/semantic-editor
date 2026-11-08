@@ -80,6 +80,9 @@ impl Window {
             PreviewTarget::Block(block) => {
                 match self.editor.document().block(block).map(|b| &b.kind) {
                     Some(Block::Diagram(_)) => ("Diagram", "CeTZ drawing code"),
+                    Some(Block::RawTypst(s)) if typst_bridge::is_code(s) => {
+                        ("Code", "Definitions and rules for the blocks after it")
+                    }
                     _ => ("Raw Typst", "Typst markup"),
                 }
             }

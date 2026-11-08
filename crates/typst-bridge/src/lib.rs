@@ -1,6 +1,7 @@
 //! Bridge between the semantic document model and the Typst compiler.
 //! All Typst calls of the application live in this crate.
 
+pub mod code;
 pub mod compile;
 pub mod counters;
 pub mod disk_cache;
@@ -10,6 +11,7 @@ pub mod symbols;
 pub mod worker;
 pub mod world;
 
+pub use code::{code_display, is_code};
 pub use compile::{
     Around, BLOCK_PAD_PT, Raster, block_document, compile, compile_pdf, render_page,
 };
