@@ -343,7 +343,9 @@ Titles decided 2026-11-08: optional, never added by default; positional
   and show an error marker.
 - Effort: large; the biggest item.
 
-- Lists: bullet, numbered and term lists with nesting, same container mechanism.
+- Lists: bullet, numbered and term lists with nesting. Done 2026-11-08 (see PLAN.md):
+  items are containers as in Typst (no list node); typed with `- `, `+ `, `/ `; Enter,
+  Backspace and Tab/Shift+Tab as in word processors.
 - Block-level calls with block bodies (`#claude-block[…]`, `#align(center)[…]`).
 
 ### M15 — Labels and references

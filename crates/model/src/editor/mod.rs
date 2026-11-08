@@ -16,11 +16,12 @@ use crate::history::History;
 use crate::ops::{Items, Op, Seq};
 use crate::symbols;
 use crate::tree::{
-    Block, BlockNode, Document, Inline, InlineNode, MathKind, MathNode, NodeId, Place,
+    Block, BlockNode, Document, Inline, InlineNode, ListKind, MathKind, MathNode, NodeId, Place,
 };
 
 mod delete;
 mod input;
+mod list;
 mod motion;
 mod structure;
 #[cfg(test)]
@@ -401,19 +402,22 @@ impl Editor {
         (matches!(block.kind, Block::Env { .. }) && !self.caret.path.is_empty()).then_some(block.id)
     }
 
-    /// Whether the caret is at the end of the title of `env`, with every `(`
-    /// typed in the title closed.
-    fn at_title_end(&self, env: NodeId) -> bool {
-        let Some(Block::Env { title, .. }) = self.doc.block(env).map(|b| &b.kind) else {
+    /// Whether the caret is at the end of the title (or term) of `owner`,
+    /// with every `(` typed in it closed.
+    fn at_label_end(&self, owner: NodeId) -> bool {
+        let Some(title) = self.doc.block(owner).and_then(|b| b.kind.text_inlines()) else {
             return false;
         };
+        if self.caret.block != owner || title.is_empty() {
+            return false;
+        }
         let text: String = title.iter().map(text_of).collect();
         let open = text.matches('(').count() as isize - text.matches(')').count() as isize;
         let end = title.last().map_or(0, |t| text_of(t).chars().count());
         open <= 0 && self.caret.path == [Step::Index(title.len() - 1)] && self.caret.offset == end
     }
 
-    /// The first caret position of an environment's body.
+    /// The first caret position of a container's body.
     fn body_start(&self, env: NodeId) -> Option<CursorPath> {
         let first = self.doc.block(env)?.kind.body()?.first()?;
         Some(self.doc.start_of(first))
@@ -638,6 +642,10 @@ impl Editor {
             (None, None) if self.typing_env_name() => {
                 "space → environment (e.g. #lemma, #proof) · ( → with a title"
             }
+            (None, _) if self.term_item().is_some() => "term · : or Enter → on to the description",
+            (None, None) if self.item_of(self.caret.block).is_some() => {
+                "list item · Enter → next item (on an empty one: out) · Tab / Shift+Tab → indent / outdent"
+            }
             (None, _) if self.title_env().is_some() => {
                 "title · Enter or ) → on to the text · Esc → just after the environment"
             }
@@ -648,7 +656,7 @@ impl Editor {
                 "Esc → just after the environment · click its heading → title · Enter on an empty last paragraph → leave"
             }
             (None, None) => {
-                "$ → formula · = and space at the start → section · #name and space → environment"
+                "$ → formula · = and space → section · - + / and space → list · #name and space → environment"
             }
         }
     }

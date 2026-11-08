@@ -409,6 +409,89 @@ fn environment_titles() {
     e.doc().check_invariants().unwrap();
 }
 
+/// Lists: `- ` makes an item, Enter the next one, Tab/Shift+Tab nest and
+/// un-nest, Enter on an empty item moves it out a level and then out of the
+/// list, Backspace at an item's start lets its text continue the item before.
+#[test]
+fn lists() {
+    let mut e = Editor::new(Document::new());
+    let check = |e: &Editor| e.doc().check_invariants().unwrap();
+    e.insert_text("- a");
+    assert_eq!(texts(&e), ["-[a]"]);
+    e.enter();
+    e.insert_text("b");
+    e.enter();
+    assert_eq!(texts(&e), ["-[a]", "-[b]", "-[]"]);
+    assert!(e.next_slot(false), "Tab nests the empty item in b");
+    assert_eq!(texts(&e), ["-[a]", "-[b|-[]]"]);
+    e.insert_text("c");
+    e.enter();
+    assert_eq!(texts(&e), ["-[a]", "-[b|-[c]|-[]]"]);
+    check(&e);
+    e.enter();
+    assert_eq!(texts(&e), ["-[a]", "-[b|-[c]]", "-[]"], "out a level");
+    e.enter();
+    assert_eq!(texts(&e), ["-[a]", "-[b|-[c]]", ""], "out of the list");
+    e.insert_text("after");
+    check(&e);
+
+    // Backspace at the start of b: its text (and c) continue item a; again:
+    // the paragraphs join.
+    let b = e.doc().blocks[1].kind.body().unwrap()[0].clone();
+    e.set_caret(e.doc().start_of(&b));
+    e.backspace();
+    assert_eq!(texts(&e), ["-[a|b|-[c]]", "after"]);
+    e.backspace();
+    assert_eq!(texts(&e), ["-[ab|-[c]]", "after"]);
+    check(&e);
+
+    // Shift+Tab in c: out after a. Enter in the middle of "ab" splits it.
+    let c = e.doc().blocks[0].kind.body().unwrap()[1].clone();
+    e.set_caret(e.doc().end_of(&c));
+    assert!(e.next_slot(true));
+    assert_eq!(texts(&e), ["-[ab]", "-[c]", "after"]);
+    let ab = e.doc().blocks[0].kind.body().unwrap()[0].id;
+    e.set_caret(cursor(ab, vec![Step::Index(0)], 1));
+    e.enter();
+    assert_eq!(texts(&e), ["-[a]", "-[b]", "-[c]", "after"]);
+    check(&e);
+
+    // Enter in an item with a nested list after the text: the nested list
+    // goes with the new item, so the order stays.
+    e.set_caret(e.doc().end_of(&e.doc().blocks[1]));
+    e.next_slot(false);
+    assert_eq!(texts(&e), ["-[a|-[b]]", "-[c]", "after"]);
+    e.set_caret(cursor(
+        e.doc().blocks[0].kind.body().unwrap()[0].id,
+        vec![Step::Index(0)],
+        1,
+    ));
+    e.enter();
+    assert_eq!(texts(&e), ["-[a]", "-[|-[b]]", "-[c]", "after"]);
+    check(&e);
+    while e.undo() {}
+    assert_eq!(texts(&e), [""]);
+
+    // Numbered and term items; `:` ends the term.
+    e.insert_text("+ one");
+    e.enter();
+    e.insert_text("two");
+    assert_eq!(texts(&e), ["+[one]", "+[two]"]);
+    let mut e = Editor::new(Document::new());
+    e.insert_text("/ Term: desc");
+    assert_eq!(texts(&e), ["/Term:[desc]"]);
+    e.enter();
+    assert_eq!(texts(&e), ["/Term:[desc]", "/:[]"]);
+    assert!(e.term_item().is_some(), "the caret is in the new term");
+    e.backspace();
+    assert_eq!(
+        texts(&e),
+        ["/Term:[desc|]"],
+        "an empty term drops the marker"
+    );
+    check(&e);
+}
+
 /// Enter on a raw/diagram block adds a paragraph: after it at its end (also
 /// after the last block), before it at its start.
 #[test]

@@ -65,10 +65,17 @@ impl Editor {
         if c == '$' {
             return self.insert_formula();
         }
+        // `:` at the end of a term: on to the description.
+        if c == ':'
+            && let Some(item) = self.term_item()
+            && self.at_label_end(item)
+        {
+            return self.body_start(item).is_some_and(|c| self.jump(c));
+        }
         // `)` at the end of a title with no `(` open in it: on to the body.
         if c == ')'
             && let Some(env) = self.title_env()
-            && self.at_title_end(env)
+            && self.at_label_end(env)
         {
             return self.body_start(env).is_some_and(|c| self.jump(c));
         }
@@ -94,6 +101,22 @@ impl Editor {
             let place = pos.place;
             let after = cursor(pos.block.id, vec![Step::Index(0)], 0);
             return self.retype(place, Some(level as u8), level, after);
+        }
+        // `- `, `+ `, `/ ` at the start of a paragraph make it a list item
+        // (as in Typst).
+        if s == " "
+            && pos.inline == 0
+            && pos.offset == 1
+            && matches!(pos.block.kind, Block::Paragraph(_))
+            && let Some(kind) = match chars[0] {
+                '-' => Some(ListKind::Bullet),
+                '+' => Some(ListKind::Numbered),
+                '/' => Some(ListKind::Term),
+                _ => None,
+            }
+        {
+            let place = pos.place;
+            return self.make_item(place, kind);
         }
         // `#name ` as the whole paragraph makes it an environment `#name[…]`
         // with the caret in its body; `#name(` one with a title, caret in it.

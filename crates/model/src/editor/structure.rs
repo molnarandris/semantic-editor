@@ -114,9 +114,9 @@ impl Editor {
                 return self.paragraph_after(p.place);
             }
         }
-        // In a title: on to the body.
-        if let Some(env) = self.title_env() {
-            return self.body_start(env).is_some_and(|c| self.jump(c));
+        // In a title or term: on to the body.
+        if let Some(owner) = self.title_env().or_else(|| self.term_item()) {
+            return self.body_start(owner).is_some_and(|c| self.jump(c));
         }
         let Some(pos) = self.text_pos() else {
             let Some(place) = self.doc.place(self.caret.block) else {
@@ -130,6 +130,14 @@ impl Editor {
             }
             return self.paragraph_after(place);
         };
+        let item = self.item_of(pos.block.id);
+        if let Some(item) = item
+            && is_empty_text_block(pos.block)
+            && (pos.place.index > 0 || self.doc.siblings(Some(item)).is_some_and(|b| b.len() == 1))
+        {
+            let place = pos.place;
+            return self.item_enter(item, place, None);
+        }
         if let Some(env) = pos.place.parent
             && self.doc.is_env(env)
             && is_empty_text_block(pos.block)
@@ -186,6 +194,9 @@ impl Editor {
             Some(level) => self.doc.heading(level, new_inlines),
             None => self.doc.paragraph(new_inlines),
         };
+        if let Some(item) = item {
+            return self.item_enter(item, place, Some((ops, block)));
+        }
         let after = cursor(block.id, vec![Step::Index(0)], 0);
         ops.push(Op::Insert {
             seq: place.seq(),

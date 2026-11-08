@@ -134,7 +134,24 @@ impl Editor {
             };
             return self.commit(vec![op], after, Last::Other);
         }
+        if let Block::Item { term, .. } = &pos.block.kind {
+            // The start of a term: an empty one drops the item's marker.
+            return is_empty_text(term) && self.unwrap_item(block_id, true);
+        }
         let place = pos.place;
+        if place.index == 0
+            && let Some(item) = self.item_of(block_id)
+        {
+            // The start of an item: after a term, into the term; else the
+            // marker goes and the text continues the item before (if any).
+            if let Some(Block::Item { term, .. }) = self.doc.block(item).map(|b| &b.kind)
+                && let Some(last) = term.last()
+            {
+                let end = text_of(last).chars().count();
+                return self.jump(cursor(item, vec![Step::Index(term.len() - 1)], end));
+            }
+            return self.unwrap_item(item, true);
+        }
         let Some(before) = self.doc.sibling(place, -1) else {
             // The start of an environment: mark it (the next press unwraps
             // it), or remove it at once if it is still empty.
@@ -370,8 +387,8 @@ impl Editor {
                 inline: pos.inline + 1,
             });
         }
-        if matches!(pos.block.kind, Block::Env { .. }) {
-            return false; // the end of a title
+        if pos.block.kind.body().is_some() {
+            return false; // the end of a title or term
         }
         let place = pos.place;
         let Some(next) = self.doc.sibling(place, 1) else {

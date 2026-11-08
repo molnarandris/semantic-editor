@@ -471,5 +471,15 @@ Done before M11–M13, at the user's request (2026-11-08). Implementation notes:
     renders with its place in the list (`serialize_block_numbered`, counted in
     `stale_blocks`); spacing between top-level items is the editor's block spacing,
     not the list's. Items are counter-sensitive (they may hold equations).
+  - Typing (`editor/list.rs`): `- `, `+ `, `/ ` at the start of a paragraph make it an
+    item (a term item puts the caret in its term; `:` or Enter at its end go on).
+    Enter: the rest of the paragraph and the blocks after it in the item go to a new
+    item after it (so a nested list stays below its text). Enter on an empty item: out
+    a level (after the item it is nested in, taking the blocks after it along), at the
+    outermost level a plain paragraph again; an empty paragraph after an item's first
+    block starts a new item. Backspace at an item's start: its blocks continue the item
+    before (or stay in place for the first item); after a term, into the term. Tab /
+    Shift+Tab (in text; in math they still visit slots): nest in the item before /
+    move out a level.
 
 Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing.

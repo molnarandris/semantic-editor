@@ -37,9 +37,13 @@ impl Editor {
         }
     }
 
-    /// Tab / Shift+Tab: the next (previous) empty slot of the block.
+    /// Tab / Shift+Tab: the next (previous) empty slot of the block; in the
+    /// text of a list item, indent (outdent) the item.
     pub fn next_slot(&mut self, back: bool) -> bool {
         self.finish_word();
+        if self.row_pos().is_none() {
+            return self.indent_item(back);
+        }
         let Some(block) = self.doc.block(self.caret.block) else {
             return false;
         };
