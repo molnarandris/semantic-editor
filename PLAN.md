@@ -16,6 +16,24 @@ Decisions on the spec's open questions (change any time):
   is not re-exported by `typst`. Same pinned version; Typst-only, inside `typst-bridge`.
 - `today()` returns `None` for now (no `chrono`).
 
+## Pitfalls: sharp rendering (read before touching drawing code)
+
+Learned the hard way (2026-11-08, blurry text that Typesetter did not have):
+
+- Draw rasters with `snapshot.append_texture`, never `append_scaled_texture`: GTK's
+  scaled-texture node resamples even at exactly 1:1 (GL and Vulkan alike), which
+  smears thin glyphs. Typesetter uses plain texture nodes too.
+- Render at `zoom × device scale` and draw the texture at its own size in device
+  pixels, at a whole-device-pixel position. Any mismatch resamples.
+- Not causes (measured): the font or a missing anti-aliasing setting (`typst_render`
+  has none; our raster dumped to PNG is crisp), debug vs release builds, transparent
+  block pages (GTK blends in sRGB, like tiny-skia on an opaque page).
+- How to debug: dump the raster as PNG and compare it with the pixels on screen
+  (screenshot, magnified). Render a node offscreen with
+  `Gsk.*Renderer.realize_for_display` + `render_texture` (PyGObject in the SDK, no
+  window) to see what GTK does to it. Measure before adding code; when matching
+  Typesetter is an option, do that.
+
 ## Build and packaging (Flatpak only)
 
 App ID `io.github.molnarandris.SemanticEditor` (`.Devel` suffix for dev builds), GNOME
