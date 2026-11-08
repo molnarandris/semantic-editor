@@ -639,7 +639,13 @@ impl SemEditor {
             snapshot.append_color(&blue(0.04), &rect);
             snapshot.pop();
         }
-        snapshot.append_border(&outline, &[1.0; 4], &[blue(0.35); 4]);
+        // Marked by Backspace (the next one unwraps it): stronger.
+        let (width, alpha) = if ed.env_marked() {
+            (2.0, 0.8)
+        } else {
+            (1.0, 0.35)
+        };
+        snapshot.append_border(&outline, &[width; 4], &[blue(alpha); 4]);
     }
 
     fn snapshot_highlights(&self, snapshot: &gtk::Snapshot, x0: f64, scroll: f64) {

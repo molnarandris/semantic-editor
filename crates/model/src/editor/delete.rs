@@ -37,6 +37,23 @@ impl Editor {
                 let (ops, after) = self.remove_block(place);
                 self.commit(ops, after, Last::Other)
             }
+            Selected::Unwrap { env } => {
+                let Some(place) = self.doc.place(env) else {
+                    return false;
+                };
+                let Some(body) = self.doc.block(env).and_then(|b| b.kind.body()) else {
+                    return false;
+                };
+                // The body takes the environment's place, ids and all, so
+                // the caret stays where it is.
+                let insert = Op::Insert {
+                    seq: place.seq(),
+                    index: place.index,
+                    items: Items::Blocks(body.clone()),
+                };
+                let after = self.caret.clone();
+                self.commit(vec![delete_block(place), insert], after, Last::Other)
+            }
         }
     }
 
@@ -107,7 +124,7 @@ impl Editor {
         }
         let place = pos.place;
         let Some(before) = self.doc.sibling(place, -1) else {
-            // The start of an environment: select it (the next press deletes
+            // The start of an environment: mark it (the next press unwraps
             // it), or remove it at once if it is still empty.
             let Some(env) = place.parent else {
                 return false;
@@ -122,7 +139,7 @@ impl Editor {
                 let (ops, after) = self.remove_block(env_place);
                 return self.commit(ops, after, Last::Other);
             }
-            return self.select(Selected::Block { block: env });
+            return self.select(Selected::Unwrap { env });
         };
         if before.kind.inlines().is_some() {
             let (ops, after) = join_blocks(

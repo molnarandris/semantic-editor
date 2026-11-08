@@ -419,6 +419,10 @@ Done before M11–M13, at the user's request (2026-11-08). Implementation notes:
   inside (`Editor::env_focus`, `snapshot_env_outline`); edge stops sit just outside the
   outline on the first/last line, and Home/End skip them (`Stop::edge`).
 - Follow-up (user remarks, 2026-11-08):
+  - Backspace at the start of an environment's text marks it (`Selected::Unwrap`,
+    stronger outline, `Editor::env_marked`); the next Backspace unwraps it: its body
+    takes its place, ids kept, so the caret stays. Backspace at an edge still selects,
+    then deletes. An empty environment still goes at once.
   - The caret shading of a display equation spans the whole line (the page width, or
     the environment's box), not just the formula, so it is symmetric with a number.
   - `^`/`_` after a large operator (∑, ∏, ∫, ⋃, ⨁, …) attach to it

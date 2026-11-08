@@ -277,11 +277,24 @@ fn environments() {
     assert_eq!(texts(&e), ["Before", "After"]);
     e.undo();
 
-    // Backspace at the start of the body selects it too.
-    e.set_caret(e.doc().start_of(&body(&e)[0]));
+    // Backspace at the start of the body marks it; the next press unwraps
+    // it, keeping its text and the caret; one undo brings it back.
+    let first = e.doc().start_of(&body(&e)[0]);
+    e.set_caret(first.clone());
     e.backspace();
-    assert_eq!(e.selected(), Some(&Selected::Block { block: env }));
+    assert_eq!(e.selected(), Some(&Selected::Unwrap { env }));
+    assert_eq!(e.env_focus(), Some((env, true)));
+    assert!(e.env_marked());
+    e.backspace();
+    assert_eq!(texts(&e), ["Before", "First.", "Second.", "After"]);
+    assert_eq!(e.caret(), &first);
+    e.doc().check_invariants().unwrap();
+    e.undo();
+    assert_eq!(texts(&e), ["Before", "#lemma[First.|Second.]", "After"]);
+    e.set_caret(first);
+    e.backspace();
     e.escape();
+    assert_eq!(e.selected(), None);
 
     // An empty environment goes with one Backspace.
     e.set_caret(e.doc().end_of(&e.doc().blocks[2]));

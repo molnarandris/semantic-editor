@@ -67,8 +67,11 @@ pub enum Selected {
     },
     /// Inline formula number `inline` of a paragraph.
     Formula { block: NodeId, inline: usize },
-    /// A whole raw Typst or diagram block.
+    /// A whole block (raw Typst, diagram, environment).
     Block { block: NodeId },
+    /// An environment marked by Backspace at the start of its text: its
+    /// outline is drawn stronger, and the next Backspace unwraps it.
+    Unwrap { env: NodeId },
 }
 
 #[derive(Debug)]
@@ -487,7 +490,7 @@ impl Editor {
                 .and_then(|v| v.get(*inline))
                 .map_or(vec![], |i| vec![i.id]),
             Some(Selected::Block { block }) => vec![*block],
-            None => vec![],
+            Some(Selected::Unwrap { .. }) | None => vec![],
         }
     }
 
@@ -530,6 +533,9 @@ impl Editor {
     /// A short key hint for the status bar.
     pub fn hint(&self) -> &'static str {
         match (&self.selected, self.row_pos()) {
+            (Some(Selected::Unwrap { .. }), _) => {
+                "Backspace → remove the environment, keep its text · Esc → cancel"
+            }
             (Some(_), _) => "Backspace → delete selection · Esc → cancel",
             (None, _) if self.source_block().is_some() => {
                 "Ctrl+Enter or double click → edit source · Enter → new paragraph · Backspace → delete"
@@ -559,11 +565,19 @@ impl Editor {
     /// The environment to outline: the one the caret is just before/after
     /// (`false`), else the innermost one it is in (`true`).
     pub fn env_focus(&self) -> Option<(NodeId, bool)> {
+        if let Some(Selected::Unwrap { env }) = self.selected {
+            return Some((env, true));
+        }
         if self.edge().is_some() {
             return Some((self.caret.block, false));
         }
         let env = self.doc.place(self.caret.block)?.parent?;
         Some((env, true))
+    }
+
+    /// Whether the next Backspace unwraps the focused environment.
+    pub fn env_marked(&self) -> bool {
+        matches!(self.selected, Some(Selected::Unwrap { .. }))
     }
 
     /// Whether the caret's paragraph is `#name` so far, with the caret at
