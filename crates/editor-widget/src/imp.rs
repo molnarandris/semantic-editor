@@ -12,7 +12,7 @@ use model::{CursorPath, Document, Editor, NodeId};
 use typst_bridge::{BLOCK_PAD_PT, BlockLayout, CompileJob, CompileResult, Raster, SpanMap, Worker};
 
 use crate::caret::{self, Stop};
-use crate::{jobs, pixels};
+use crate::jobs;
 
 /// Logical pixels per typographic point: default, limits, and the factor
 /// of one zoom step.
@@ -228,9 +228,7 @@ impl ObjectImpl for SemEditor {
         self.editor
             .borrow_mut()
             .set_symbol_resolver(typst_bridge::resolve_symbol);
-        // Re-render at the new scale when the window moves to a monitor
-        // with another (fractional) scale.
-        pixels::on_device_scale_change(&*obj, |obj| obj.queue_allocate());
+        obj.connect_scale_factor_notify(|obj| obj.queue_allocate());
         self.setup_input();
     }
 
@@ -260,7 +258,7 @@ impl WidgetImpl for SemEditor {
         let page = ((width as f64 - 2.0 * (SIDE_MARGIN_PX + PAPER_PAD_PT * zoom)) / zoom)
             .clamp(MIN_PAGE_WIDTH_PT, MAX_PAGE_WIDTH_PT)
             .floor();
-        let ppp = zoom * pixels::device_scale(&*self.obj());
+        let ppp = zoom * self.device_scale();
         if page != self.page_width_pt.get() || ppp != self.pixel_per_pt.get() {
             self.page_width_pt.set(page);
             self.pixel_per_pt.set(ppp);
@@ -290,7 +288,7 @@ impl WidgetImpl for SemEditor {
             self.snapshot_highlights(snapshot, x0, scroll);
         }
 
-        let snap = pixels::pixel_snapper(&*obj);
+        let snap = self.pixel_snapper();
         let mut y = TOP_MARGIN_PX - scroll;
         for view in self.views.borrow().iter() {
             let h = view.height_pt() * zoom;
@@ -298,7 +296,8 @@ impl WidgetImpl for SemEditor {
                 if let Some(texture) = &view.texture {
                     // The raster has a transparent pad around the content.
                     // Draw it one texture pixel per device pixel, on the
-                    // pixel grid: any resampling blurs the thin glyphs.
+                    // pixel grid, as a plain texture node: a scaled-texture
+                    // node resamples (blurs) even at exactly 1:1.
                     let pad = BLOCK_PAD_PT * zoom;
                     let (px, py) = snap(x0 - pad, y - pad);
                     let per_px = zoom / view.texture_ppp;
@@ -308,7 +307,7 @@ impl WidgetImpl for SemEditor {
                         (texture.width() as f64 * per_px) as f32,
                         (texture.height() as f64 * per_px) as f32,
                     );
-                    snapshot.append_scaled_texture(texture, gsk::ScalingFilter::Linear, &rect);
+                    snapshot.append_texture(texture, &rect);
                 }
                 if view.error.is_some() {
                     let marker =
@@ -678,6 +677,31 @@ impl SemEditor {
 
     pub(crate) fn zoom_by(&self, steps: f64) {
         self.set_zoom(self.zoom.get() * ZOOM_STEP.powf(steps));
+    }
+
+    /// Rounds widget coordinates to the nearest device pixel, taking the
+    /// widget's position in the window surface into account (fractional
+    /// scaling).
+    fn pixel_snapper(&self) -> impl Fn(f64, f64) -> (f64, f64) + use<> {
+        let obj = self.obj();
+        let scale = self.device_scale();
+        let origin = obj.native().and_then(|native| {
+            let (sx, sy) = native.surface_transform();
+            obj.compute_point(&native, &graphene::Point::new(0.0, 0.0))
+                .map(|p| (p.x() as f64 + sx, p.y() as f64 + sy))
+        });
+        let (ox, oy) = origin.unwrap_or((0.0, 0.0));
+        move |x, y| {
+            let snap = |v: f64, o: f64| ((v + o) * scale).round() / scale - o;
+            (snap(x, ox), snap(y, oy))
+        }
+    }
+
+    fn device_scale(&self) -> f64 {
+        let obj = self.obj();
+        obj.native()
+            .and_then(|n| n.surface())
+            .map_or(obj.scale_factor() as f64, |s| s.scale())
     }
 
     fn scroll(&self) -> f64 {

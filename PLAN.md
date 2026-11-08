@@ -189,6 +189,11 @@ Follow-ups after M6 (done):
 - Block textures are drawn one texture pixel per device pixel, snapped to the device
   pixel grid relative to the surface: fractional placement made GTK resample and
   soften the glyphs.
+- Blurry text, fixed 2026-11-08: block textures were drawn with
+  `append_scaled_texture`, and GTK's scaled-texture node resamples even at exactly 1:1
+  (checked offscreen with the GL and Vulkan renderers at scale 2: up to 176/255 off).
+  A plain `append_texture`, as Typesetter does, is pixel-exact. Used in the editor and
+  the block preview.
 - Zoom: Ctrl+wheel, touchpad pinch, Ctrl+plus / Ctrl+minus (handled in the widget;
   Ctrl+0 stays "make paragraph"), and menu entries incl. Reset Zoom (`win.zoom-in`, `win.zoom-out`, `win.zoom-reset`). Default 1.75×, range
   0.75×–5×, step 1.1×. Blocks re-render at the new scale (scale is in the render key);
@@ -278,25 +283,5 @@ Implementation notes (done):
   recomputed on every buffer change (block sources are short).
 - The dialog closes itself when its block disappears (undo of the insert, new
   document) and reloads its text when the source changes from outside.
-
-Follow-ups after M8 (done):
-
-- Soft text. Compared with Typesetter, whose preview is sharp: it uses the same
-  rasterizer (`typst_render`, same version family), so the difference is in drawing.
-  Checked and ruled out: GTK 4.24 blends a transparent raster in sRGB (50 % black on
-  white gives 127 with the GL, Vulkan and Cairo renderers), exactly like tiny-skia on an
-  opaque page, so `fill: none` blocks are not the cause.
-- Cause found: the fractional device scale. `editor_widget::pixels` now holds the shared
-  helpers: `device_scale` (the surface's fractional `scale`), `pixel_snapper`, and
-  `on_device_scale_change`, which watches the surface's `scale`. The editor used to
-  re-render only on `scale-factor` changes, an integer that stays 2 from 125 % to 200 %:
-  moving the window between such monitors, or a first allocation before the compositor
-  reported the fractional scale, left blocks rendered at the wrong scale and resampled.
-- The source dialog's preview draws like the editor: one texture pixel per device pixel,
-  snapped to the surface's pixel grid. Before, it used the integer scale factor
-  (at 175 % each texture pixel covered 0.875 device pixels, always resampled), centred
-  on the widget's own grid, and accepted renders up to 4 % off. Now a render is drawn as
-  is when its scale is 97–100 % of the fitting one; otherwise the old render is shown
-  scaled and a new one is requested at 99 %.
 
 Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing.

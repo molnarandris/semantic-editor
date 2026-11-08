@@ -6,7 +6,6 @@
 mod caret;
 mod imp;
 mod jobs;
-pub mod pixels;
 
 pub use imp::DEFAULT_ZOOM;
 
