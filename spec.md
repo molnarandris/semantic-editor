@@ -305,6 +305,10 @@ functions and packages.
 
 ### M14 — Nested blocks: theorem environments and lists
 
+User request (2026-11-08, after M10): the theorem's text must be editable in place, like
+any paragraph; the environment only contributes "Theorem", the number and the formatting
+(bold, italic, …). The body is the call's content argument.
+
 - Theorem, lemma, definition, proof, … as a container block holding paragraphs and
   equations (the model is a flat block list today, so nesting is the main change:
   cursor paths, ops, Enter/Backspace at the edges, Escape leaves the environment).

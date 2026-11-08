@@ -162,7 +162,7 @@ impl SemEditor {
         })
     }
 
-    /// A raw/diagram block should be opened for editing (Enter or double
+    /// A raw/diagram block should be opened for editing (Ctrl+Enter or double
     /// click on it).
     pub fn connect_edit_source<F: Fn(&Self, NodeId) + 'static>(
         &self,

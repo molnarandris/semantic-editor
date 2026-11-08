@@ -42,6 +42,18 @@ impl Editor {
         self.commit(vec![op], after, Last::Other)
     }
 
+    /// Insert an empty paragraph before block `b`; the caret stays.
+    fn paragraph_before(&mut self, b: usize) -> bool {
+        let block = self.doc.paragraph(vec![]);
+        let op = Op::Insert {
+            seq: Seq::Blocks,
+            index: b,
+            items: Items::Blocks(vec![block]),
+        };
+        let after = self.caret.clone();
+        self.commit(vec![op], after, Last::Other)
+    }
+
     /// Escape: drop the selection, else leave the innermost structure (caret
     /// just after it), else leave the formula.
     pub fn escape(&mut self) -> bool {
@@ -85,6 +97,11 @@ impl Editor {
             let Some(b) = self.doc.block_index(self.caret.block) else {
                 return false;
             };
+            // At the start of a raw/diagram block: a paragraph before it, as
+            // Enter at the start of a line; the caret stays on the block.
+            if self.source_block().is_some() && self.caret.offset == 0 {
+                return self.paragraph_before(b);
+            }
             return self.paragraph_after(b);
         };
         let (b, i, c, len) = (pos.block_index, pos.inline, pos.offset, pos.len);

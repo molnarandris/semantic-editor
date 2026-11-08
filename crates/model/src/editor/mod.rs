@@ -530,7 +530,7 @@ impl Editor {
         match (&self.selected, self.row_pos()) {
             (Some(_), _) => "Backspace → delete selection · Esc → cancel",
             (None, _) if self.source_block().is_some() => {
-                "Enter → edit source · Backspace → delete · Esc → next paragraph"
+                "Ctrl+Enter or double click → edit source · Enter → new paragraph · Backspace → delete"
             }
             (None, Some(p)) if p.nested() => "Tab → next slot · Esc → leave structure",
             (None, Some(_)) => "/ fraction · ^ _ scripts · Esc or $ → leave formula",

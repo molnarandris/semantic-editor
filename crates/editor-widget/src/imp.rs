@@ -178,7 +178,7 @@ impl ObjectImpl for SemEditor {
             vec![
                 Signal::builder("caret-moved").build(),
                 // A raw/diagram block's source should be opened for editing
-                // (Enter or double click on it). Param: block id.
+                // (Ctrl+Enter or double click on it). Param: block id.
                 Signal::builder("edit-source")
                     .param_types([u64::static_type()])
                     .build(),
@@ -353,6 +353,8 @@ enum Command {
     Backspace,
     Delete,
     Enter,
+    /// Ctrl+Enter: open the caret's raw/diagram block in the source dialog.
+    EditSource,
     Undo,
     Redo,
     Escape,
@@ -498,7 +500,7 @@ impl SemEditor {
             Command::Right => _ = ed.move_right(),
             Command::Backspace => _ = ed.backspace(),
             Command::Delete => _ = ed.delete(),
-            Command::Enter if ed.block_source(ed.caret().block).is_some() => {
+            Command::EditSource => {
                 drop(ed);
                 self.request_source_edit();
                 return;
@@ -1162,6 +1164,7 @@ fn command_for(key: gdk::Key, state: gdk::ModifierType) -> Option<Command> {
         Key::End | Key::KP_End => Command::LineEnd,
         Key::BackSpace => Command::Backspace,
         Key::Delete | Key::KP_Delete => Command::Delete,
+        Key::Return | Key::KP_Enter | Key::ISO_Enter if ctrl => Command::EditSource,
         Key::Return | Key::KP_Enter | Key::ISO_Enter => Command::Enter,
         Key::Escape => Command::Escape,
         Key::ISO_Left_Tab => Command::PrevSlot,

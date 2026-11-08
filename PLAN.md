@@ -377,5 +377,9 @@ Implementation notes (done):
 - Sample: a code block defines a `theorem` environment, used by the raw block after it.
 - A failing code block makes the blocks after it fail too (they include its code); their
   last good renders stay, with error markers.
+- Follow-up: Enter on a raw/diagram/code block no longer opens the source dialog (there
+  was no way to add a paragraph after the last such block). Enter at its end adds a
+  paragraph after it, at its start one before it (caret stays). Ctrl+Enter or a double
+  click opens the dialog (`Command::EditSource`); the status bar hint says so.
 
 Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing.

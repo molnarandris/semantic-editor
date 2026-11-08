@@ -189,6 +189,30 @@ fn equals_space_makes_headings() {
     assert!(!e.set_heading(None));
 }
 
+/// Enter on a raw/diagram block adds a paragraph: after it at its end (also
+/// after the last block), before it at its start.
+#[test]
+fn enter_on_source_blocks_adds_paragraphs() {
+    let mut d = Document::empty();
+    let t = d.text("Text");
+    d.blocks = vec![d.paragraph(vec![t]), d.diagram("circle((0, 0))")];
+    let mut e = Editor::new(d);
+    let id = e.doc().blocks[1].id;
+    let end = "circle((0, 0))".chars().count();
+    e.set_caret(cursor(id, vec![], end));
+    assert!(e.enter());
+    assert_eq!(e.doc().blocks.len(), 3);
+    assert!(matches!(e.doc().blocks[2].kind, Block::Paragraph(_)));
+    assert_eq!(e.caret().block, e.doc().blocks[2].id);
+
+    e.set_caret(cursor(id, vec![], 0));
+    assert!(e.enter());
+    assert_eq!(e.doc().blocks.len(), 4);
+    assert!(matches!(e.doc().blocks[1].kind, Block::Paragraph(_)));
+    assert_eq!(e.doc().blocks[2].id, id);
+    assert_eq!(e.caret(), &cursor(id, vec![], 0));
+}
+
 #[test]
 fn header_edits_are_one_undo_step_and_keep_the_caret() {
     let mut e = sample();
