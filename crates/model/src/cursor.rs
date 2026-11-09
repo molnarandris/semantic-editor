@@ -188,10 +188,12 @@ impl Document {
             | Block::Env { title: inlines, .. }
             | Block::Item { term: inlines, .. } => walk_inlines(inlines, path),
             Block::DisplayMath(row) => walk_row(row, path),
-            Block::RawTypst(text) | Block::Diagram(text) if path.is_empty() => {
+            Block::RawTypst(text) | Block::Diagram(text) | Block::Bibliography(text)
+                if path.is_empty() =>
+            {
                 Ok(Target::Raw { block, text })
             }
-            Block::RawTypst(_) | Block::Diagram(_) => Err(0),
+            Block::RawTypst(_) | Block::Diagram(_) | Block::Bibliography(_) => Err(0),
         }
     }
 
@@ -381,7 +383,7 @@ impl Document {
                 row_positions(block.id, vec![], row, &mut out);
                 label(&mut out);
             }
-            Block::RawTypst(s) | Block::Diagram(s) => {
+            Block::RawTypst(s) | Block::Diagram(s) | Block::Bibliography(s) => {
                 out.push(at(vec![], 0));
                 out.push(at(vec![], s.chars().count()));
             }
@@ -483,7 +485,7 @@ impl Document {
                 consumed += 1;
                 row
             }
-            Block::RawTypst(_) | Block::Diagram(_) => return crumbs,
+            Block::RawTypst(_) | Block::Diagram(_) | Block::Bibliography(_) => return crumbs,
         };
         while let [Step::Index(k), child, rest @ ..] = path {
             let Some(node) = row.nodes.get(*k) else { break };

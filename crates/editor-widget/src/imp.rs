@@ -736,7 +736,8 @@ impl SemEditor {
 
     /// The labels offered while a reference is typed: those containing what
     /// was typed, in document order, each with what it labels and its number
-    /// once known ("section 2.1", "equation 3", "lemma 1").
+    /// once known ("section 2.1", "equation 3", "lemma 1"); then the
+    /// bibliography's keys ("citation").
     fn completions(&self) -> Vec<(String, String)> {
         let ed = self.editor.borrow();
         let Some(typed) = ed.ref_typing() else {
@@ -772,6 +773,14 @@ impl SemEditor {
                 };
                 (label.to_string(), desc)
             })
+            // Then the bibliography's keys: citations.
+            .chain(
+                ed.doc()
+                    .bib_keys()
+                    .into_iter()
+                    .filter(|key| key.contains(typed.as_str()))
+                    .map(|key| (key, "citation".to_string())),
+            )
             .collect()
     }
 

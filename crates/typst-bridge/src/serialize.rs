@@ -412,6 +412,9 @@ impl Writer {
             // In a figure, written by the figure; elsewhere (not made by the
             // editor) like a paragraph.
             Block::Caption(inlines) => w.text_block(inlines, false),
+            Block::Bibliography(source) => {
+                w.out.push_str(&crate::bib::bibliography_code(source));
+            }
             Block::Item { kind, term, body } => {
                 let number = w.number.take().filter(|_| w.style == Style::Edit);
                 match (kind, number) {

@@ -44,6 +44,7 @@ fn block_text(b: &BlockNode) -> String {
     match &b.kind {
         Block::Paragraph(v) | Block::Heading { inlines: v, .. } => inline_text(v),
         Block::Caption(v) => format!("cap({})", inline_text(v)),
+        Block::Bibliography(_) => "bib".into(),
         Block::DisplayMath(_) => "$$".into(),
         Block::RawTypst(s) | Block::Diagram(s) => s.clone(),
         Block::Env {
@@ -1513,6 +1514,25 @@ fn links_in_a_block() {
 /// `#figure ` starts a figure with an empty caption under its body; → goes
 /// on into the caption, Enter in it leaves the figure; Backspace in an empty
 /// caption removes it; unwrapping keeps the caption's text as a paragraph.
+#[test]
+fn bibliography_and_citations() {
+    let mut e = Editor::default();
+    e.insert_text("#lemma See @example. ");
+    // Inserted from inside an environment: at the top level, after it.
+    assert!(e.insert_block(NewBlock::Bibliography));
+    assert_eq!(e.doc().blocks.len(), 2);
+    assert!(matches!(e.doc().blocks[1].kind, Block::Bibliography(_)));
+    assert_eq!(e.doc().bib_keys(), ["example"]);
+    // Following a citation: to the bibliography; Alt+← back.
+    let before = e.doc().start_of(&e.doc().blocks[0].kind.body().unwrap()[0]);
+    e.set_caret(before.clone());
+    assert!(e.follow_ref("example"));
+    assert_eq!(e.caret().block, e.doc().blocks[1].id);
+    assert!(e.go_back());
+    assert_eq!(e.caret(), &before);
+    assert!(!e.follow_ref("unknown"));
+}
+
 #[test]
 fn figures_and_captions() {
     let mut e = Editor::default();

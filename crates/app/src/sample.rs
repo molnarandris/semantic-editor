@@ -386,6 +386,24 @@ line((0, 0.25), (0, -0.25))",
     typed_section(b.0)
 }
 
+/// The sample's bibliography (BibTeX).
+const BIBLIOGRAPHY: &str = "@article{fannes1992,
+  title = {Finitely correlated states on quantum spin chains},
+  author = {Fannes, M. and Nachtergaele, B. and Werner, R. F.},
+  journal = {Communications in Mathematical Physics},
+  volume = {144},
+  pages = {443--490},
+  year = {1992},
+}
+@article{perezgarcia2007,
+  title = {Matrix product state representations},
+  author = {P{\\'e}rez-Garc{\\'i}a, D. and Verstraete, F. and Wolf, M. M. and Cirac, J. I.},
+  journal = {Quantum Information and Computation},
+  volume = {7},
+  pages = {401--430},
+  year = {2007},
+}";
+
 /// The last section, typed key by key at the end of `doc`.
 fn typed_section(doc: Document) -> Document {
     let mut e = Editor::new(doc);
@@ -460,5 +478,13 @@ fn typed_section(doc: Document) -> Document {
     e.insert_text("@fig:chain and @thm:fundamental.");
     // Ends the reference: its trailing `.` goes back to the text.
     e.escape();
+    // Citations: the same `@`, with a key of the bibliography.
+    e.insert_text(" Citations use the same `@`: matrix product states go back to ");
+    e.insert_text("finitely correlated states @fannes1992 and are reviewed in ");
+    e.insert_text("@perezgarcia2007.");
+    e.escape();
+    e.insert_block(NewBlock::Bibliography);
+    let bibliography = e.caret().block;
+    e.set_block_source(bibliography, BIBLIOGRAPHY);
     e.doc().clone()
 }

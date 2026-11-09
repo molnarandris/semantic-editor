@@ -15,7 +15,8 @@ use serde::{Deserialize, Serialize};
 /// (`Inline::Call`: bold, italic, `#name[…]`). 10: inline code
 /// (`Inline::Raw`). 11: block labels (`label`, absent when empty).
 /// 12: references (`Inline::Ref`). 13: figure captions (`Block::Caption`).
-pub const FORMAT_VERSION: u32 = 13;
+/// 14: the bibliography (`Block::Bibliography`).
+pub const FORMAT_VERSION: u32 = 14;
 
 #[derive(Serialize)]
 struct SemFileOut<'a> {
@@ -125,9 +126,16 @@ mod tests {
         ] {
             assert!(tail.contains(part), "missing {part:?}");
         }
-        // The references point to labels of the document.
+        // A bibliography at the end, cited in the last paragraph.
         let doc = sample::document();
-        let last = doc.blocks.last().unwrap().kind.inlines().unwrap();
+        assert!(matches!(
+            doc.blocks.last().unwrap().kind,
+            model::Block::Bibliography(_)
+        ));
+        assert_eq!(doc.bib_keys(), ["fannes1992", "perezgarcia2007"]);
+        assert!(tail.contains("@fannes1992 and are reviewed in @perezgarcia2007."));
+        // The references point to labels of the document.
+        let last = doc.blocks[doc.blocks.len() - 2].kind.inlines().unwrap();
         let labels: Vec<&str> = doc.labels().iter().map(|(l, _)| *l).collect();
         let refs: Vec<&str> = last
             .iter()
@@ -135,6 +143,7 @@ mod tests {
                 model::Inline::Ref(label) => Some(label.as_str()),
                 _ => None,
             })
+            .filter(|r| !doc.bib_keys().iter().any(|k| k == r))
             .collect();
         assert_eq!(
             refs,

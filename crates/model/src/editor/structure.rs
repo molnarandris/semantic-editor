@@ -375,12 +375,23 @@ impl Editor {
             let op = row_insert(p.row, p.offset, node);
             return self.commit(vec![op], p.at(p.offset + 1), Last::Other);
         }
-        let Some(place) = self.doc.place(self.caret.block) else {
+        let Some(mut place) = self.doc.place(self.caret.block) else {
             return false;
         };
+        if kind == NewBlock::Bibliography {
+            // At the top level, after the caret's top-level block.
+            let Some(index) = self.doc.top_index(self.caret.block) else {
+                return false;
+            };
+            place = Place {
+                parent: None,
+                index,
+            };
+        }
         let block = match kind {
             NewBlock::Diagram => self.doc.diagram(DIAGRAM_TEMPLATE),
             NewBlock::RawTypst => self.doc.raw(""),
+            NewBlock::Bibliography => self.doc.bibliography_block(BIBLIOGRAPHY_TEMPLATE),
         };
         let after = cursor(block.id, vec![], 0);
         let replace = self.doc.at(place).is_some_and(is_empty_text_block);
@@ -397,7 +408,7 @@ impl Editor {
     /// The source of a raw Typst or diagram block.
     pub fn block_source(&self, block: NodeId) -> Option<&str> {
         match self.doc.block(block).map(|b| &b.kind) {
-            Some(Block::RawTypst(s) | Block::Diagram(s)) => Some(s),
+            Some(Block::RawTypst(s) | Block::Diagram(s) | Block::Bibliography(s)) => Some(s),
             Some(_) => None,
             None => self.doc.code_source(block),
         }

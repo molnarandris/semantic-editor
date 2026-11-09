@@ -21,6 +21,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 
 use model::{Block, BlockNode, Inline, InlineNode, ListKind};
+use typst_bridge::bib::{hidden_bibliography, hidden_cites};
 use typst_bridge::{
     Around, CounterState, LabelTarget, SpanMap, chain_code, code_display, initial_state, is_code,
     label_report, missing_ref, ref_stub, serialize_block_numbered, tracked_counters,
@@ -109,7 +110,7 @@ pub fn counter_sensitive(block: &BlockNode) -> bool {
         Block::RawTypst(source) => !is_code(source),
         // Footnotes are numbered through the document.
         Block::Paragraph(inlines) => has_footnote(inlines),
-        Block::Diagram(_) | Block::Caption(_) => false,
+        Block::Diagram(_) | Block::Caption(_) | Block::Bibliography(_) => false,
     }
 }
 
@@ -160,6 +161,30 @@ pub fn stale_blocks(
             table.entry(label).or_insert((index, element, 0)).2 += 1;
         }
     }
+    // Citations: references to keys of the bibliography (not labels), per
+    // block in document order.
+    let bibliography = blocks.iter().find_map(|b| match &b.kind {
+        Block::Bibliography(source) => Some(source.as_str()),
+        _ => None,
+    });
+    let keys = bibliography.map(model::bib_keys).unwrap_or_default();
+    let cites: Vec<Vec<String>> = blocks
+        .iter()
+        .map(|b| {
+            let mut refs = vec![];
+            refs_in(b, &mut refs);
+            refs.retain(|r| !table.contains_key(r.as_str()) && keys.contains(r));
+            refs
+        })
+        .collect();
+    let mut all_cited: Vec<String> = vec![];
+    for key in cites.iter().flatten() {
+        if !all_cited.contains(key) {
+            all_cited.push(key.clone());
+        }
+    }
+    // Cited in the blocks before the current one.
+    let mut cited_before: Vec<String> = vec![];
     // What they point to, as their blocks last reported.
     let mut reported: HashMap<&str, &LabelTarget> = HashMap::new();
     for (index, s) in submitted.iter().enumerate() {
@@ -204,12 +229,31 @@ pub fn stale_blocks(
         // everything else), else a red `@label`.
         let mut refs = vec![];
         refs_in(block, &mut refs);
-        for label in refs.iter().filter(|l| !own.contains(l)) {
+        let cited = &cites[index];
+        for label in refs
+            .iter()
+            .filter(|l| !own.contains(l) && !cited.contains(l))
+        {
             match (table.get(label.as_str()), reported.get(label.as_str())) {
                 (Some((_, element, 1)), Some(target)) => {
                     around.suffix.push_str(&ref_stub(target, element));
                 }
                 _ => around.prefix.push_str(&missing_ref(label)),
+            }
+        }
+        // Citations are numbered as in the whole document: the earlier ones
+        // hidden before the block, the bibliography hidden after it; the
+        // bibliography lists everything the document cites.
+        if let (Some(source), false) = (bibliography, cited.is_empty()) {
+            around.prefix.push_str(&hidden_cites(&cited_before));
+            around.suffix.push_str(&hidden_bibliography(source));
+        }
+        if matches!(block.kind, Block::Bibliography(_)) {
+            around.prefix.push_str(&hidden_cites(&all_cited));
+        }
+        for key in cited {
+            if !cited_before.contains(key) {
+                cited_before.push(key.clone());
             }
         }
         let (snippet, map) = serialize_block_numbered(block, (number > 0).then_some(number));
@@ -622,6 +666,38 @@ mod tests {
         assert_eq!(submit(&d.blocks, "", &mut views), [0, 1]);
         views[0].end = Some(state(1));
         assert_eq!(submit(&d.blocks, "", &mut views), [2]);
+    }
+
+    /// With the compiler: citations render (each block compiles), numbered
+    /// through the document; the bibliography gets them all.
+    #[test]
+    fn citations_through_the_document() {
+        let mut e = Editor::new(Document::new());
+        e.insert_text("First @beta. ");
+        e.enter();
+        e.insert_text("Then @alpha and @beta, not @gamma. ");
+        e.insert_block(model::NewBlock::Bibliography);
+        let mut d = e.doc().clone();
+        let bib = "@article{alpha, title = {A}, author = {Ann}, year = {2020}}\n\
+                   @article{beta, title = {B}, author = {Bob}, year = {2021}}";
+        if let Block::Bibliography(source) = &mut d.blocks[2].kind {
+            *source = bib.into();
+        }
+        let jobs = stale_blocks(&d.blocks, "", false, &[]);
+        let around = |i: usize| &jobs.iter().find(|j| j.index == i).unwrap().around;
+        let cite = |k: &str| format!("#cite(label(\"{k}\"))");
+        assert!(around(0).suffix.contains("#place(hide(bibliography("));
+        assert!(!around(0).prefix.contains("#cite"), "nothing cited before");
+        assert!(around(1).prefix.contains(&cite("beta")));
+        assert!(around(1).prefix.contains("\"@gamma\""), "not a key: red");
+        let all = format!("#place(hide[{}{}])", cite("beta"), cite("alpha"));
+        assert!(around(2).prefix.contains(&all), "{}", around(2).prefix);
+        let mut world = typst_bridge::BridgeWorld::new();
+        for job in &jobs {
+            let (src, _) = typst_bridge::block_document(&job.around, &job.snippet, 300.0);
+            typst_bridge::compile(&mut world, &src)
+                .unwrap_or_else(|e| panic!("block {}: {e:?}\n{src}", job.index));
+        }
     }
 
     /// With the compiler: footnotes are numbered through the document (a

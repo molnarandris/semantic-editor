@@ -167,7 +167,7 @@ impl Window {
 
     fn add_actions(self: &Rc<Self>) {
         type Handler = fn(Rc<Window>);
-        let actions: [(&str, Handler); 13] = [
+        let actions: [(&str, Handler); 14] = [
             ("insert-env", |w| {
                 w.editor.start_env();
                 w.editor.grab_focus();
@@ -177,6 +177,9 @@ impl Window {
             }),
             ("insert-diagram", |w| w.insert_block(NewBlock::Diagram)),
             ("insert-raw", |w| w.insert_block(NewBlock::RawTypst)),
+            ("insert-bibliography", |w| {
+                w.insert_block(NewBlock::Bibliography)
+            }),
             ("open", |w| spawn(async move { w.open().await })),
             ("save", |w| {
                 spawn(async move {
@@ -309,6 +312,10 @@ fn main_menu() -> gio::Menu {
     insert.append(Some("Insert _Environment"), Some("win.insert-env"));
     insert.append(Some("Insert _Diagram"), Some("win.insert-diagram"));
     insert.append(Some("Insert _Raw Typst"), Some("win.insert-raw"));
+    insert.append(
+        Some("Insert _Bibliography"),
+        Some("win.insert-bibliography"),
+    );
     menu.append_section(None, &insert);
     let other = gio::Menu::new();
     other.append(Some("Open S_ample Document"), Some("win.open-sample"));

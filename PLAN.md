@@ -818,3 +818,29 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
   it is called from (`FOOTNOTE_MARK_PT` past the text before it), not after the
   note's text below.
 - The sample has a footnote in the markup paragraph.
+
+## M16c — Bibliography and citations (2026-11-09)
+
+- Model: `Block::Bibliography(source)`, BibTeX or Hayagriva YAML, behaving like a
+  diagram block (source edited as a whole in the source dialog, two caret
+  positions). "Insert Bibliography" (menu) puts one at the top level after the
+  caret's top-level block, from a one-entry template, and opens the dialog.
+  `bib_keys` reads the entry keys (BibTeX `@type{key,`, not `@string`/`@comment`/
+  `@preamble`; YAML top-level `key:`); `Document::bibliography` is the first one.
+  File format 14.
+- Citations are references (`Inline::Ref`) whose label is a bibliography key and
+  not a label of the document, as in Typst. The completion list offers the keys
+  ("citation"); following one (Ctrl+click) goes to the bibliography.
+- Source: `#bibliography(bytes(```bib … ```.text))` (`typst_bridge::bib`), the
+  source verbatim in a raw block whose fence outgrows any backticks in it.
+- Rendering (blocks compile alone): a citing block gets the citations of the
+  blocks before it as hidden ones before it (`hidden_cites`) and the bibliography
+  hidden after it (`hidden_bibliography`), so Typst numbers its citations as in the
+  whole document; the bibliography block gets all the document's citations hidden
+  before it, so it lists what is cited. Measured against a whole-document compile
+  (`citations_through_hidden_ones`): same text, and the hidden parts take no space.
+  A key that is neither a label nor in the bibliography shows a red `@key`.
+- The sample ends with a bibliography of two MPS papers, cited in the last
+  paragraph.
+- Not yet: a bibliography from a file (needs project files); citation forms
+  (`#cite(<key>, supplement: […])`, `form:`) other than `@key`.

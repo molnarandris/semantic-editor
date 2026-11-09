@@ -84,6 +84,10 @@ impl Window {
                     .is_some_and(|(r, k)| matches!(r.nodes[k].kind, model::MathKind::Diagram(_)));
                 match doc.block(block).map(|b| &b.kind) {
                     Some(Block::Diagram(_)) => ("Diagram", "CeTZ drawing code"),
+                    Some(Block::Bibliography(_)) => (
+                        "Bibliography",
+                        "BibTeX or Hayagriva YAML; lists the works the document cites",
+                    ),
                     None if inline_diagram => ("Diagram", "CeTZ drawing code"),
                     Some(Block::RawTypst(s)) if typst_bridge::is_code(s) => {
                         ("Code", "Definitions and rules for the blocks after it")

@@ -450,6 +450,17 @@ Titles decided 2026-11-08: optional, never added by default; positional
   counter-sensitive, so numbers run through the document. In the editor a footnote's
   text shows under its own paragraph (where Typst puts it on the block's page,
   measured), edited in place; the export puts it at the foot of the page as usual.
+- M16c decisions (2026-11-09): the bibliography is a block of its own
+  (`Block::Bibliography`), its BibTeX (or Hayagriva YAML) source embedded and edited
+  in the source dialog like a diagram ("Insert Bibliography"); written
+  `#bibliography(bytes(```bib … ```.text))`, so the source stays verbatim. A
+  citation is the reference node with a bibliography key, `@key`, as in Typst; the
+  completion list offers the keys too, and Ctrl+click goes to the bibliography.
+  Rendering: a citing block gets, before it, the citations of the document's earlier
+  blocks as hidden ones, and after it the bibliography hidden, so Typst numbers its
+  citations as in the whole document; the bibliography block gets all citations
+  hidden before it, so it lists what the document cites. Style: a set rule in the
+  header (`#set bibliography(style: …)`).
   Wishlist (user, 2026-11-09; postponed, "for now leave it as it is"): footnote texts
   in a list at the very end of the document, the paragraph showing only the number;
   hovering the number shows the text in a bubble. Open question then: where the

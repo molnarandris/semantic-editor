@@ -64,6 +64,9 @@ pub enum Block {
     /// The caption of a figure: the last block of its body, edited in place
     /// under it, written as the call's `caption:` argument.
     Caption(Vec<InlineNode>),
+    /// The bibliography: its BibTeX (or Hayagriva YAML) source, embedded and
+    /// edited in the source dialog. Typst lists the works the document cites.
+    Bibliography(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -137,6 +140,40 @@ impl InlineNode {
             },
         }
     }
+}
+
+/// The entry keys of a bibliography source: BibTeX (`@article{key, …`; not
+/// `@string`, `@comment`, `@preamble`) or Hayagriva YAML (top-level `key:`).
+pub fn bib_keys(source: &str) -> Vec<String> {
+    let bibtex = source.trim_start().starts_with('@') || source.trim_start().starts_with('%');
+    let mut keys = vec![];
+    for line in source.lines() {
+        let key = if bibtex {
+            let Some(rest) = line.trim_start().strip_prefix('@') else {
+                continue;
+            };
+            let Some((kind, rest)) = rest.split_once('{') else {
+                continue;
+            };
+            let kind = kind.trim().to_ascii_lowercase();
+            if matches!(kind.as_str(), "string" | "comment" | "preamble") {
+                continue;
+            }
+            rest.split(',').next().unwrap_or("").trim()
+        } else {
+            if line.starts_with([' ', '\t', '#', '-']) {
+                continue;
+            }
+            match line.trim_end().strip_suffix(':') {
+                Some(key) => key.trim(),
+                None => continue,
+            }
+        };
+        if !key.is_empty() && !keys.iter().any(|k| k == key) {
+            keys.push(key.to_string());
+        }
+    }
+    keys
 }
 
 /// The formulas of an inline list, in calls too.
@@ -342,7 +379,7 @@ impl BlockNode {
                 inline_rows(inlines, &mut out);
                 out
             }
-            Block::RawTypst(_) | Block::Diagram(_) => vec![],
+            Block::RawTypst(_) | Block::Diagram(_) | Block::Bibliography(_) => vec![],
         }
     }
 
@@ -358,7 +395,7 @@ impl BlockNode {
                 inline_rows_mut(inlines, &mut out);
                 out
             }
-            Block::RawTypst(_) | Block::Diagram(_) => vec![],
+            Block::RawTypst(_) | Block::Diagram(_) | Block::Bibliography(_) => vec![],
         }
     }
 
@@ -372,6 +409,7 @@ impl BlockNode {
             Block::Env { .. } => "environment",
             Block::Item { .. } => "list item",
             Block::Caption(_) => "caption",
+            Block::Bibliography(_) => "bibliography",
         }
     }
 
@@ -701,7 +739,7 @@ impl Document {
                         inline_ids(title, f);
                         visit(body, f);
                     }
-                    Block::RawTypst(_) | Block::Diagram(_) => {}
+                    Block::RawTypst(_) | Block::Diagram(_) | Block::Bibliography(_) => {}
                 }
             }
         }
@@ -991,6 +1029,21 @@ impl Document {
             .map(|b| b.id)
     }
 
+    /// The bibliography block (the first, if there are several).
+    pub fn bibliography(&self) -> Option<&BlockNode> {
+        self.blocks
+            .iter()
+            .find(|b| matches!(b.kind, Block::Bibliography(_)))
+    }
+
+    /// The citation keys of the bibliography, in its order.
+    pub fn bib_keys(&self) -> Vec<String> {
+        match self.bibliography().map(|b| &b.kind) {
+            Some(Block::Bibliography(source)) => bib_keys(source),
+            _ => vec![],
+        }
+    }
+
     /// The label of reference `id`, if `id` is a reference.
     pub fn ref_label(&self, id: NodeId) -> Option<&str> {
         fn find(inlines: &[InlineNode], id: NodeId) -> Option<&str> {
@@ -1195,6 +1248,14 @@ impl Document {
         }
     }
 
+    pub fn bibliography_block(&mut self, source: &str) -> BlockNode {
+        BlockNode {
+            label: String::new(),
+            id: self.fresh_id(),
+            kind: Block::Bibliography(source.into()),
+        }
+    }
+
     pub fn diagram(&mut self, source: &str) -> BlockNode {
         BlockNode {
             label: String::new(),
@@ -1256,6 +1317,26 @@ mod tests {
         let inl = doc.blocks[0].kind.inlines().unwrap();
         assert_eq!(inl.len(), 5);
         assert_eq!(inl[2].kind, Inline::Text("ab".into()));
+    }
+
+    #[test]
+    fn bibliography_keys() {
+        let bibtex = "@string{j = {J. Tests}}
+@article{alpha,
+  title = {A},
+}
+  @Book{ beta ,
+  title = {B}}
+@comment{not:this}";
+        assert_eq!(bib_keys(bibtex), ["alpha", "beta"]);
+        let yaml = "# works
+alpha:
+  type: article
+  title: A
+beta-2:
+  type: book
+";
+        assert_eq!(bib_keys(yaml), ["alpha", "beta-2"]);
     }
 
     #[test]

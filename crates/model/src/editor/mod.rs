@@ -50,7 +50,17 @@ enum Last {
 pub enum NewBlock {
     Diagram,
     RawTypst,
+    /// Always at the top level of the document.
+    Bibliography,
 }
+
+/// The source a new bibliography starts with (BibTeX).
+pub const BIBLIOGRAPHY_TEMPLATE: &str = "@article{example,
+  title = {An Example Article},
+  author = {Doe, Jane},
+  journal = {Journal of Examples},
+  year = {2024},
+}";
 
 /// The source a new diagram starts with.
 pub const DIAGRAM_TEMPLATE: &str = "circle((0, 0), radius: 1)
@@ -983,10 +993,17 @@ impl Editor {
     /// `false` if no block has that label.
     pub fn follow_ref(&mut self, label: &str) -> bool {
         self.finish_word();
-        let Some(target) = self.doc.labels().into_iter().find(|(l, _)| *l == label) else {
+        let labelled = self.doc.labels().into_iter().find(|(l, _)| *l == label);
+        // A citation: to the bibliography.
+        let cited = || {
+            let keys = self.doc.bib_keys();
+            self.doc
+                .bibliography()
+                .filter(|_| keys.iter().any(|k| k == label))
+        };
+        let Some(block) = labelled.map(|(_, b)| b).or_else(cited) else {
             return false;
         };
-        let block = target.1;
         let caret = match &block.kind {
             Block::Env { body, .. } => self.doc.start_of(&body[0]),
             _ => self.doc.start_of(block),

@@ -278,7 +278,7 @@ fn content_stops(block: &BlockNode, l: &BlockLayout, top: bool) -> Vec<Stop> {
             row_stops(block, vec![], row, l, line, 1, &mut v);
             v
         }
-        Block::RawTypst(text) | Block::Diagram(text) => {
+        Block::RawTypst(text) | Block::Diagram(text) | Block::Bibliography(text) => {
             let n = text.chars().count();
             let r = match (top, l.box_of(block.id)) {
                 (true, _) => Rect {

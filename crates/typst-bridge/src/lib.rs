@@ -1,6 +1,7 @@
 //! Bridge between the semantic document model and the Typst compiler.
 //! All Typst calls of the application live in this crate.
 
+pub mod bib;
 pub mod calls;
 pub mod code;
 pub mod compile;
