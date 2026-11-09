@@ -404,6 +404,16 @@ impl Editor {
         self.pos_in(true)
     }
 
+    /// The caret's block, offset and label length when it is in a label.
+    fn label_pos(&self) -> Option<(NodeId, usize, usize)> {
+        match self.doc.resolve(&self.caret)? {
+            Target::Label { block, text } => {
+                Some((block.id, self.caret.offset, text.chars().count()))
+            }
+            _ => None,
+        }
+    }
+
     fn pos_in(&self, raw: bool) -> Option<TextPos<'_>> {
         let c = &self.caret;
         let place = self.doc.place(c.block)?;
@@ -511,7 +521,8 @@ impl Editor {
     /// in it).
     fn title_env(&self) -> Option<NodeId> {
         let block = self.doc.block(self.caret.block)?;
-        (matches!(block.kind, Block::Env { .. }) && !self.caret.path.is_empty()).then_some(block.id)
+        let in_title = !self.caret.path.is_empty() && self.caret.path != [Step::Label];
+        (matches!(block.kind, Block::Env { .. }) && in_title).then_some(block.id)
     }
 
     /// Whether the caret is at the end of the title (or term) of `owner`,
@@ -575,8 +586,9 @@ impl Editor {
     /// After the caret moved from `old`: if `old` was in an empty title and
     /// the caret is no longer in it, remove the title (its own undo step).
     fn drop_left_title(&mut self, old: &CursorPath) {
-        let still_in = old.block == self.caret.block && !self.caret.path.is_empty();
-        if old.path.is_empty() || still_in {
+        let in_title = |c: &CursorPath| !c.path.is_empty() && c.path != [Step::Label];
+        let still_in = old.block == self.caret.block && in_title(&self.caret);
+        if !in_title(old) || still_in {
             return;
         }
         let empty = match self.doc.block(old.block).map(|b| &b.kind) {
@@ -862,6 +874,9 @@ impl Editor {
             }
             (None, Some(p)) if p.nested() => "Tab → next slot · Esc → leave structure",
             (None, Some(_)) => "/ fraction · ^ _ scripts · Esc or $ → leave formula",
+            (None, None) if self.label_pos().is_some() => {
+                "label (letters, digits, - _ . :) · Enter, space or Esc → leave"
+            }
             (None, None) if self.raw_pos().is_some() => "code, kept as typed · ` or Esc → end it",
             (None, None) if let Some(hint) = self.inline_call_hint() => hint,
             (None, None) if let Some(hint) = self.call_hint() => hint,
@@ -905,6 +920,9 @@ impl Editor {
         if let Some(env) = self.title_env() {
             return Some((env, true));
         }
+        if self.caret.path == [Step::Label] && self.doc.is_env(self.caret.block) {
+            return Some((self.caret.block, true));
+        }
         let parent = self.doc.place(self.caret.block)?.parent?;
         Some((self.doc.env_around(parent)?, true))
     }
@@ -921,6 +939,17 @@ impl Editor {
         let (_, mut path) = self.call_around(&self.caret.path[..at.prefix])?;
         path.push(Step::Body);
         Some(path)
+    }
+
+    /// The block whose label pill shows (as "+ label" when it has none):
+    /// the caret's block if it can have a label, else the innermost
+    /// environment around it.
+    pub fn label_focus(&self) -> Option<NodeId> {
+        let block = self.doc.block(self.caret.block)?;
+        if block.kind.labelable() {
+            return Some(block.id);
+        }
+        self.doc.env_around(self.doc.place(block.id)?.parent?)
     }
 
     /// Whether the next Backspace unwraps the focused environment.

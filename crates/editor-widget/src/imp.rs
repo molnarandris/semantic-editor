@@ -332,6 +332,7 @@ impl WidgetImpl for SemEditor {
             y += h + BLOCK_SPACING_PT * zoom;
         }
 
+        self.snapshot_label_pills(snapshot, x0, scroll, obj.has_focus());
         if obj.has_focus() {
             self.snapshot_formula_marks(snapshot, x0, scroll);
         }
@@ -697,6 +698,91 @@ impl SemEditor {
             let outline = gsk::RoundedRect::from_rect(rect, 2.0);
             snapshot.append_color(&blue(0.04), &rect);
             snapshot.append_border(&outline, &[1.0; 4], &[blue(0.35); 4]);
+        }
+    }
+
+    /// Label pills beside the page: every label, and a faint "+ label" for
+    /// the block the caret is in (see `Editor::label_focus`). The text is
+    /// drawn char by char at the label's caret positions.
+    fn snapshot_label_pills(&self, snapshot: &gtk::Snapshot, x0: f64, scroll: f64, focus: bool) {
+        let zoom = self.zoom.get();
+        let height = self.obj().height() as f64;
+        let (focused, caret) = {
+            let ed = self.editor.borrow();
+            (ed.label_focus().filter(|_| focus), ed.caret().clone())
+        };
+        let blue = |a: f32| gdk::RGBA::new(0.21, 0.52, 0.89, a);
+        let mut font = gtk::pango::FontDescription::from_string("Monospace");
+        font.set_absolute_size(caret::PILL_FONT_PT * zoom * gtk::pango::SCALE as f64);
+        let tops = self.block_tops();
+        for (index, &top) in tops.iter().enumerate() {
+            let y0 = top - scroll;
+            let next = tops.get(index + 1).map_or(f64::INFINITY, |t| t - scroll);
+            if next < 0.0 || y0 > height {
+                continue;
+            }
+            let stops = self.block_stops(index);
+            let ed = self.editor.borrow();
+            let mut i = 0;
+            while i < stops.len() {
+                if !stops[i].label {
+                    i += 1;
+                    continue;
+                }
+                let block = stops[i].cursor.block;
+                let n = stops[i..]
+                    .iter()
+                    .take_while(|s| s.label && s.cursor.block == block)
+                    .count();
+                let (first, last) = (&stops[i], &stops[i + n - 1]);
+                i += n;
+                let Some(label) = ed.doc().block(block).map(|b| b.label.clone()) else {
+                    continue;
+                };
+                let editing = caret.block == block && caret.path == [model::Step::Label];
+                if label.is_empty() && focused != Some(block) {
+                    continue;
+                }
+                let shown = if label.is_empty() && !editing {
+                    "+ label".to_string()
+                } else {
+                    label.clone()
+                };
+                let width = (shown.chars().count().max(1) as f64 * caret::PILL_CHAR_PT
+                    + 2.0 * caret::PILL_PAD_PT)
+                    .max(last.x - first.x + 2.0 * caret::PILL_PAD_PT);
+                let rect = graphene::Rect::new(
+                    (x0 + (first.x - caret::PILL_PAD_PT) * zoom) as f32,
+                    (y0 + first.top * zoom) as f32,
+                    (width * zoom) as f32,
+                    ((first.bottom - first.top) * zoom) as f32,
+                );
+                let pill = gsk::RoundedRect::from_rect(rect, rect.height() / 2.0);
+                let (fill, border, text) = match (label.is_empty(), editing) {
+                    (true, false) => (blue(0.03), blue(0.25), gdk::RGBA::new(0.4, 0.45, 0.55, 0.8)),
+                    (_, true) => (blue(0.12), blue(0.7), gdk::RGBA::new(0.1, 0.25, 0.5, 1.0)),
+                    (false, false) => {
+                        (blue(0.08), blue(0.35), gdk::RGBA::new(0.15, 0.3, 0.55, 1.0))
+                    }
+                };
+                snapshot.push_rounded_clip(&pill);
+                snapshot.append_color(&fill, &rect);
+                snapshot.pop();
+                snapshot.append_border(&pill, &[1.0; 4], &[border; 4]);
+                for (k, c) in shown.chars().enumerate() {
+                    let layout = self.obj().create_pango_layout(Some(&c.to_string()));
+                    layout.set_font_description(Some(&font));
+                    let baseline = layout.baseline() as f64 / gtk::pango::SCALE as f64;
+                    let x = first.x + k as f64 * caret::PILL_CHAR_PT;
+                    snapshot.save();
+                    snapshot.translate(&graphene::Point::new(
+                        (x0 + x * zoom) as f32,
+                        (y0 + first.line * zoom - baseline) as f32,
+                    ));
+                    snapshot.append_layout(&layout, &text);
+                    snapshot.restore();
+                }
+            }
         }
     }
 

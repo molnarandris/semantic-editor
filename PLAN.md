@@ -687,3 +687,30 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
   while the caret is in it; `Editor::call_focus` now gives the path prefix of the
   positions inside the innermost call (ending with `Body`) or inline code, which
   `caret::call_outline` matches.
+
+## M15a — Labels (2026-11-09)
+
+- Model: `BlockNode::label: String` (empty for none), used where
+  `Block::labelable()` (headings, display formulas, environments). Serialized with
+  `#[serde(flatten)]` on the kind, so a block without a label is written exactly as
+  before; file format 11. `Seq::Label(block)` edits it like text; caret path
+  `[Step::Label]` (`Target::Label`), its positions after the block's own (an
+  environment's before the position just after it), so → at the end of a block goes
+  onto the pill and ← from the next block comes back to it (`neighbour` now crosses
+  blocks to the last *position* of the block before, not `end_of`).
+- Editing (`label_char`, `leave_label`): only the chars Typst allows in a label
+  (`is_label_char`: letters, digits, `- _ . :`); space, Enter, Esc or → at the end
+  leave it (a new paragraph at the end of the document). Backspace/Delete take
+  chars, ← at its start goes back into the block. In an environment's label the
+  environment stays outlined (`env_focus`); `title_env` and the empty-title cleanup
+  ignore the label path.
+- Source: ` <label>` right after the block (`= Intro <sec>`, `$ x $ <eq>`,
+  `#lemma[…] <l>`), in both styles; a test compiles a document referencing all three.
+- Widget: the pill sits right of the page on the block's first line (a display
+  formula's line): `caret::label_stops` puts one stop per char at a fixed advance
+  (`PILL_CHAR_PT`) and the pill's text is drawn char by char at those places in a
+  monospace font, so caret and text agree without measuring. Stops carry `label`;
+  clicks and ↑/↓ reach them only right of the page, Home/End never.
+  `snapshot_label_pills` draws every label, and a faint "+ label" for the caret's
+  labelable block or the environment around it (`Editor::label_focus`).
+- Not yet (M15b): references, the popover, duplicate/dangling labels.

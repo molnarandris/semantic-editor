@@ -296,7 +296,18 @@ impl Writer {
     }
 
     fn block(&mut self, block: &BlockNode) {
-        self.node(block.id, |w| match &block.kind {
+        self.node(block.id, |w| w.block_kind(block));
+        // The label, as in Typst: right after what it labels.
+        if !block.label.is_empty() && block.kind.labelable() {
+            self.out.push_str(" <");
+            self.out.push_str(&block.label);
+            self.out.push('>');
+        }
+    }
+
+    fn block_kind(&mut self, block: &BlockNode) {
+        let w = self;
+        match &block.kind {
             Block::Heading { level, inlines } => {
                 for _ in 0..(*level).max(1) {
                     w.out.push('=');
@@ -384,7 +395,7 @@ impl Writer {
                 w.blocks(body);
                 w.indent = outer;
             }
-        });
+        }
     }
 
     /// Typst source copied as is, each line after the first indented by
@@ -1580,6 +1591,32 @@ mod tests {
         assert_eq!(typ, format!("{PREAMBLE}\nHi\n\n$ x $\n"));
         let mut world = BridgeWorld::new();
         compile(&mut world, &typ).unwrap();
+    }
+
+    /// Labels follow what they label; references to them resolve.
+    #[test]
+    fn labels() {
+        let mut d = Document::empty();
+        d.header = "#set heading(numbering: \"1.1\")\n#set math.equation(numbering: \"(1)\")\n#let lemma(body) = figure(kind: \"lemma\", supplement: [Lemma], body)\n".into();
+        let t = d.text("Intro");
+        let mut h = d.heading(1, vec![t]);
+        h.label = "sec:intro".into();
+        let x = d.ident("x");
+        let mut m = d.display(vec![x]);
+        m.label = "eq:x".into();
+        let t = d.text("Claim.");
+        let p = d.paragraph(vec![t]);
+        let mut env = d.env("lemma", vec![p]);
+        env.label = "lem".into();
+        let refs = d.raw("See @sec:intro, @eq:x and @lem.");
+        d.blocks = vec![h, m, env, refs];
+        let typ = serialize_document(&d);
+        assert!(typ.contains("= Intro <sec:intro>\n"), "{typ}");
+        assert!(typ.contains("$ x $ <eq:x>\n"), "{typ}");
+        assert!(typ.contains("#lemma[\nClaim.\n] <lem>\n"), "{typ}");
+        assert_eq!(ser(&d.blocks[1]), "$ x $ <eq:x>");
+        let mut world = BridgeWorld::new();
+        compile(&mut world, &typ).unwrap_or_else(|e| panic!("{e:?}\n{typ}"));
     }
 }
 

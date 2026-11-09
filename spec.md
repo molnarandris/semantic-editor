@@ -399,6 +399,17 @@ Titles decided 2026-11-08: optional, never added by default; positional
   Plain click follows the link (the caret reaches a reference with the arrow keys
   instead); Alt+Left goes back.
 - Effort: medium–large (model node, popover, label table, resolution).
+- Split 2026-11-09: **M15a** labels (model, pill, editing, `<label>` in the source);
+  **M15b** references, the popover, numbers and navigation.
+- M15a decisions (2026-11-09): the label is a field of every block (`label`, empty for
+  none), used on headings, display formulas and environments; written `<label>` after
+  the block as in Typst. Typing in the pill keeps only the chars Typst allows in a
+  label (letters, digits, `-`, `_`, `.`, `:`); space, Enter, → at its end or Esc leave
+  it. The pill is drawn beside the page, right of the block's first line (a display
+  formula's line), in a monospace font so every char has its caret place. Numbering
+  stays Typst's: equations are numbered if the header numbers them (labelling does
+  not number an equation by itself, which would need inventing formatting; a header
+  can number only labelled equations with a show rule).
 
 - Labels on figures and theorems too (all targets exist by now); citations (`@key`)
   with the bibliography.

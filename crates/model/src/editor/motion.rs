@@ -31,7 +31,8 @@ impl Editor {
             }
         }
         if back {
-            Some(self.doc.end_of(self.doc.blocks.get(b.checked_sub(1)?)?))
+            let before = self.doc.blocks.get(b.checked_sub(1)?)?;
+            self.doc.positions(before).pop()
         } else {
             Some(self.doc.start_of(self.doc.blocks.get(b + 1)?))
         }

@@ -15,6 +15,9 @@
 //! - Inline call: `Index(i), Body` descends into the body of inline call
 //!   `i`, addressed like a paragraph's inlines (`[Index(1), Body, Index(0)]`
 //!   is the first text of the paragraph's first call).
+//! - Label: `[Label]` in a labelable block, `offset` counts chars of its
+//!   label (the pill beside the page). Its positions come after the block's
+//!   own (an environment's: before the position just after it).
 //! - Row path: pairs `Index(k), <child>` descending into node `k`'s child row
 //!   (`Num`, `Den`, `Base`, `Sup`, `Sub`, `Arg(i)`); `offset` is a position `0..=len`
 //!   between the row's nodes.
@@ -35,6 +38,8 @@ pub enum Step {
     Arg(usize),
     /// The body of an inline call (`*bold*`, `#cl[…]`).
     Body,
+    /// The label of a block (`[Label]`).
+    Label,
 }
 
 impl Step {
@@ -48,6 +53,7 @@ impl Step {
             Step::Sub => "subscript",
             Step::Arg(_) => "argument",
             Step::Body => "body",
+            Step::Label => "label",
         }
     }
 }
@@ -78,13 +84,20 @@ pub enum Target<'a> {
     Edge {
         block: &'a BlockNode,
     },
+    /// The label of a block.
+    Label {
+        block: &'a BlockNode,
+        text: &'a str,
+    },
 }
 
 impl Target<'_> {
     /// Number of caret positions minus one: chars for text, nodes for rows.
     pub fn len(&self) -> usize {
         match self {
-            Target::Text { text, .. } | Target::Raw { text, .. } => text.chars().count(),
+            Target::Text { text, .. } | Target::Raw { text, .. } | Target::Label { text, .. } => {
+                text.chars().count()
+            }
             Target::Row { row } => row.nodes.len(),
             Target::Edge { .. } => 1,
         }
@@ -159,6 +172,12 @@ impl Document {
     /// Resolve the container of a path in `block`. On failure returns the
     /// length of the longest valid prefix that leads to a container (or 0).
     pub fn walk<'a>(&'a self, block: &'a BlockNode, path: &[Step]) -> Result<Target<'a>, usize> {
+        if path == [Step::Label] && block.kind.labelable() {
+            return Ok(Target::Label {
+                block,
+                text: &block.label,
+            });
+        }
         match &block.kind {
             Block::Env { .. } if path.is_empty() => Ok(Target::Edge { block }),
             Block::Paragraph(inlines)
@@ -341,11 +360,21 @@ impl Document {
         let inline_positions = |inlines: &[InlineNode], out: &mut Vec<CursorPath>| {
             inline_positions(block.id, &[], inlines, out)
         };
-        match &block.kind {
-            Block::Paragraph(inlines) | Block::Heading { inlines, .. } => {
-                inline_positions(inlines, &mut out);
+        let label = |out: &mut Vec<CursorPath>| {
+            for k in 0..=block.label.chars().count() {
+                out.push(at(vec![Step::Label], k));
             }
-            Block::DisplayMath(row) => row_positions(block.id, vec![], row, &mut out),
+        };
+        match &block.kind {
+            Block::Paragraph(inlines) => inline_positions(inlines, &mut out),
+            Block::Heading { inlines, .. } => {
+                inline_positions(inlines, &mut out);
+                label(&mut out);
+            }
+            Block::DisplayMath(row) => {
+                row_positions(block.id, vec![], row, &mut out);
+                label(&mut out);
+            }
             Block::RawTypst(s) | Block::Diagram(s) => {
                 out.push(at(vec![], 0));
                 out.push(at(vec![], s.chars().count()));
@@ -356,6 +385,7 @@ impl Document {
                 for child in body {
                     out.extend(self.positions(child));
                 }
+                label(&mut out);
                 out.push(at(vec![], 1));
             }
             Block::Item { term, body, .. } => {
@@ -377,6 +407,13 @@ impl Document {
             label: block.label(),
             path_len: 0,
         }];
+        if cursor.path == [Step::Label] {
+            crumbs.push(Crumb {
+                label: "label",
+                path_len: 0,
+            });
+            return crumbs;
+        }
         let mut path = &cursor.path[..];
         let mut consumed = 0;
         let mut row = match &block.kind {

@@ -102,6 +102,18 @@ impl Editor {
         if let Some(block) = self.source_block().or_else(|| self.edge_env()) {
             return self.select(Selected::Block { block });
         }
+        if let Some((block, offset, _)) = self.label_pos() {
+            if offset == 0 {
+                return self.move_left();
+            }
+            let op = Op::Delete {
+                seq: Seq::Label(block),
+                index: offset - 1,
+                count: 1,
+            };
+            let after = cursor(block, vec![Step::Label], offset - 1);
+            return self.commit(vec![op], after, Last::Deleting);
+        }
         if let Some(pos) = self.raw_pos() {
             // Inline code: chars go; at its start, empty code goes, else ←.
             if pos.offset > 0 {
@@ -417,6 +429,18 @@ impl Editor {
         }
         if let Some(block) = self.source_block().or_else(|| self.edge_env()) {
             return self.select(Selected::Block { block });
+        }
+        if let Some((block, offset, len)) = self.label_pos() {
+            if offset == len {
+                return self.move_right();
+            }
+            let op = Op::Delete {
+                seq: Seq::Label(block),
+                index: offset,
+                count: 1,
+            };
+            let after = self.caret.clone();
+            return self.commit(vec![op], after, Last::Deleting);
         }
         if let Some(pos) = self.raw_pos() {
             if pos.offset == pos.len {

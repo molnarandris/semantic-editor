@@ -38,7 +38,21 @@ pub struct Stop {
     pub depth: usize,
     /// Just before/after an environment (outside it): Home/End stay inside.
     pub edge: bool,
+    /// In a label pill (beside the page): clicks and line moves reach it
+    /// only right of the page.
+    pub label: bool,
 }
+
+/// The label pill beside a labelled block, in pt: its distance from the
+/// right edge of the content, its inner padding, its font size and the
+/// advance of one char (its text is drawn char by char at these places).
+pub const PILL_GAP_PT: f64 = 14.0;
+pub const PILL_PAD_PT: f64 = 4.0;
+pub const PILL_FONT_PT: f64 = 7.5;
+pub const PILL_CHAR_PT: f64 = 4.6;
+/// Extent of the pill above and below the baseline of its line.
+const PILL_ABOVE_PT: f64 = 8.5;
+const PILL_BELOW_PT: f64 = 3.0;
 
 /// All caret positions of a block, in document order.
 pub fn stops(block: &BlockNode, layout: Option<&BlockLayout>) -> Vec<Stop> {
@@ -70,6 +84,7 @@ pub fn stops(block: &BlockNode, layout: Option<&BlockLayout>) -> Vec<Stop> {
             line: baseline,
             depth: 0,
             edge: false,
+            label: false,
         });
     }
     out
@@ -96,6 +111,7 @@ fn stop(
         line,
         depth: 0,
         edge: false,
+        label: false,
     }
 }
 
@@ -209,6 +225,44 @@ fn row_stops(
 /// a block inside an environment, whose stops come from the environment's
 /// layout.
 fn block_stops(block: &BlockNode, l: &BlockLayout, top: bool) -> Vec<Stop> {
+    let mut out = content_stops(block, l, top);
+    if !block.kind.labelable() {
+        return out;
+    }
+    let Some(first) = out.first() else {
+        return out;
+    };
+    let label = label_stops(block, first.line, l.width);
+    // An environment's label comes before the position just after it.
+    let at = match out.last() {
+        Some(s) if s.edge && out.len() > 1 => out.len() - 1,
+        _ => out.len(),
+    };
+    out.splice(at..at, label);
+    out
+}
+
+/// The positions in the label pill of `block`, on the line at `line`.
+fn label_stops(block: &BlockNode, line: f64, width: f64) -> Vec<Stop> {
+    let x0 = width + PILL_GAP_PT + PILL_PAD_PT;
+    (0..=block.label.chars().count())
+        .map(|k| Stop {
+            label: true,
+            ..stop(
+                block,
+                vec![Step::Label],
+                k,
+                x0 + k as f64 * PILL_CHAR_PT,
+                line - PILL_ABOVE_PT,
+                line + PILL_BELOW_PT,
+                line,
+            )
+        })
+        .collect()
+}
+
+/// The stops of `block` without its label.
+fn content_stops(block: &BlockNode, l: &BlockLayout, top: bool) -> Vec<Stop> {
     match &block.kind {
         Block::Paragraph(inlines) | Block::Heading { inlines, .. } => {
             inline_stops(block, inlines, l)
@@ -608,11 +662,26 @@ pub fn lines(stops: &[Stop]) -> Vec<Vec<usize>> {
 const DEPTH_PT: f64 = 0.5;
 const CLICK_DEPTH_PT: f64 = 0.01;
 
+/// Whether a stop of `line` can be reached at `x`: label stops only right
+/// of the page (from where their pill starts).
+fn reachable<'a>(stops: &'a [Stop], line: &[usize], x: f64) -> Vec<&'a Stop> {
+    let pill = line
+        .iter()
+        .filter(|&&i| stops[i].label)
+        .map(|&i| stops[i].x)
+        .fold(f64::INFINITY, f64::min);
+    let others = line.iter().any(|&i| !stops[i].label);
+    line.iter()
+        .map(|&i| &stops[i])
+        .filter(|s| !s.label || !others || x >= pill - PILL_PAD_PT - 2.0)
+        .collect()
+}
+
 /// The stop of `line` closest to `x` (preferring shallower positions).
 pub fn nearest_in_line<'a>(stops: &'a [Stop], line: &[usize], x: f64) -> Option<&'a Stop> {
     let dist = |s: &Stop| (s.x - x).abs() + DEPTH_PT * s.depth as f64;
-    line.iter()
-        .map(|&i| &stops[i])
+    reachable(stops, line, x)
+        .into_iter()
         .min_by(|a, b| dist(a).total_cmp(&dist(b)))
 }
 
@@ -620,11 +689,11 @@ pub fn nearest_in_line<'a>(stops: &'a [Stop], line: &[usize], x: f64) -> Option<
 pub fn line_edge<'a>(stops: &'a [Stop], line: &[usize], end: bool) -> Option<&'a Stop> {
     // Home/End stay inside an environment: its edges only on a line of
     // nothing else.
-    let inside = line.iter().any(|&i| !stops[i].edge);
+    let inside = line.iter().any(|&i| !stops[i].edge && !stops[i].label);
     let stops = line
         .iter()
         .map(|&i| &stops[i])
-        .filter(|s| !(inside && s.edge));
+        .filter(|s| !(inside && (s.edge || s.label)));
     if end {
         stops.max_by(|a, b| a.x.total_cmp(&b.x))
     } else {
@@ -658,8 +727,8 @@ pub fn hit(stops: &[Stop], x: f64, y: f64) -> Option<&Stop> {
         let dy = (s.top - y).max(y - s.bottom).max(0.0);
         (s.x - x).abs() + 2.0 * dy + CLICK_DEPTH_PT * s.depth as f64
     };
-    line.iter()
-        .map(|&i| &stops[i])
+    reachable(stops, line, x)
+        .into_iter()
         .min_by(|a, b| dist(a).total_cmp(&dist(b)))
 }
 
@@ -688,6 +757,49 @@ mod tests {
     use super::*;
     use model::{Document, ListKind};
     use typst_bridge::{Around, BridgeWorld, block_document, compile, raw_layout, serialize_block};
+
+    /// The stops without the label pill's (most tests are about content).
+    fn stops(block: &BlockNode, layout: Option<&BlockLayout>) -> Vec<Stop> {
+        super::stops(block, layout)
+            .into_iter()
+            .filter(|s| !s.label)
+            .collect()
+    }
+
+    /// Label stops: after the content (an environment's: before the position
+    /// just after it), right of the page on the block's first line, one per
+    /// char; clicks reach them only there.
+    #[test]
+    fn label_pills() {
+        let mut e = model::Editor::new(Document::new());
+        e.insert_text("= Intro");
+        e.move_right();
+        e.insert_text("sec");
+        let block = e.doc().blocks[0].clone();
+        let l = layout_of(&block, 300.0);
+        let s = super::stops(&block, Some(&l));
+        let got: Vec<_> = s.iter().map(|s| s.cursor.clone()).collect();
+        assert_eq!(got, e.doc().positions(&block));
+        let label: Vec<&Stop> = s.iter().filter(|s| s.label).collect();
+        assert_eq!(label.len(), 4);
+        assert!(label[0].x > 300.0 && (label[3].x - label[0].x - 3.0 * PILL_CHAR_PT).abs() < 0.01);
+        assert!((label[0].line - s[0].line).abs() < 0.01);
+        // A click right of the text but on the page stays in the text.
+        let y = s[0].line - 2.0;
+        assert!(!hit(&s, 250.0, y).unwrap().label);
+        assert_eq!(hit(&s, label[2].x + 0.5, y).unwrap().cursor.offset, 2);
+        // End stays in the text.
+        let lines = lines(&s);
+        assert!(!line_edge(&s, &lines[0], true).unwrap().label);
+        // An environment: before the position after it.
+        let mut e = model::Editor::new(Document::new());
+        e.insert_text("#block x");
+        let block = e.doc().blocks[0].clone();
+        let l = layout_of(&block, 300.0);
+        let s = super::stops(&block, Some(&l));
+        let got: Vec<_> = s.iter().map(|s| s.cursor.clone()).collect();
+        assert_eq!(got, e.doc().positions(&block));
+    }
 
     fn layout_of(block: &BlockNode, width: f64) -> BlockLayout {
         let mut world = BridgeWorld::new();

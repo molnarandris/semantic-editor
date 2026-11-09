@@ -55,6 +55,9 @@ impl Editor {
         if self.raw_pos().is_some() {
             return self.raw_char(c);
         }
+        if self.label_pos().is_some() {
+            return self.label_char(c);
+        }
         self.selected = None;
         // Just before/after an environment: typing starts a paragraph there.
         if let Some((place, offset)) = self.edge() {
@@ -303,6 +306,43 @@ impl Editor {
         }
         let node = self.doc.inline_call(name, "", vec![]);
         Some(self.insert_inline(node, 0))
+    }
+
+    /// Typing in a label: the chars Typst allows in one; space leaves it.
+    fn label_char(&mut self, c: char) -> bool {
+        self.selected = None;
+        let Some((block, offset, _)) = self.label_pos() else {
+            return false;
+        };
+        if c == ' ' {
+            return self.leave_label();
+        }
+        if !is_label_char(c) {
+            return false;
+        }
+        let op = Op::Insert {
+            seq: Seq::Label(block),
+            index: offset,
+            items: Items::Text(c.into()),
+        };
+        let after = cursor(block, vec![Step::Label], offset + 1);
+        self.commit(vec![op], after, Last::Typing { space: false })
+    }
+
+    /// Leave the label the caret is in: on to the position after it (a new
+    /// paragraph at the end of the document).
+    pub(super) fn leave_label(&mut self) -> bool {
+        let Some((block, _, len)) = self.label_pos() else {
+            return false;
+        };
+        self.caret.offset = len;
+        if let Some(next) = self.neighbour(false) {
+            return self.jump(next);
+        }
+        let Some(place) = self.doc.place(block) else {
+            return false;
+        };
+        self.paragraph_after(place)
     }
 
     /// Typing in inline code: everything is kept as typed; `` ` `` ends it.
@@ -857,6 +897,11 @@ pub(super) fn inline_call_head(chars: &[char]) -> Option<(usize, String, Option<
     }
     let (name, args) = call_head(&chars[start..])?;
     Some((start, name, args))
+}
+
+/// Whether Typst allows `c` in a label (`<eq:main-1.2>`).
+pub(super) fn is_label_char(c: char) -> bool {
+    c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | ':')
 }
 
 /// `name` if `chars` is `#name` with a Typst identifier (`lemma`,

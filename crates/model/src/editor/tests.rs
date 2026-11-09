@@ -262,8 +262,10 @@ fn environments() {
     assert!(e.move_right());
     assert_eq!(e.caret(), &e.doc().start_of(&body(&e)[0]));
 
-    // → at the end of the body: just after it.
+    // → at the end of the body: onto its label, then just after it.
     e.set_caret(e.doc().end_of(&body(&e)[1]));
+    assert!(e.move_right());
+    assert_eq!(e.caret().path, vec![Step::Label]);
     assert!(e.move_right());
     assert_eq!(e.caret(), &after);
 
@@ -830,17 +832,19 @@ fn arrows_enter_formulas_and_cross_blocks() {
         e.move_left();
     }
     assert_eq!((e.caret().path.clone(), e.caret().offset), (vec![i(0)], 3));
-    // Across blocks: end of "ef" → display row → "gh".
+    // Across blocks: end of "ef" → display row → its label → "gh".
     caret_at(&mut e, 1, 0, 2);
     e.move_right();
     assert_eq!(e.caret().block, e.doc().blocks[2].id);
     assert_eq!(e.caret().offset, 0);
     e.move_right();
     e.move_right();
+    assert_eq!(e.caret().path, vec![Step::Label]);
+    e.move_right();
     assert_eq!(e.caret().block, e.doc().blocks[3].id);
     e.move_left();
     assert_eq!(e.caret().block, e.doc().blocks[2].id);
-    assert_eq!(e.caret().offset, 1);
+    assert_eq!(e.caret().path, vec![Step::Label]);
 }
 
 #[test]
@@ -1323,4 +1327,65 @@ fn dashes_spaces_and_line_breaks() {
         panic!()
     };
     assert_eq!(row.nodes[1].kind, MathKind::Linebreak);
+}
+
+#[test]
+fn block_labels() {
+    let mut e = Editor::default();
+    e.insert_text("= Intro");
+    // → at the end of the heading: onto its label.
+    assert!(e.move_right());
+    assert_eq!(e.caret().path, vec![Step::Label]);
+    e.insert_text("sec:<in>tro");
+    let label = |e: &Editor, b: usize| e.doc().blocks[b].label.clone();
+    assert_eq!(label(&e, 0), "sec:intro", "only label chars");
+    // Space leaves it (on to a new paragraph at the end of the document).
+    e.insert_text(" ");
+    assert_eq!(e.doc().blocks.len(), 2);
+    assert_eq!(e.caret().block, e.doc().blocks[1].id);
+    // ← from the next paragraph comes back to the label's end.
+    e.move_left();
+    assert_eq!(
+        (e.caret().path.clone(), e.caret().offset),
+        (vec![Step::Label], 9)
+    );
+    e.backspace();
+    e.backspace();
+    e.backspace();
+    e.backspace();
+    e.backspace();
+    e.backspace();
+    assert_eq!(label(&e, 0), "sec");
+    // Enter leaves it too; a display formula and an environment have one.
+    e.enter();
+    e.insert_text("$$x");
+    e.move_right();
+    assert_eq!(e.caret().path, vec![Step::Label]);
+    e.insert_text("eq");
+    e.escape();
+    let display = e
+        .doc()
+        .blocks
+        .iter()
+        .position(|b| matches!(b.kind, Block::DisplayMath(_)))
+        .unwrap();
+    assert_eq!(label(&e, display), "eq");
+    // Paragraphs have none: → goes on.
+    let mut e = Editor::default();
+    e.insert_text("a");
+    assert!(!e.move_right());
+    // An environment's label comes after its body, before the position
+    // just after it; the environment stays outlined.
+    let mut e = Editor::default();
+    e.insert_text("#lemma x");
+    assert!(e.move_right());
+    assert_eq!(e.caret().path, vec![Step::Label]);
+    assert_eq!(e.env_focus(), Some((e.caret().block, true)));
+    e.insert_text("l1");
+    assert!(e.move_right());
+    assert_eq!((e.caret().path.clone(), e.caret().offset), (vec![], 1));
+    assert_eq!(texts(&e), ["#lemma[x]"]);
+    assert_eq!(label(&e, 0), "l1");
+    while e.undo() {}
+    assert_eq!(label(&e, 0), "");
 }

@@ -80,6 +80,9 @@ impl Editor {
         {
             return self.leave_block(place);
         }
+        if self.label_pos().is_some() {
+            return self.leave_label();
+        }
         let Some(p) = self.row_pos() else {
             if self.raw_pos().is_some() {
                 return self.leave_raw();
@@ -113,6 +116,9 @@ impl Editor {
     pub fn enter(&mut self) -> bool {
         self.finish_word();
         self.selected = None;
+        if self.label_pos().is_some() {
+            return self.leave_label();
+        }
         if let Some(pos) = self.raw_pos() {
             self.caret = pos.at(pos.inline + 1, 0);
         }
@@ -335,7 +341,14 @@ impl Editor {
             seq: place.seq(),
             index: place.index,
             count: 1,
-            items: Items::Blocks(vec![BlockNode { id: block.id, kind }]),
+            items: Items::Blocks(vec![BlockNode {
+                id: block.id,
+                label: match kind.labelable() {
+                    true => block.label.clone(),
+                    false => String::new(),
+                },
+                kind,
+            }]),
         };
         self.commit(vec![op], after, Last::Other)
     }

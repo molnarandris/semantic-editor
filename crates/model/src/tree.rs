@@ -12,11 +12,16 @@ use crate::cursor::Step;
 pub struct NodeId(pub u64);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(transparent)]
 pub struct BlockNode {
     #[serde(skip)]
     pub id: NodeId,
+    #[serde(flatten)]
     pub kind: Block,
+    /// The block's label (`<label>` after it), empty if none. Used on
+    /// headings, display formulas and environments (see
+    /// [`Block::labelable`]).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub label: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -244,6 +249,15 @@ pub enum MathKind {
 }
 
 impl Block {
+    /// Whether the block can have a label (headings, display formulas,
+    /// environments).
+    pub fn labelable(&self) -> bool {
+        matches!(
+            self,
+            Block::Heading { .. } | Block::DisplayMath(_) | Block::Env { .. }
+        )
+    }
+
     /// The inline list of a paragraph or heading.
     pub fn inlines(&self) -> Option<&Vec<InlineNode>> {
         match self {
@@ -1025,6 +1039,7 @@ impl Document {
     pub fn paragraph(&mut self, inlines: Vec<InlineNode>) -> BlockNode {
         let inlines = self.normalized_inlines(inlines);
         BlockNode {
+            label: String::new(),
             id: self.fresh_id(),
             kind: Block::Paragraph(inlines),
         }
@@ -1033,6 +1048,7 @@ impl Document {
     pub fn heading(&mut self, level: u8, inlines: Vec<InlineNode>) -> BlockNode {
         let inlines = self.normalized_inlines(inlines);
         BlockNode {
+            label: String::new(),
             id: self.fresh_id(),
             kind: Block::Heading { level, inlines },
         }
@@ -1041,6 +1057,7 @@ impl Document {
     pub fn display(&mut self, nodes: Vec<MathNode>) -> BlockNode {
         let row = self.row(nodes);
         BlockNode {
+            label: String::new(),
             id: self.fresh_id(),
             kind: Block::DisplayMath(row),
         }
@@ -1048,6 +1065,7 @@ impl Document {
 
     pub fn raw(&mut self, s: &str) -> BlockNode {
         BlockNode {
+            label: String::new(),
             id: self.fresh_id(),
             kind: Block::RawTypst(s.into()),
         }
@@ -1055,6 +1073,7 @@ impl Document {
 
     pub fn diagram(&mut self, source: &str) -> BlockNode {
         BlockNode {
+            label: String::new(),
             id: self.fresh_id(),
             kind: Block::Diagram(source.into()),
         }
@@ -1071,6 +1090,7 @@ impl Document {
             _ => vec![],
         };
         BlockNode {
+            label: String::new(),
             id: self.fresh_id(),
             kind: Block::Item { kind, term, body },
         }
@@ -1082,6 +1102,7 @@ impl Document {
             body.push(self.paragraph(vec![]));
         }
         BlockNode {
+            label: String::new(),
             id: self.fresh_id(),
             kind: Block::Env {
                 name: name.into(),
@@ -1128,8 +1149,15 @@ mod tests {
         let d = doc.display(vec![f]);
         doc.blocks = vec![para, d];
 
+        doc.blocks[1].label = "eq:frac".into();
         let json = serde_json::to_string(&doc).unwrap();
         assert!(!json.contains("\"id\""));
+        // Blocks without a label are written as before labels existed.
+        assert!(
+            json.contains("{\"Paragraph\":[{\"Text\":\"see \"}"),
+            "{json}"
+        );
+        assert!(json.contains("\"label\":\"eq:frac\""), "{json}");
         let mut back: Document = serde_json::from_str(&json).unwrap();
         back.regenerate_ids();
         back.check_invariants().unwrap();

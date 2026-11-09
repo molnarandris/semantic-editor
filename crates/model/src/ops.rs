@@ -26,6 +26,8 @@ pub enum Seq {
     Text(NodeId),
     /// The chars of the document header.
     Header,
+    /// The chars of a block's label (by block id).
+    Label(NodeId),
 }
 
 impl Place {
@@ -218,6 +220,10 @@ impl Document {
                 .map(|r| SeqMut::Row(&mut r.nodes))
                 .ok_or_else(not_found),
             Seq::Text(id) => text_in(self, id),
+            Seq::Label(block) => self
+                .block_mut(block)
+                .map(|b| SeqMut::Text(&mut b.label))
+                .ok_or_else(not_found),
         }
     }
 
