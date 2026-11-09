@@ -123,6 +123,10 @@ impl Editor {
             self.caret = pos.at(pos.inline + 1, 0);
         }
         if let Some(p) = self.row_pos() {
+            // In a case of `cases`: a new case.
+            if self.new_case(&p) {
+                return true;
+            }
             if let Some((mut path, i)) = p.formula() {
                 path.push(Step::Index(i + 1));
                 self.caret = cursor(p.block, path, 0);

@@ -413,7 +413,10 @@ fn typed_section(doc: Document) -> Document {
     e.enter();
 
     // Labelled display formulas: `$$`, the formula, → onto the label.
-    e.insert_text("$$|x| = cases(x \"if\" x >= 0, -x \"otherwise\")");
+    // Enter in `cases` starts the next case.
+    e.insert_text("$$|x| = cases(x \"if\" x >= 0");
+    e.enter();
+    e.insert_text("-x \"otherwise\")");
     e.move_right();
     e.insert_text("eq:abs");
     e.enter();

@@ -308,6 +308,9 @@ functions and packages.
   (multi-line aligned equations; Typst lays them out, the caret follows spans).
 - `phi(x)` where `phi` is a symbol is not a call (already representable).
 - Later: matrices (`mat(…; …)`, 2D arguments).
+- `cases` by lines (user request 2026-11-09): Enter in a case starts the next one (as a
+  line break would look), ↑/↓ move between cases; `,` still works. Typing only: the
+  source has Typst's commas.
 - Split 2026-11-09: **M12a** the call node, **M12b** the atoms; both done (see
   PLAN.md). Line break typed as in Typst, `\` then space; an empty new line shows a
   placeholder with the caret in it. While a formula is being edited (caret in it),

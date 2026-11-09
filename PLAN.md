@@ -721,3 +721,8 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
   inline diagram, labelled `cases` and aligned formulas, a term list and a block
   call with an argument. Test `sample_has_every_feature` checks the export.
   (Typst 0.15 has `chevron.r`; `angle.r` is gone.)
+- Follow-up (user request): `cases` by lines. Enter with the caret anywhere in a case
+  of a call taking more arguments starts a new empty case after it
+  (`Editor::case_around`, `new_case`; a call opened with `(` is still left with `)`),
+  and ↑/↓ move to the case above/below (`vertical_target`; past the first/last case,
+  line moves as before). The source keeps Typst's commas.

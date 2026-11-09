@@ -751,6 +751,40 @@ fn math_calls() {
     assert_eq!(display_of(&e, 0), "sqrt(a , b)");
 }
 
+/// `cases`: Enter starts a new case after the caret's one (also from deeper
+/// in it), ↑/↓ go to the case above/below, `)` still leaves.
+#[test]
+fn cases_by_lines() {
+    let mut e = math_calls_editor();
+    e.insert_text("cases(a");
+    assert!(e.enter());
+    e.insert_text("1/b");
+    assert!(e.enter(), "from the denominator: a new case after it");
+    e.insert_text("c");
+    assert_eq!(display_of(&e, 0), "cases(a, frac(1, b), c)");
+    let arg = |e: &Editor| e.caret().path[1];
+    assert_eq!(arg(&e), Step::Arg(2));
+    assert!(
+        e.vertical_target(true).is_none(),
+        "below the last case: lines"
+    );
+    let up = e.vertical_target(false).unwrap();
+    assert_eq!(up.path[1], Step::Arg(1));
+    e.set_caret(up);
+    e.set_caret(e.vertical_target(false).unwrap());
+    assert_eq!(arg(&e), Step::Arg(0));
+    // Enter in the first case inserts after it.
+    e.set_caret(CursorPath {
+        offset: 1,
+        ..e.caret().clone()
+    });
+    assert!(e.enter());
+    e.insert_text("x)");
+    assert_eq!(display_of(&e, 0), "cases(a, x, frac(1, b), c)");
+    assert!(e.caret().path.is_empty(), "`)` left the call");
+    e.doc().check_invariants().unwrap();
+}
+
 /// Atoms: `'` adds primes, `"…"` is text (spaces and all, Backspace takes
 /// its chars back), `&` an alignment point, `\` then space a line break.
 #[test]

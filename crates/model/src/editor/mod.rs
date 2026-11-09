@@ -872,6 +872,9 @@ impl Editor {
                     "( → function with its arguments · space → symbol"
                 }
             }
+            (None, Some(p)) if self.case_around(&p).is_some() => {
+                "Enter → new case · ↑/↓ → case above/below · Esc → leave"
+            }
             (None, Some(p)) if p.nested() => "Tab → next slot · Esc → leave structure",
             (None, Some(_)) => "/ fraction · ^ _ scripts · Esc or $ → leave formula",
             (None, None) if self.label_pos().is_some() => {

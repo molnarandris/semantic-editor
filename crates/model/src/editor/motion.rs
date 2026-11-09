@@ -66,7 +66,8 @@ impl Editor {
 
     /// ↑/↓ inside a structure: the row above/below in the innermost
     /// fraction or scripts that has one (numerator ↔ denominator, base ↔
-    /// scripts). The offset is 0; the widget picks the column. `None` means
+    /// scripts, case ↔ case of `cases`). The offset is 0; the widget picks
+    /// the column. `None` means
     /// move by lines.
     pub fn vertical_target(&self, down: bool) -> Option<CursorPath> {
         let p = self.row_pos()?;
@@ -80,12 +81,17 @@ impl Editor {
             let parent = &path[..n - 2];
             let prow = self.row_id_at(p.block, parent)?;
             let node = self.row_nodes(prow).get(j)?;
+            // The cases of `cases` (a call taking more arguments) are stacked.
+            let stacked = matches!(&node.kind, MathKind::Call { name, .. }
+                if self.math_call_shape(name).is_some_and(|s| s.variadic));
             let to = match (step, down) {
                 (Step::Num, true) => Some(Step::Den),
                 (Step::Den, false) => Some(Step::Num),
                 (Step::Sup, true) | (Step::Sub, false) => Some(Step::Base),
                 (Step::Base, true) => Some(Step::Sub),
                 (Step::Base, false) => Some(Step::Sup),
+                (Step::Arg(i), true) if stacked => Some(Step::Arg(i + 1)),
+                (Step::Arg(i), false) if stacked => i.checked_sub(1).map(Step::Arg),
                 _ => None,
             };
             if let Some(to) = to.filter(|t| node.child(*t).is_some()) {

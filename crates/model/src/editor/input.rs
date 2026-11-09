@@ -664,6 +664,51 @@ impl Editor {
         self.commit(vec![row_replace(prow, j, node)], next, Last::Other)
     }
 
+    /// The innermost call taking more arguments (`cases`) with the caret in
+    /// one of its arguments, at any depth: the path of the row holding the
+    /// call, the call's index there and the argument's index.
+    pub(super) fn case_around(&self, p: &RowPos) -> Option<(Vec<Step>, usize, usize)> {
+        let mut path = p.path.clone();
+        while path.len() > p.base {
+            let n = path.len();
+            if let (Step::Index(j), Step::Arg(i)) = (path[n - 2], path[n - 1]) {
+                let parent = path[..n - 2].to_vec();
+                let prow = self.row_id_at(p.block, &parent)?;
+                if let MathKind::Call { name, .. } = &self.row_nodes(prow).get(j)?.kind
+                    && self.math_call_shape(name).is_some_and(|s| s.variadic)
+                {
+                    return Some((parent, j, i));
+                }
+            }
+            path.truncate(n - 2);
+        }
+        None
+    }
+
+    /// Enter in a case of `cases` (a call taking more arguments): a new empty
+    /// case after it, the caret in it. `false` outside such a call.
+    pub(super) fn new_case(&mut self, p: &RowPos) -> bool {
+        let Some((parent, j, i)) = self.case_around(p) else {
+            return false;
+        };
+        let Some(prow) = self.row_id_at(p.block, &parent) else {
+            return false;
+        };
+        let mut node = self.row_nodes(prow)[j].clone();
+        let row = self.doc.row(vec![]);
+        let row_id = row.id;
+        let MathKind::Call { args, .. } = &mut node.kind else {
+            return false;
+        };
+        // A call opened with `(` is left with `)` from the new case too.
+        if self.groups.contains(&args[i].id) {
+            self.groups.insert(row_id);
+        }
+        args.insert(i + 1, row);
+        let after = cursor(p.block, child_path(&parent, j, Step::Arg(i + 1)), 0);
+        self.commit(vec![row_replace(prow, j, node)], after, Last::Other)
+    }
+
     /// End the identifier being typed: a known name becomes its symbol.
     pub(super) fn finish_word(&mut self) -> bool {
         let Some(w) = self.word.take() else {
