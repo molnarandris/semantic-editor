@@ -28,6 +28,12 @@ fn inline_text(v: &[InlineNode]) -> String {
         .map(|i| match &i.kind {
             Inline::Text(s) => s.clone(),
             Inline::Math(_) => "$".into(),
+            Inline::Call { name, args, body } => match name.as_str() {
+                "strong" => format!("*{}*", inline_text(body)),
+                "emph" => format!("_{}_", inline_text(body)),
+                _ if args.is_empty() => format!("#{name}[{}]", inline_text(body)),
+                _ => format!("#{name}({args})[{}]", inline_text(body)),
+            },
         })
         .collect()
 }
@@ -1096,6 +1102,149 @@ fn breadcrumb_selects_structures() {
     assert!(e.select_crumb(1));
     assert!(matches!(
         e.selected(),
-        Some(Selected::Formula { inline: 1, .. })
+        Some(Selected::Inline { path, .. }) if path == &[Step::Index(1)]
     ));
+}
+
+#[test]
+fn bold_and_italic_as_in_typst() {
+    let mut e = Editor::default();
+    e.insert_text("a *bold* and _it_ end");
+    assert_eq!(texts(&e), ["a *bold* and _it_ end"]);
+    // In a word, `*` and `_` are plain text (Typst reads them so too);
+    // `\*` is a literal star.
+    let mut e = Editor::default();
+    e.insert_text("snake_case a*b \\* \\_");
+    assert_eq!(texts(&e), ["snake_case a*b * _"]);
+    // Nested, with a formula inside; `$` leaves the formula, `*` the call.
+    let mut e = Editor::default();
+    e.insert_text("*x _y $a$ z_*.");
+    assert_eq!(texts(&e), ["*x _y $ z_*."]);
+    assert_eq!(e.caret().path, vec![Step::Index(2)]);
+    e.doc().check_invariants().unwrap();
+    while e.undo() {}
+    assert_eq!(texts(&e), [""]);
+}
+
+#[test]
+fn inline_calls_typed() {
+    let mut e = Editor::default();
+    e.insert_text("see #cl[closure] and #link(\"https://x.org\")[here] or #todo fix]!");
+    assert_eq!(
+        texts(&e),
+        ["see #cl[closure] and #link(\"https://x.org\")[here] or #todo[fix]!"]
+    );
+    // `#name` + space as the whole paragraph is still a block call.
+    let mut e = Editor::default();
+    e.insert_text("#lemma x");
+    assert_eq!(texts(&e), ["#lemma[x]"]);
+    // Escape leaves the call; an empty call left goes.
+    let mut e = Editor::default();
+    e.insert_text("a *b");
+    assert!(e.escape());
+    e.insert_text(" c **d");
+    assert_eq!(texts(&e), ["a *b* c d"]);
+}
+
+#[test]
+fn backspace_around_inline_calls() {
+    let mut e = Editor::default();
+    e.insert_text("a *b* c");
+    caret_at(&mut e, 0, 2, 0);
+    assert!(e.backspace());
+    assert!(e.selected().is_some(), "first press selects the call");
+    assert!(e.backspace());
+    assert_eq!(texts(&e), ["a c"]);
+    // In an empty call: it goes. At the start of a full one: ←.
+    let mut e = Editor::default();
+    e.insert_text("a *");
+    assert!(e.backspace());
+    assert_eq!(texts(&e), ["a "]);
+    assert_eq!(e.caret().path, vec![Step::Index(0)]);
+    let mut e = Editor::default();
+    e.insert_text("a *b");
+    e.move_left();
+    assert!(e.backspace());
+    assert_eq!(texts(&e), ["a *b*"]);
+    assert_eq!(
+        (e.caret().path.clone(), e.caret().offset),
+        (vec![Step::Index(0)], 2)
+    );
+}
+
+#[test]
+fn enter_splits_inline_calls() {
+    let mut e = Editor::default();
+    e.insert_text("a *bo _x_ld* c");
+    // Caret in "ld" after "l": inside the bold.
+    let caret = e.caret().clone();
+    let path = vec![Step::Index(1), Step::Body, Step::Index(2)];
+    e.set_caret(CursorPath {
+        path: path.clone(),
+        offset: 1,
+        ..caret
+    });
+    assert!(e.enter());
+    assert_eq!(texts(&e), ["a *bo _x_l*", "*d* c"]);
+    assert_eq!(
+        e.caret().path,
+        vec![Step::Index(1), Step::Body, Step::Index(0)]
+    );
+    e.insert_text("!");
+    assert_eq!(texts(&e), ["a *bo _x_l*", "*!d* c"]);
+    // At the end of the bold, nothing of it continues.
+    let mut e = Editor::default();
+    e.insert_text("a *b");
+    assert!(e.enter());
+    assert_eq!(texts(&e), ["a *b*", ""]);
+    e.doc().check_invariants().unwrap();
+    while e.undo() {}
+    assert_eq!(texts(&e), [""]);
+}
+
+#[test]
+fn arrows_go_through_inline_calls() {
+    let mut e = Editor::default();
+    e.insert_text("a *b* c");
+    caret_at(&mut e, 0, 0, 2);
+    assert!(e.move_right());
+    assert_eq!(
+        e.caret().path,
+        vec![Step::Index(1), Step::Body, Step::Index(0)]
+    );
+    let crumbs: Vec<_> = e
+        .doc()
+        .breadcrumb(e.caret())
+        .iter()
+        .map(|c| c.label)
+        .collect();
+    assert_eq!(crumbs, ["paragraph", "bold"]);
+    assert!(e.move_right());
+    assert!(e.move_right());
+    assert_eq!(
+        (e.caret().path.clone(), e.caret().offset),
+        (vec![Step::Index(2)], 0)
+    );
+}
+
+#[test]
+fn an_empty_call_left_goes() {
+    for right in [false, true] {
+        let mut e = Editor::default();
+        e.insert_text("a b");
+        // An empty bold typed in the middle, then the caret moves away.
+        caret_at(&mut e, 0, 0, 2);
+        e.insert_text("*");
+        assert_eq!(texts(&e), ["a **b"]);
+        let moved = if right { e.move_right() } else { e.move_left() };
+        assert!(moved);
+        assert_eq!(texts(&e), ["a b"]);
+        assert_eq!(
+            (e.caret().path.clone(), e.caret().offset),
+            (vec![Step::Index(0)], 2)
+        );
+        e.doc().check_invariants().unwrap();
+        e.undo();
+        assert_eq!(texts(&e), ["a **b"]);
+    }
 }

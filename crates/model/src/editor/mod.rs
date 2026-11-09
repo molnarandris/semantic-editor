@@ -20,6 +20,7 @@ use crate::tree::{
 };
 
 mod delete;
+use delete::joined_tail;
 mod input;
 mod list;
 mod motion;
@@ -70,8 +71,9 @@ pub enum Selected {
         start: usize,
         end: usize,
     },
-    /// Inline formula number `inline` of a paragraph.
-    Formula { block: NodeId, inline: usize },
+    /// An inline formula or call: `path` leads to it (ends with its
+    /// `Index`).
+    Inline { block: NodeId, path: Vec<Step> },
     /// A whole block (raw Typst, diagram, environment).
     Block { block: NodeId },
     /// An environment marked by Backspace at the start of its text: its
@@ -129,10 +131,15 @@ pub type MathCallResolver = fn(&[&str], &str) -> Option<MathCallShape>;
 /// (the header, then the raw blocks in document order); `None` if unknown.
 pub type CallResolver = fn(&[&str], &str) -> Option<CallShape>;
 
-/// Position of a text caret inside a paragraph or heading.
+/// Position of a text caret inside a paragraph or heading (or a title,
+/// a term, the body of an inline call in them).
 struct TextPos<'a> {
     place: Place,
     block: &'a BlockNode,
+    /// The block, or the inline call whose body holds the text.
+    owner: NodeId,
+    /// The path to the inline list (empty, or into calls' bodies).
+    prefix: Vec<Step>,
     inlines: &'a [InlineNode],
     inline: usize,
     offset: usize,
@@ -143,6 +150,18 @@ impl TextPos<'_> {
     fn chars(&self) -> Vec<char> {
         text_of(&self.inlines[self.inline]).chars().collect()
     }
+
+    /// Inside an inline call's body.
+    fn nested(&self) -> bool {
+        !self.prefix.is_empty()
+    }
+
+    /// The caret at `offset` in inline `inline` of the same list.
+    fn at(&self, inline: usize, offset: usize) -> CursorPath {
+        let mut path = self.prefix.clone();
+        path.push(Step::Index(inline));
+        cursor(self.block.id, path, offset)
+    }
 }
 
 /// Position of a caret in a math row.
@@ -150,8 +169,9 @@ impl TextPos<'_> {
 struct RowPos {
     place: Place,
     block: NodeId,
-    /// Length of the path prefix before the formula's row path (1 for an
-    /// inline formula, 0 for display math).
+    /// Length of the path prefix before the formula's row path (0 for
+    /// display math; for an inline formula, the path to it, ending with its
+    /// `Index`).
     base: usize,
     path: Vec<Step>,
     row: NodeId,
@@ -162,6 +182,15 @@ struct RowPos {
 impl RowPos {
     fn nested(&self) -> bool {
         self.path.len() > self.base
+    }
+
+    /// An inline formula's index in its list and the path to the list.
+    fn formula(&self) -> Option<(Vec<Step>, usize)> {
+        let k = self.base.checked_sub(1)?;
+        let Step::Index(i) = self.path[k] else {
+            return None;
+        };
+        Some((self.path[..k].to_vec(), i))
     }
 
     /// Path of the parent row, index of the structure in it, and the step
@@ -324,6 +353,7 @@ impl Editor {
         let old = std::mem::replace(&mut self.caret, self.doc.fix_cursor(&caret));
         self.last = Last::Other;
         self.drop_left_title(&old);
+        self.drop_left_call(&old);
     }
 
     pub fn can_undo(&self) -> bool {
@@ -369,18 +399,20 @@ impl Editor {
         let c = &self.caret;
         let place = self.doc.place(c.block)?;
         let block = self.doc.at(place)?;
-        let inlines = block.kind.text_inlines()?;
-        let [Step::Index(inline)] = c.path[..] else {
+        let at = self.doc.inline_at(block, &c.path)?;
+        if c.path.len() != at.prefix + 1 {
             return None;
-        };
-        let Inline::Text(text) = &inlines.get(inline)?.kind else {
+        }
+        let Inline::Text(text) = &at.inlines.get(at.index)?.kind else {
             return None;
         };
         Some(TextPos {
             place,
             block,
-            inlines,
-            inline,
+            owner: at.owner,
+            prefix: c.path[..at.prefix].to_vec(),
+            inlines: at.inlines,
+            inline: at.index,
             offset: c.offset,
             len: text.chars().count(),
         })
@@ -393,10 +425,14 @@ impl Editor {
         let Ok(Target::Row { row }) = self.doc.walk(block, &c.path) else {
             return None;
         };
+        let base = self
+            .doc
+            .inline_at(block, &c.path)
+            .map_or(0, |at| at.prefix + 1);
         Some(RowPos {
             place,
             block: block.id,
-            base: usize::from(block.kind.text_inlines().is_some()),
+            base,
             path: c.path.clone(),
             row: row.id,
             offset: c.offset,
@@ -434,7 +470,7 @@ impl Editor {
         };
         match result {
             Ok(()) => {
-                debug_assert!(self.doc.check_invariants().is_ok());
+                debug_assert_eq!(self.doc.check_invariants(), Ok(()));
                 self.caret = self.doc.fix_cursor(&after);
                 self.last = last;
                 self.selected = None;
@@ -455,6 +491,7 @@ impl Editor {
         let changed = caret != self.caret;
         let old = std::mem::replace(&mut self.caret, caret);
         self.drop_left_title(&old);
+        self.drop_left_call(&old);
         changed
     }
 
@@ -552,6 +589,63 @@ impl Editor {
         }
     }
 
+    /// After the caret moved from `old`: if `old` was in an empty inline
+    /// call (`*` typed, then the caret moved away), remove the call (its own
+    /// undo step); the caret keeps its place.
+    fn drop_left_call(&mut self, old: &CursorPath) {
+        let Some(block) = self.doc.block(old.block) else {
+            return;
+        };
+        let Some(at) = self.doc.inline_at(block, &old.path) else {
+            return;
+        };
+        if at.prefix == 0 || !is_empty_text(at.inlines) {
+            return;
+        }
+        let call = old.path[..at.prefix - 1].to_vec();
+        if self.caret.block == old.block && self.caret.path.starts_with(&old.path[..at.prefix]) {
+            return;
+        }
+        // Where the caret is, by the inline it is in (ids survive the edit).
+        let here = self.doc.block(self.caret.block).and_then(|b| {
+            let at = self.doc.inline_at(b, &self.caret.path)?;
+            Some((at.inlines[at.index].id, at.prefix))
+        });
+        let call_at = self.doc.inline_at(block, &call).expect("the call");
+        let m = call_at.index;
+        let (before, after) = (&call_at.inlines[m - 1], &call_at.inlines[m + 1]);
+        let (before_id, after_id) = (before.id, after.id);
+        let before_len = text_of(before).chars().count();
+        let starts_block = m == 1 && call.len() == 1;
+        let joined = joined_tail(text_of(before), text_of(after), starts_block);
+        let trimmed = text_of(after).chars().count() - joined.chars().count();
+        let Some((ops, _)) = self.remove_inline(old.block, &call) else {
+            return;
+        };
+        let mut after_caret = self.caret.clone();
+        let applied = self
+            .history
+            .apply(&mut self.doc, ops, old.clone(), after_caret.clone());
+        if applied.is_err() {
+            return;
+        }
+        if let Some((id, prefix)) = here {
+            let rest = after_caret.path[prefix + 1..].to_vec();
+            let (id, shift) = match id == after_id {
+                true => (before_id, before_len as isize - trimmed as isize),
+                false => (id, 0),
+            };
+            if let Some(mut path) = self.doc.inline_path(after_caret.block, id) {
+                path.extend(rest);
+                after_caret.path = path;
+                if shift != 0 {
+                    after_caret.offset = after_caret.offset.saturating_add_signed(shift);
+                }
+            }
+        }
+        self.caret = self.doc.fix_cursor(&after_caret);
+    }
+
     /// Select a subtree (the first Backspace/Delete on a structure, a
     /// breadcrumb click). The caret stays.
     fn select(&mut self, sel: Selected) -> bool {
@@ -625,13 +719,16 @@ impl Editor {
         let Some(block) = self.doc.block(c.block) else {
             return false;
         };
-        let inline_formula = block.kind.text_inlines().is_some();
         let prefix = &c.path[..path_len.min(c.path.len())];
+        let inline = self
+            .doc
+            .inline_at(block, prefix)
+            .is_some_and(|at| at.prefix + 1 == prefix.len());
         let sel = match prefix {
             [] => return false,
-            [Step::Index(i)] if inline_formula => Selected::Formula {
+            [.., Step::Index(_)] if inline => Selected::Inline {
                 block: c.block,
-                inline: *i,
+                path: prefix.to_vec(),
             },
             [.., Step::Index(k)] => Selected::Nodes {
                 block: c.block,
@@ -671,15 +768,20 @@ impl Editor {
                 .map(|r| self.row_nodes(r))
                 .and_then(|n| n.get(*start..*end))
                 .map_or(vec![], |n| n.iter().map(|n| n.id).collect()),
-            Some(Selected::Formula { block, inline }) => self
-                .doc
-                .block(*block)
-                .and_then(|b| b.kind.text_inlines())
-                .and_then(|v| v.get(*inline))
+            Some(Selected::Inline { block, path }) => self
+                .inline_by_path(*block, path)
                 .map_or(vec![], |i| vec![i.id]),
             Some(Selected::Block { block }) => vec![*block],
             Some(Selected::Unwrap { .. }) | None => vec![],
         }
+    }
+
+    /// The inline (formula, call or text) that `path` in `block` leads to
+    /// (`path` ends with its `Index`).
+    fn inline_by_path(&self, block: NodeId, path: &[Step]) -> Option<&InlineNode> {
+        let block = self.doc.block(block)?;
+        let at = self.doc.inline_at(block, path)?;
+        (at.prefix + 1 == path.len()).then(|| &at.inlines[at.index])
     }
 
     /// The formula around the caret and the structures it is in, outermost
@@ -691,18 +793,15 @@ impl Editor {
         let Some(block) = self.doc.block(p.block) else {
             return vec![];
         };
-        let (mut row, formula) = match (&block.kind, p.path.first()) {
-            (Block::DisplayMath(row), _) => (row, row.id),
-            (
-                Block::Paragraph(v)
-                | Block::Heading { inlines: v, .. }
-                | Block::Env { title: v, .. },
-                Some(Step::Index(i)),
-            ) => match v.get(*i).map(|n| (&n.kind, n.id)) {
-                Some((Inline::Math(row), id)) => (row, id),
+        let (mut row, formula) = match &block.kind {
+            Block::DisplayMath(row) => (row, row.id),
+            _ => match self.inline_by_path(p.block, &p.path[..p.base]) {
+                Some(InlineNode {
+                    id,
+                    kind: Inline::Math(row),
+                }) => (row, *id),
                 _ => return vec![],
             },
-            _ => return vec![],
         };
         let mut out = vec![formula];
         for pair in p.path[p.base..].chunks(2) {
@@ -746,6 +845,7 @@ impl Editor {
             }
             (None, Some(p)) if p.nested() => "Tab → next slot · Esc → leave structure",
             (None, Some(_)) => "/ fraction · ^ _ scripts · Esc or $ → leave formula",
+            (None, None) if let Some(hint) = self.inline_call_hint() => hint,
             (None, None) if let Some(hint) = self.call_hint() => hint,
             (None, _) if self.term_item().is_some() => "term · : or Enter → on to the description",
             (None, None) if self.item_of(self.caret.block).is_some() => {
@@ -761,7 +861,7 @@ impl Editor {
                 "Esc → just after the environment · click its heading → title · Enter on an empty last paragraph → leave"
             }
             (None, None) => {
-                "$ → formula · = and space → section · - + / and space → list · #name and space → environment"
+                "$ → formula · *bold* _italic_ · = and space → section · - + / and space → list · #name and space → environment"
             }
         }
     }
@@ -794,6 +894,17 @@ impl Editor {
     /// Whether the next Backspace unwraps the focused environment.
     pub fn env_marked(&self) -> bool {
         matches!(self.selected, Some(Selected::Unwrap { .. }))
+    }
+
+    /// The hint in the body of an inline call.
+    fn inline_call_hint(&self) -> Option<&'static str> {
+        let pos = self.text_pos()?;
+        let (name, _) = self.call_around(&pos.prefix)?;
+        Some(match name.as_str() {
+            "strong" => "bold · * or Esc → end it · $ formula · _ italic",
+            "emph" => "italic · _ or Esc → end it · $ formula · * bold",
+            _ => "in the function's text · ] or Esc → leave it",
+        })
     }
 
     /// The hint while the caret's paragraph is `#name` or `#name(args)` so
@@ -857,6 +968,6 @@ fn delete_block(place: Place) -> Op {
 fn text_of(inline: &InlineNode) -> &str {
     match &inline.kind {
         Inline::Text(s) => s,
-        Inline::Math(_) => "",
+        Inline::Math(_) | Inline::Call { .. } => "",
     }
 }

@@ -12,6 +12,9 @@
 //!   addressed like a paragraph's inlines, `[Index(i)]`.
 //! - List item: no position of its own; a term item's term is addressed
 //!   like a paragraph's inlines.
+//! - Inline call: `Index(i), Body` descends into the body of inline call
+//!   `i`, addressed like a paragraph's inlines (`[Index(1), Body, Index(0)]`
+//!   is the first text of the paragraph's first call).
 //! - Row path: pairs `Index(k), <child>` descending into node `k`'s child row
 //!   (`Num`, `Den`, `Base`, `Sup`, `Sub`, `Arg(i)`); `offset` is a position `0..=len`
 //!   between the row's nodes.
@@ -30,6 +33,8 @@ pub enum Step {
     Sub,
     /// Argument `i` of a function call (`sqrt(x)`, `root(3, x)`).
     Arg(usize),
+    /// The body of an inline call (`*bold*`, `#cl[…]`).
+    Body,
 }
 
 impl Step {
@@ -42,6 +47,7 @@ impl Step {
             Step::Sup => "superscript",
             Step::Sub => "subscript",
             Step::Arg(_) => "argument",
+            Step::Body => "body",
         }
     }
 }
@@ -89,6 +95,56 @@ impl Target<'_> {
     }
 }
 
+/// Where a path meets an inline list: the list, its owner (a block, or an
+/// inline call for its body) and the index of the inline the path goes on
+/// into. `prefix` is the length of the path before that `Index`.
+#[derive(Clone, Copy, Debug)]
+pub struct InlineAt<'a> {
+    pub owner: NodeId,
+    pub inlines: &'a [InlineNode],
+    pub prefix: usize,
+    pub index: usize,
+}
+
+/// The innermost inline list `path` goes through, from `inlines` owned by
+/// `owner`; descends into calls while the path goes into their body.
+fn inline_at<'a>(
+    owner: NodeId,
+    inlines: &'a [InlineNode],
+    path: &[Step],
+    prefix: usize,
+) -> Option<InlineAt<'a>> {
+    let Some(Step::Index(i)) = path.first() else {
+        return None;
+    };
+    let inline = inlines.get(*i)?;
+    if let (Some(body), Some(Step::Body)) = (inline.body(), path.get(1)) {
+        return inline_at(inline.id, body, &path[2..], prefix + 2);
+    }
+    Some(InlineAt {
+        owner,
+        inlines,
+        prefix,
+        index: *i,
+    })
+}
+
+fn walk_inlines<'a>(inlines: &'a [InlineNode], path: &[Step]) -> Result<Target<'a>, usize> {
+    let Some(Step::Index(i)) = path.first() else {
+        return Err(0);
+    };
+    let inline = inlines.get(*i).ok_or(0usize)?;
+    match &inline.kind {
+        Inline::Text(text) if path.len() == 1 => Ok(Target::Text { inline, text }),
+        Inline::Text(_) => Err(1),
+        Inline::Math(row) => walk_row(row, &path[1..]).map_err(|n| n + 1),
+        Inline::Call { body, .. } => match path.get(1) {
+            Some(Step::Body) => walk_inlines(body, &path[2..]).map_err(|n| n + 2),
+            _ => Err(1),
+        },
+    }
+}
+
 /// One breadcrumb entry for the status bar. `path_len` is the length of the
 /// cursor path prefix that leads to this structure (for "select this").
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -106,23 +162,46 @@ impl Document {
             Block::Paragraph(inlines)
             | Block::Heading { inlines, .. }
             | Block::Env { title: inlines, .. }
-            | Block::Item { term: inlines, .. } => {
-                let Some(Step::Index(i)) = path.first() else {
-                    return Err(0);
-                };
-                let inline = inlines.get(*i).ok_or(0usize)?;
-                match &inline.kind {
-                    Inline::Text(text) if path.len() == 1 => Ok(Target::Text { inline, text }),
-                    Inline::Text(_) => Err(1),
-                    Inline::Math(row) => walk_row(row, &path[1..]).map_err(|n| n + 1),
-                }
-            }
+            | Block::Item { term: inlines, .. } => walk_inlines(inlines, path),
             Block::DisplayMath(row) => walk_row(row, path),
             Block::RawTypst(text) | Block::Diagram(text) if path.is_empty() => {
                 Ok(Target::Raw { block, text })
             }
             Block::RawTypst(_) | Block::Diagram(_) => Err(0),
         }
+    }
+
+    /// The innermost inline list of `block` that `path` goes through (see
+    /// [`InlineAt`]); `None` outside text.
+    pub fn inline_at<'a>(&'a self, block: &'a BlockNode, path: &[Step]) -> Option<InlineAt<'a>> {
+        if matches!(block.kind, Block::Env { .. }) && path.is_empty() {
+            return None;
+        }
+        inline_at(block.id, block.kind.text_inlines()?, path, 0)
+    }
+
+    /// The path to inline `id` in block `block` (through inline calls).
+    pub fn inline_path(&self, block: NodeId, id: NodeId) -> Option<Vec<Step>> {
+        fn find(inlines: &[InlineNode], id: NodeId, path: &mut Vec<Step>) -> bool {
+            for (i, inline) in inlines.iter().enumerate() {
+                path.push(Step::Index(i));
+                if inline.id == id {
+                    return true;
+                }
+                if let Some(body) = inline.body() {
+                    path.push(Step::Body);
+                    if find(body, id, path) {
+                        return true;
+                    }
+                    path.pop();
+                }
+                path.pop();
+            }
+            false
+        }
+        let mut path = vec![];
+        let inlines = self.block(block)?.kind.text_inlines()?;
+        find(inlines, id, &mut path).then_some(path)
     }
 
     pub fn resolve(&self, cursor: &CursorPath) -> Option<Target<'_>> {
@@ -230,17 +309,35 @@ impl Document {
             path,
             offset,
         };
-        let inline_positions = |inlines: &[InlineNode], out: &mut Vec<CursorPath>| {
+        fn inline_positions(
+            block: NodeId,
+            prefix: &[Step],
+            inlines: &[InlineNode],
+            out: &mut Vec<CursorPath>,
+        ) {
             for (i, inline) in inlines.iter().enumerate() {
+                let mut path = prefix.to_vec();
+                path.push(Step::Index(i));
                 match &inline.kind {
                     Inline::Text(s) => {
                         for k in 0..=s.chars().count() {
-                            out.push(at(vec![Step::Index(i)], k));
+                            out.push(CursorPath {
+                                block,
+                                path: path.clone(),
+                                offset: k,
+                            });
                         }
                     }
-                    Inline::Math(row) => row_positions(block.id, vec![Step::Index(i)], row, out),
+                    Inline::Math(row) => row_positions(block, path, row, out),
+                    Inline::Call { body, .. } => {
+                        path.push(Step::Body);
+                        inline_positions(block, &path, body, out);
+                    }
                 }
             }
+        }
+        let inline_positions = |inlines: &[InlineNode], out: &mut Vec<CursorPath>| {
+            inline_positions(block.id, &[], inlines, out)
         };
         match &block.kind {
             Block::Paragraph(inlines) | Block::Heading { inlines, .. } => {
@@ -297,15 +394,40 @@ impl Document {
                 if let Some(label) = label {
                     crumbs.push(Crumb { label, path_len: 0 });
                 }
-                let Some(Inline::Math(row)) = inlines.get(*i).map(|n| &n.kind) else {
+                let mut inlines = inlines;
+                let mut i = *i;
+                // Into inline calls, then a formula.
+                loop {
+                    let Some(inline) = inlines.get(i) else {
+                        return crumbs;
+                    };
+                    match (&inline.kind, path.get(1)) {
+                        (Inline::Call { body, .. }, Some(Step::Body)) => {
+                            crumbs.push(Crumb {
+                                label: inline.label(),
+                                path_len: consumed + 1,
+                            });
+                            path = &path[2..];
+                            consumed += 2;
+                            let Some(Step::Index(j)) = path.first() else {
+                                return crumbs;
+                            };
+                            inlines = body;
+                            i = *j;
+                        }
+                        (Inline::Math(_), _) => break,
+                        _ => return crumbs,
+                    }
+                }
+                let Some(Inline::Math(row)) = inlines.get(i).map(|n| &n.kind) else {
                     return crumbs;
                 };
                 crumbs.push(Crumb {
                     label: "math",
-                    path_len: 1,
+                    path_len: consumed + 1,
                 });
                 path = &path[1..];
-                consumed = 1;
+                consumed += 1;
                 row
             }
             Block::RawTypst(_) | Block::Diagram(_) => return crumbs,

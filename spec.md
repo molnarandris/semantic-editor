@@ -320,6 +320,18 @@ functions and packages.
   line breaks, non-breaking space and dash shorthands.
 - The generic call in text: `#cl[…]`, `#todo[…]`, `#highlight[…]`, `#underline[…]`,
   `#footnote[…]`: content argument editable in place, rendered by Typst.
+- Split 2026-11-09: **M13a** the inline call node (bold, italic, generic calls, links
+  as `#link("…")[…]`); **M13b** the atoms (inline code, line breaks, `~`, dashes).
+- M13a decisions (2026-11-09): one node, `Inline::Call { name, args, body }`, the body
+  a list of inlines like a paragraph's (text, formulas, calls: nesting as in Typst);
+  bold and italic are the calls `strong` and `emph`. Typing as in Typst: `*` starts
+  bold and `*` again ends it (`_` italic), except right after a letter or digit, where
+  Typst reads them as plain text (`snake_case`, `a*b`); `\*` gives a literal `*`.
+  `#name[` (or `#name(args)[`) starts any call, `#name` + space too when it is not the
+  whole paragraph (then it is a block call, as before); `]` leaves the innermost call.
+  Backspace after a call selects it, then deletes it; in an empty call it goes. Enter
+  inside a call splits it with the paragraph. Typst draws everything; export writes
+  `*…*`/`_…_` where Typst reads them back the same, else `#strong[…]`.
 
 ### M14 — Nested blocks: theorem environments and lists
 

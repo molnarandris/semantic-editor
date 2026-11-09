@@ -65,6 +65,11 @@ impl Editor {
         if c == '$' {
             return self.insert_formula();
         }
+        if matches!(c, '*' | '_' | ']')
+            && let Some(done) = self.markup_char(c)
+        {
+            return done;
+        }
         // `:` at the end of a term: on to the description.
         if c == ':'
             && let Some(item) = self.term_item()
@@ -94,6 +99,7 @@ impl Editor {
         let level = pos.offset;
         if s == " "
             && pos.inline == 0
+            && !pos.nested()
             && (1..=6).contains(&level)
             && chars[..level].iter().all(|&c| c == '=')
             && matches!(pos.block.kind, Block::Paragraph(_))
@@ -106,6 +112,7 @@ impl Editor {
         // (as in Typst).
         if s == " "
             && pos.inline == 0
+            && !pos.nested()
             && pos.offset == 1
             && matches!(pos.block.kind, Block::Paragraph(_))
             && let Some(kind) = match chars[0] {
@@ -125,6 +132,7 @@ impl Editor {
         // name known to take no content.
         if (s == " " || s == "(" || s == "[")
             && pos.inlines.len() == 1
+            && !pos.nested()
             && pos.offset == pos.len
             && matches!(pos.block.kind, Block::Paragraph(_))
             && let Some((name, args)) = call_head(&chars)
@@ -154,7 +162,18 @@ impl Editor {
             };
             return self.commit(vec![op], after, Last::Other);
         }
-        let mut space_before = pos.offset == 0 && pos.inline == 0
+        // `#name ` or `#name[` (with `(args)`) in text: an inline call.
+        if (s == " " || s == "[")
+            && let Some((start, name, args)) = inline_call_head(&chars[..pos.offset])
+            && self.call_shape(&name).is_none_or(|c| c.body)
+        {
+            let strip = pos.offset - start;
+            let call = self
+                .doc
+                .inline_call(&name, &args.unwrap_or_default(), vec![]);
+            return self.insert_inline(call, strip);
+        }
+        let mut space_before = pos.offset == 0 && pos.inline == 0 && !pos.nested()
             || pos.offset > 0 && chars[pos.offset - 1].is_whitespace();
         let mut out = String::new();
         for c in s.chars() {
@@ -189,30 +208,106 @@ impl Editor {
 
     /// `$` in text: an empty inline formula at the caret, caret inside.
     pub(super) fn insert_formula(&mut self) -> bool {
+        let math = self.doc.math(vec![]);
+        self.insert_inline(math, 0)
+    }
+
+    /// Insert an inline formula or call at the caret in text, in place of
+    /// the `strip` chars before it; the caret goes inside it.
+    pub(super) fn insert_inline(&mut self, node: InlineNode, strip: usize) -> bool {
         let Some(pos) = self.text_pos() else {
             return false;
         };
         let (i, c, len) = (pos.inline, pos.offset, pos.len);
-        let block = pos.block.id;
+        let owner = pos.owner;
+        let mut after = pos.at(i + 1, 0);
+        if node.body().is_some() {
+            after.path.extend([Step::Body, Step::Index(0)]);
+        }
         let text_id = pos.inlines[i].id;
         let tail: String = pos.chars()[c..].iter().collect();
         let mut ops = vec![];
-        if c < len {
+        if strip + len - c > 0 {
             ops.push(Op::Delete {
                 seq: Seq::Text(text_id),
-                index: c,
-                count: len - c,
+                index: c - strip,
+                count: strip + len - c,
             });
         }
-        let math = self.doc.math(vec![]);
         let rest = self.doc.text(&tail);
         ops.push(Op::Insert {
-            seq: Seq::Inlines(block),
+            seq: Seq::Inlines(owner),
             index: i + 1,
-            items: Items::Inlines(vec![math, rest]),
+            items: Items::Inlines(vec![node, rest]),
         });
-        let after = cursor(block, vec![Step::Index(i + 1)], 0);
         self.commit(ops, after, Last::Other)
+    }
+
+    /// `*` (bold), `_` (italic) and `]` in text, as in Typst: `*` starts a
+    /// `strong` call or leaves the one the caret is in; after a letter or
+    /// digit it is just a star (`a*b`), and `\*` makes a literal one. `]`
+    /// leaves the innermost call. `None`: the char is plain text.
+    fn markup_char(&mut self, c: char) -> Option<bool> {
+        let pos = self.text_pos()?;
+        let chars = pos.chars();
+        let before = pos.offset.checked_sub(1).map(|k| chars[k]);
+        let call = self.call_around(&pos.prefix).map(|(name, _)| name);
+        if before == Some('\\') {
+            let op = Op::Replace {
+                seq: Seq::Text(pos.inlines[pos.inline].id),
+                index: pos.offset - 1,
+                count: 1,
+                items: Items::Text(c.into()),
+            };
+            let after = self.caret.clone();
+            return Some(self.commit(vec![op], after, Last::Typing { space: false }));
+        }
+        let name = match c {
+            '*' => "strong",
+            '_' => "emph",
+            _ => return call.map(|_| self.leave_call()),
+        };
+        if call.as_deref() == Some(name) {
+            return Some(self.leave_call());
+        }
+        if before.is_some_and(char::is_alphanumeric) {
+            return None;
+        }
+        let node = self.doc.inline_call(name, "", vec![]);
+        Some(self.insert_inline(node, 0))
+    }
+
+    /// The name and path of the inline call whose body holds the inline
+    /// list at `prefix`.
+    pub(super) fn call_around(&self, prefix: &[Step]) -> Option<(String, Vec<Step>)> {
+        let call = prefix.get(..prefix.len().checked_sub(1)?)?;
+        match &self.inline_by_path(self.caret.block, call)?.kind {
+            Inline::Call { name, .. } => Some((name.clone(), call.to_vec())),
+            _ => None,
+        }
+    }
+
+    /// Leave the inline call the caret's text is in: caret just after it.
+    /// A call left empty goes.
+    pub(super) fn leave_call(&mut self) -> bool {
+        let Some(pos) = self.text_pos() else {
+            return false;
+        };
+        let Some((_, mut path)) = self.call_around(&pos.prefix) else {
+            return false;
+        };
+        let block = pos.block.id;
+        if is_empty_text(pos.inlines) {
+            return match self.remove_inline(block, &path) {
+                Some((ops, after)) => self.commit(ops, after, Last::Other),
+                None => false,
+            };
+        }
+        let Some(Step::Index(k)) = path.pop() else {
+            return false;
+        };
+        path.push(Step::Index(k + 1));
+        self.jump(cursor(block, path, 0))
     }
 
     pub(super) fn math_char(&mut self, c: char) -> bool {
@@ -663,6 +758,18 @@ pub(super) fn call_head(chars: &[char]) -> Option<(String, Option<String>)> {
     }
     let args: String = inner.iter().collect();
     (depth == 0).then(|| (name, Some(args.trim().to_string())))
+}
+
+/// The call head that `chars` ends with, `#name` or `#name(args)` at the
+/// start or after a space or punctuation: where its `#` is, the name and the
+/// arguments.
+pub(super) fn inline_call_head(chars: &[char]) -> Option<(usize, String, Option<String>)> {
+    let start = chars.iter().rposition(|&c| c == '#')?;
+    if start > 0 && chars[start - 1].is_alphanumeric() {
+        return None;
+    }
+    let (name, args) = call_head(&chars[start..])?;
+    Some((start, name, args))
 }
 
 /// `name` if `chars` is `#name` with a Typst identifier (`lemma`,

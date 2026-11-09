@@ -99,6 +99,14 @@ fn stop(
     }
 }
 
+fn cursor(block: &BlockNode, path: Vec<Step>, offset: usize) -> CursorPath {
+    CursorPath {
+        block: block.id,
+        path,
+        offset,
+    }
+}
+
 /// Stops of a math row and, recursively, of the rows inside its nodes.
 fn row_stops(
     block: &BlockNode,
@@ -270,21 +278,76 @@ fn block_stops(block: &BlockNode, l: &BlockLayout, top: bool) -> Vec<Stop> {
 }
 
 fn inline_stops(block: &BlockNode, inlines: &[model::InlineNode], l: &BlockLayout) -> Vec<Stop> {
+    list_stops(block, &[], inlines, l)
+}
+
+/// The stops of an inline list at `prefix` (a block's, or an inline call's
+/// body).
+fn list_stops(
+    block: &BlockNode,
+    prefix: &[Step],
+    inlines: &[model::InlineNode],
+    l: &BlockLayout,
+) -> Vec<Stop> {
+    let at = |i: usize| {
+        let mut p = prefix.to_vec();
+        p.push(Step::Index(i));
+        p
+    };
     // Per text inline: stop by char offset.
     let mut per: Vec<Vec<Option<Stop>>> = inlines
         .iter()
         .map(|i| match &i.kind {
             Inline::Text(s) => vec![None; s.chars().count() + 1],
-            Inline::Math(_) => vec![],
+            Inline::Math(_) | Inline::Call { .. } => vec![],
         })
         .collect();
 
-    // Per formula: the stops inside it.
+    // Per formula or call: the stops inside it.
     let mut inner: Vec<Vec<Stop>> = vec![vec![]; inlines.len()];
 
     for (i, inline) in inlines.iter().enumerate() {
-        let path = vec![Step::Index(i)];
+        let path = at(i);
         match &inline.kind {
+            Inline::Call { body, .. } => {
+                let mut p = path.clone();
+                p.push(Step::Body);
+                inner[i] = list_stops(block, &p, body, l);
+                // Just before and after it: where its text starts and ends.
+                let (first, last) = match (inner[i].first(), inner[i].last()) {
+                    (Some(f), Some(e)) => (f.clone(), e.clone()),
+                    _ => {
+                        let Some(r) = l.box_of(inline.id) else {
+                            continue;
+                        };
+                        let s = stop(block, vec![], 0, r.x, r.y, r.bottom(), line_near(l, r));
+                        let e = Stop {
+                            x: r.right(),
+                            ..s.clone()
+                        };
+                        (s, e)
+                    }
+                };
+                if i > 0 {
+                    let offset = per[i - 1].len().saturating_sub(1);
+                    let s = Stop {
+                        cursor: cursor(block, at(i - 1), offset),
+                        depth: 0,
+                        ..first
+                    };
+                    if let Some(slot) = per[i - 1].last_mut() {
+                        slot.get_or_insert(s);
+                    }
+                }
+                if let Some(slot) = per.get_mut(i + 1).and_then(|v| v.first_mut()) {
+                    let s = Stop {
+                        cursor: cursor(block, at(i + 1), 0),
+                        depth: 0,
+                        ..last
+                    };
+                    slot.get_or_insert(s);
+                }
+            }
             Inline::Text(_) => {
                 let slots = &mut per[i];
                 let glyphs = l.glyphs.iter().filter(|g| g.node == inline.id);
@@ -333,29 +396,13 @@ fn inline_stops(block: &BlockNode, inlines: &[model::InlineNode], l: &BlockLayou
                 row_stops(block, path.clone(), row, l, line, 1, &mut inner[i]);
                 if i > 0 {
                     let offset = per[i - 1].len().saturating_sub(1);
-                    let s = stop(
-                        block,
-                        vec![Step::Index(i - 1)],
-                        offset,
-                        r.x,
-                        r.y,
-                        r.bottom(),
-                        line,
-                    );
+                    let s = stop(block, at(i - 1), offset, r.x, r.y, r.bottom(), line);
                     if let Some(slot) = per[i - 1].last_mut() {
                         slot.get_or_insert(s);
                     }
                 }
                 if let Some(slot) = per.get_mut(i + 1).and_then(|v| v.first_mut()) {
-                    let s = stop(
-                        block,
-                        vec![Step::Index(i + 1)],
-                        0,
-                        r.right(),
-                        r.y,
-                        r.bottom(),
-                        line,
-                    );
+                    let s = stop(block, at(i + 1), 0, r.right(), r.y, r.bottom(), line);
                     slot.get_or_insert(s);
                 }
             }
@@ -443,9 +490,11 @@ pub fn formula_marks(doc: &Document, caret: &CursorPath, stops: &[Stop]) -> Vec<
         return vec![];
     };
     let is_row = |path: &[Step]| matches!(doc.walk(block, path), Ok(Target::Row { .. }));
-    let formula = match &caret.path[..] {
+    // The path to the formula: none for display math, else through the
+    // inline calls to the inline formula.
+    let formula = match doc.inline_at(block, &caret.path) {
         _ if is_row(&[]) => &[][..],
-        [first, ..] if is_row(&[*first]) => &caret.path[..1],
+        Some(at) if is_row(&caret.path[..at.prefix + 1]) => &caret.path[..at.prefix + 1],
         _ => return vec![],
     };
     let mut out = vec![];
@@ -973,6 +1022,31 @@ mod tests {
         assert_eq!(offsets, want);
         let xs: Vec<_> = s.iter().filter(|s| s.depth == 0).map(|s| s.x).collect();
         assert!(xs.windows(2).all(|w| w[0] <= w[1] + 0.01), "{xs:?}");
+    }
+
+    /// Every position of the document's model has a stop, in reading order
+    /// (left to right on one line), inside bold, italic and calls too; the
+    /// positions just before and after a call sit where its text starts and
+    /// ends.
+    #[test]
+    fn stops_in_inline_calls() {
+        for keys in [
+            "a *bold* c",
+            "*x _y $a$ z_*.",
+            "see #underline[it] now",
+            "x *",
+            "*a*",
+        ] {
+            let mut e = model::Editor::new(Document::new());
+            e.insert_text(keys);
+            let block = e.doc().blocks[0].clone();
+            let l = layout_of(&block, 300.0);
+            let s = stops(&block, Some(&l));
+            let got: Vec<_> = s.iter().map(|s| s.cursor.clone()).collect();
+            assert_eq!(got, e.doc().positions(&block), "{keys}");
+            let xs: Vec<_> = s.iter().filter(|s| s.depth == 0).map(|s| s.x).collect();
+            assert!(xs.windows(2).all(|w| w[0] <= w[1] + 0.01), "{keys}: {xs:?}");
+        }
     }
 
     #[test]

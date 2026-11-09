@@ -80,6 +80,105 @@ pub struct InlineNode {
 pub enum Inline {
     Text(String),
     Math(MathRow),
+    /// A call with a content body in text: `#strong[…]` (written `*…*`),
+    /// `#emph[…]` (`_…_`), `#cl[…]`, `#link("…")[…]`. Typst draws it; the
+    /// body is edited in place and alternates like a paragraph's inlines.
+    /// `args` are the other arguments as Typst source (`"https://…"`),
+    /// empty if none.
+    Call {
+        name: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        args: String,
+        body: Vec<InlineNode>,
+    },
+}
+
+impl InlineNode {
+    /// The body of an inline call.
+    pub fn body(&self) -> Option<&Vec<InlineNode>> {
+        match &self.kind {
+            Inline::Call { body, .. } => Some(body),
+            _ => None,
+        }
+    }
+
+    pub fn body_mut(&mut self) -> Option<&mut Vec<InlineNode>> {
+        match &mut self.kind {
+            Inline::Call { body, .. } => Some(body),
+            _ => None,
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match &self.kind {
+            Inline::Text(_) => "text",
+            Inline::Math(_) => "math",
+            Inline::Call { name, .. } => match name.as_str() {
+                "strong" => "bold",
+                "emph" => "italic",
+                "link" => "link",
+                _ => "function",
+            },
+        }
+    }
+}
+
+/// The formulas of an inline list, in calls too.
+fn inline_rows<'a>(inlines: &'a [InlineNode], out: &mut Vec<&'a MathRow>) {
+    for inline in inlines {
+        match &inline.kind {
+            Inline::Math(row) => out.push(row),
+            Inline::Call { body, .. } => inline_rows(body, out),
+            Inline::Text(_) => {}
+        }
+    }
+}
+
+fn inline_rows_mut<'a>(inlines: &'a mut [InlineNode], out: &mut Vec<&'a mut MathRow>) {
+    for inline in inlines {
+        match &mut inline.kind {
+            Inline::Math(row) => out.push(row),
+            Inline::Call { body, .. } => inline_rows_mut(body, out),
+            Inline::Text(_) => {}
+        }
+    }
+}
+
+/// Whether inline `id` is in this list, in calls too.
+fn inlines_contain(inlines: &[InlineNode], id: NodeId) -> bool {
+    inlines
+        .iter()
+        .any(|i| i.id == id || i.body().is_some_and(|b| inlines_contain(b, id)))
+}
+
+/// The body of inline call `id` in this list, in calls too.
+fn call_body_mut(inlines: &mut [InlineNode], id: NodeId) -> Option<&mut Vec<InlineNode>> {
+    for inline in inlines {
+        if inline.id == id {
+            return inline.body_mut();
+        }
+        if let Some(body) = inline.body_mut()
+            && let Some(found) = call_body_mut(body, id)
+        {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// The inline `id` in this list, in calls too.
+fn find_inline_mut(inlines: &mut [InlineNode], id: NodeId) -> Option<&mut InlineNode> {
+    for inline in inlines {
+        if inline.id == id {
+            return Some(inline);
+        }
+        if let Some(body) = inline.body_mut()
+            && let Some(found) = find_inline_mut(body, id)
+        {
+            return Some(found);
+        }
+    }
+    None
 }
 
 /// A horizontal sequence of math nodes. An empty row renders as a slot.
@@ -198,13 +297,11 @@ impl BlockNode {
             Block::Paragraph(inlines)
             | Block::Heading { inlines, .. }
             | Block::Env { title: inlines, .. }
-            | Block::Item { term: inlines, .. } => inlines
-                .iter()
-                .filter_map(|i| match &i.kind {
-                    Inline::Math(row) => Some(row),
-                    Inline::Text(_) => None,
-                })
-                .collect(),
+            | Block::Item { term: inlines, .. } => {
+                let mut out = vec![];
+                inline_rows(inlines, &mut out);
+                out
+            }
             Block::RawTypst(_) | Block::Diagram(_) => vec![],
         }
     }
@@ -215,13 +312,11 @@ impl BlockNode {
             Block::Paragraph(inlines)
             | Block::Heading { inlines, .. }
             | Block::Env { title: inlines, .. }
-            | Block::Item { term: inlines, .. } => inlines
-                .iter_mut()
-                .filter_map(|i| match &mut i.kind {
-                    Inline::Math(row) => Some(row),
-                    Inline::Text(_) => None,
-                })
-                .collect(),
+            | Block::Item { term: inlines, .. } => {
+                let mut out = vec![];
+                inline_rows_mut(inlines, &mut out);
+                out
+            }
             Block::RawTypst(_) | Block::Diagram(_) => vec![],
         }
     }
@@ -486,8 +581,10 @@ impl Document {
         fn inline_ids(inlines: &mut [InlineNode], f: &mut impl FnMut(&mut NodeId)) {
             for inline in inlines {
                 f(&mut inline.id);
-                if let Inline::Math(row) = &mut inline.kind {
-                    row.visit_ids(f);
+                match &mut inline.kind {
+                    Inline::Math(row) => row.visit_ids(f),
+                    Inline::Call { body, .. } => inline_ids(body, f),
+                    Inline::Text(_) => {}
                 }
             }
         }
@@ -551,9 +648,16 @@ impl Document {
         }
     }
 
-    fn normalized_inlines(&mut self, inlines: Vec<InlineNode>) -> Vec<InlineNode> {
+    /// Inlines alternating Text, Math or Call, Text, …, starting and ending
+    /// with text; call bodies too.
+    pub(crate) fn normalized_inlines(&mut self, inlines: Vec<InlineNode>) -> Vec<InlineNode> {
         let mut out: Vec<InlineNode> = Vec::with_capacity(inlines.len() + 2);
-        for inline in inlines {
+        for mut inline in inlines {
+            if let Some(body) = inline.body_mut() {
+                let old = std::mem::take(body);
+                let new = self.normalized_inlines(old);
+                *inline.body_mut().expect("a call") = new;
+            }
             match (&inline.kind, out.last_mut()) {
                 (
                     Inline::Text(s),
@@ -564,14 +668,11 @@ impl Document {
                 ) => {
                     prev.push_str(s);
                 }
-                (
-                    Inline::Math(_),
-                    None
-                    | Some(InlineNode {
-                        kind: Inline::Math(_),
-                        ..
-                    }),
-                ) => {
+                (Inline::Math(_) | Inline::Call { .. }, last)
+                    if last
+                        .as_ref()
+                        .is_none_or(|l| !matches!(l.kind, Inline::Text(_))) =>
+                {
                     out.push(self.text(""));
                     out.push(inline);
                 }
@@ -616,6 +717,26 @@ impl Document {
             }
             Ok(())
         }
+        fn inline_ids(
+            owner: NodeId,
+            inlines: &[InlineNode],
+            check: &mut impl FnMut(NodeId) -> Result<(), String>,
+        ) -> Result<(), String> {
+            for (i, inline) in inlines.iter().enumerate() {
+                check(inline.id)?;
+                let want_text = i % 2 == 0;
+                match &inline.kind {
+                    Inline::Text(_) if want_text => {}
+                    Inline::Math(row) if !want_text => row_ids(row, check)?,
+                    Inline::Call { body, .. } if !want_text => inline_ids(inline.id, body, check)?,
+                    _ => return Err(format!("{owner:?}: inline {i} breaks alternation")),
+                }
+            }
+            if inlines.len().is_multiple_of(2) {
+                return Err(format!("{owner:?}: must start and end with text"));
+            }
+            Ok(())
+        }
         let mut all = vec![];
         all_blocks(&self.blocks, &mut all);
         for block in all {
@@ -626,26 +747,7 @@ impl Document {
             if let Some(inlines) = block.kind.text_inlines()
                 && !(inlines.is_empty() && block.kind.body().is_some())
             {
-                for (i, inline) in inlines.iter().enumerate() {
-                    check(inline.id)?;
-                    let want_text = i % 2 == 0;
-                    match &inline.kind {
-                        Inline::Text(_) if want_text => {}
-                        Inline::Math(row) if !want_text => row_ids(row, &mut check)?,
-                        _ => {
-                            return Err(format!(
-                                "block {:?}: inline {i} breaks alternation",
-                                block.id
-                            ));
-                        }
-                    }
-                }
-                if inlines.len() % 2 == 0 {
-                    return Err(format!(
-                        "block {:?}: must start and end with text",
-                        block.id
-                    ));
-                }
+                inline_ids(block.id, inlines, &mut check)?;
             } else if let Block::DisplayMath(row) = &block.kind {
                 row_ids(row, &mut check)?;
             }
@@ -706,7 +808,7 @@ impl Document {
                 b.id == id
                     || b.kind
                         .text_inlines()
-                        .is_some_and(|v| v.iter().any(|i| i.id == id))
+                        .is_some_and(|v| inlines_contain(v, id))
                     || b.rows()
                         .into_iter()
                         .any(|r| r.find_row(id).is_some() || r.find_node(id).is_some())
@@ -756,6 +858,37 @@ impl Document {
             .find_map(|r| r.find_node(id))
     }
 
+    /// The inline list owned by `owner`: a block's text inlines or an inline
+    /// call's body.
+    pub fn inlines_of_mut(&mut self, owner: NodeId) -> Option<&mut Vec<InlineNode>> {
+        if self.block(owner).is_some() {
+            return self.block_mut(owner)?.kind.text_inlines_mut();
+        }
+        let block = self.inline_block(owner)?;
+        let inlines = self.block_mut(block)?.kind.text_inlines_mut()?;
+        call_body_mut(inlines, owner)
+    }
+
+    /// The inline `id` (text, formula or call), at any depth.
+    pub fn inline_mut(&mut self, id: NodeId) -> Option<&mut InlineNode> {
+        let block = self.inline_block(id)?;
+        let inlines = self.block_mut(block)?.kind.text_inlines_mut()?;
+        find_inline_mut(inlines, id)
+    }
+
+    /// The block whose inlines hold inline `id` (at any depth).
+    fn inline_block(&self, id: NodeId) -> Option<NodeId> {
+        let mut all = vec![];
+        all_blocks(&self.blocks, &mut all);
+        all.into_iter()
+            .find(|b| {
+                b.kind
+                    .text_inlines()
+                    .is_some_and(|v| inlines_contain(v, id))
+            })
+            .map(|b| b.id)
+    }
+
     /// The source of code atom or inline diagram `id`.
     pub fn code_source(&self, id: NodeId) -> Option<&str> {
         let (row, i) = self.find_node(id)?;
@@ -797,6 +930,19 @@ impl Document {
         InlineNode {
             id: self.fresh_id(),
             kind: Inline::Math(row),
+        }
+    }
+
+    /// An inline call `#name(args)[body]`; the body is normalized.
+    pub fn inline_call(&mut self, name: &str, args: &str, body: Vec<InlineNode>) -> InlineNode {
+        let body = self.normalized_inlines(body);
+        InlineNode {
+            id: self.fresh_id(),
+            kind: Inline::Call {
+                name: name.into(),
+                args: args.into(),
+                body,
+            },
         }
     }
 

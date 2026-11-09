@@ -23,12 +23,10 @@ impl Editor {
                 let op = row_delete(row, start, end - start);
                 self.commit(vec![op], cursor(block, path, start), Last::Other)
             }
-            Selected::Formula { block, inline } => {
-                let Some(inlines) = self.doc.block(block).and_then(|b| b.kind.text_inlines())
-                else {
+            Selected::Inline { block, path } => {
+                let Some((ops, after)) = self.remove_inline(block, &path) else {
                     return false;
                 };
-                let (ops, after) = remove_formula(block, inlines, inline);
                 self.commit(ops, after, Last::Other)
             }
             Selected::Block { block } => {
@@ -112,16 +110,27 @@ impl Editor {
             let (op, after) = self.delete_char(&pos, pos.offset - 1);
             return self.commit(vec![op], after, Last::Deleting);
         }
+        if pos.inline >= 2 {
+            return self.select(Selected::Inline {
+                block: block_id,
+                path: pos.at(pos.inline - 1, 0).path,
+            });
+        }
+        if pos.nested() {
+            // The start of a call's body: an empty call goes, else ←.
+            let call = &pos.prefix[..pos.prefix.len() - 1];
+            if pos.inlines.len() == 1 && pos.len == 0 {
+                let Some((ops, after)) = self.remove_inline(block_id, call) else {
+                    return false;
+                };
+                return self.commit(ops, after, Last::Other);
+            }
+            return self.move_left();
+        }
         if pos.inline == 0 && matches!(pos.block.kind, Block::Heading { .. }) {
             // A heading first becomes a paragraph; the next press joins.
             let (place, after) = (pos.place, self.caret.clone());
             return self.retype(place, None, 0, after);
-        }
-        if pos.inline >= 2 {
-            return self.select(Selected::Formula {
-                block: block_id,
-                inline: pos.inline - 1,
-            });
         }
         if let Block::Env { title, .. } = &pos.block.kind {
             // The start of a title: an empty one goes, caret into the body.
@@ -236,19 +245,13 @@ impl Editor {
             };
         }
         let place = p.place;
-        if p.base == 1 {
-            let Step::Index(i) = p.path[0] else {
-                return false;
-            };
+        if p.base > 0 {
             if p.len > 0 {
                 return self.move_left();
             }
-            let inlines = self
-                .doc
-                .at(place)
-                .and_then(|b| b.kind.text_inlines())
-                .expect("text block");
-            let (ops, after) = remove_formula(p.block, inlines, i);
+            let Some((ops, after)) = self.remove_inline(p.block, &p.path[..p.base]) else {
+                return false;
+            };
             return self.commit(ops, after, Last::Other);
         }
         // Display math.
@@ -364,7 +367,7 @@ impl Editor {
     pub(super) fn delete_char(&self, pos: &TextPos, k: usize) -> (Op, CursorPath) {
         let chars = pos.chars();
         let ws = |i: usize| chars.get(i).is_some_and(|c| c.is_whitespace());
-        let leading = k == 0 && pos.inline == 0 && ws(1);
+        let leading = k == 0 && pos.inline == 0 && !pos.nested() && ws(1);
         let doubled = k > 0 && ws(k - 1) && ws(k + 1);
         let (index, count) = if doubled {
             (k - 1, 2)
@@ -417,12 +420,12 @@ impl Editor {
             return self.commit(vec![op], after, Last::Deleting);
         }
         if pos.inline + 2 < pos.inlines.len() {
-            return self.select(Selected::Formula {
+            return self.select(Selected::Inline {
                 block: block_id,
-                inline: pos.inline + 1,
+                path: pos.at(pos.inline + 1, 0).path,
             });
         }
-        if pos.block.kind.body().is_some() {
+        if pos.nested() || pos.block.kind.body().is_some() {
             return false; // the end of a title or term
         }
         let place = pos.place;
@@ -451,33 +454,62 @@ pub(super) fn joined_tail(head: &str, tail: &str, head_starts_block: bool) -> St
     }
 }
 
-/// Remove formula `m` of a paragraph and join the texts on either side.
+/// Remove inline `m` (a formula or call) of the list owned by `owner` at
+/// `prefix` in `block`, and join the texts on either side.
 pub(super) fn remove_formula(
     block: crate::NodeId,
+    owner: crate::NodeId,
+    prefix: &[Step],
     inlines: &[InlineNode],
     m: usize,
 ) -> (Vec<Op>, CursorPath) {
     let before = &inlines[m - 1];
     let after = &inlines[m + 1];
     let len = text_of(before).chars().count();
+    let starts_block = m == 1 && prefix.is_empty();
     let ops = vec![
         Op::Delete {
-            seq: Seq::Inlines(block),
+            seq: Seq::Inlines(owner),
             index: m,
             count: 2,
         },
         Op::Insert {
             seq: Seq::Text(before.id),
             index: len,
-            items: Items::Text(joined_tail(text_of(before), text_of(after), m == 1)),
+            items: Items::Text(joined_tail(text_of(before), text_of(after), starts_block)),
         },
     ];
+    let mut path = prefix.to_vec();
+    path.push(Step::Index(m - 1));
     let caret = CursorPath {
         block,
-        path: vec![Step::Index(m - 1)],
+        path,
         offset: len,
     };
     (ops, caret)
+}
+
+impl Editor {
+    /// Ops removing the inline formula or call that `path` leads to, and the
+    /// caret after.
+    pub(super) fn remove_inline(
+        &self,
+        block: NodeId,
+        path: &[Step],
+    ) -> Option<(Vec<Op>, CursorPath)> {
+        let b = self.doc.block(block)?;
+        let at = self.doc.inline_at(b, path)?;
+        if at.prefix + 1 != path.len() || at.index == 0 {
+            return None;
+        }
+        Some(remove_formula(
+            block,
+            at.owner,
+            &path[..at.prefix],
+            at.inlines,
+            at.index,
+        ))
+    }
 }
 
 /// Append the text block after `first` (in the same list) to the text

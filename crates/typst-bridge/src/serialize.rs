@@ -221,6 +221,47 @@ struct Writer {
     /// The number of a numbered item rendered on its own (Edit style), so
     /// it shows its place in the list: `3. …` instead of `+ …`.
     number: Option<usize>,
+    /// The markup delimiters (`*`, `_`) the writer is inside of.
+    markup: Vec<char>,
+}
+
+/// Whether inline call `i` of `inlines` (bold or italic) can be written as
+/// markup, `*…*` or `_…_`, and read back the same by Typst: the delimiters
+/// must not touch a letter or digit (Typst reads those as plain text), the
+/// body must not start or end with a space, and nothing else may make the
+/// delimiter ambiguous (an empty text next to another call or formula). A
+/// call inside one written the same way is written as a call.
+fn markup_ok(inlines: &[InlineNode], i: usize, m: char) -> bool {
+    let text = |k: usize| match inlines.get(k).map(|n| &n.kind) {
+        Some(Inline::Text(t)) => Some(t.as_str()),
+        _ => None,
+    };
+    let (Some(before), Some(after)) = (text(i - 1), text(i + 1)) else {
+        return false;
+    };
+    let Some(Inline::Call { body, .. }) = inlines.get(i).map(|n| &n.kind) else {
+        return false;
+    };
+    // The first and last char the body is written with (`$` or `#` for a
+    // formula or call).
+    let edge = |n: &InlineNode, end: bool| match &n.kind {
+        Inline::Text(t) if end => t.chars().last(),
+        Inline::Text(t) => t.chars().next(),
+        _ => Some('$'),
+    };
+    let first = body.iter().find_map(|n| edge(n, false));
+    let last = body.iter().rev().find_map(|n| edge(n, true));
+    let (Some(first), Some(last)) = (first, last) else {
+        return false; // empty
+    };
+    let boundary = |c: Option<char>, end: bool| match c {
+        Some(c) => !c.is_alphanumeric() && c != m,
+        None => end,
+    };
+    !first.is_whitespace()
+        && !last.is_whitespace()
+        && boundary(before.chars().last(), i == 1)
+        && boundary(after.chars().next(), i + 2 == inlines.len())
 }
 
 impl Writer {
@@ -392,6 +433,47 @@ impl Writer {
                     w.out.push('$');
                     w.row(row);
                     w.out.push('$');
+                }
+                Inline::Call { name, args, body } => {
+                    let markup = match name.as_str() {
+                        "strong" if args.is_empty() => Some('*'),
+                        "emph" if args.is_empty() => Some('_'),
+                        _ => None,
+                    };
+                    match markup {
+                        Some(m)
+                            if w.style == Style::Readable
+                                && !w.markup.contains(&m)
+                                && markup_ok(inlines, i, m) =>
+                        {
+                            w.out.push(m);
+                            w.markup.push(m);
+                            w.inlines(body, false);
+                            w.markup.pop();
+                            w.out.push(m);
+                        }
+                        _ => {
+                            w.out.push('#');
+                            w.out.push_str(name);
+                            if !args.is_empty() {
+                                w.out.push('(');
+                                w.out.push_str(args);
+                                w.out.push(')');
+                            }
+                            w.out.push('[');
+                            w.text_block(body, false);
+                            w.out.push(']');
+                            // A `.` or `(` right after would continue the
+                            // expression (`#f[…].x`, `#f[…](…)`).
+                            let next = inlines.get(i + 1).and_then(|n| match &n.kind {
+                                Inline::Text(t) => t.chars().next(),
+                                _ => None,
+                            });
+                            if matches!(next, Some('.' | '(')) {
+                                w.out.push(';');
+                            }
+                        }
+                    }
                 }
             });
         }
@@ -788,6 +870,7 @@ pub fn serialize_math_node(node: &MathNode) -> String {
         args: 0,
         indent: String::new(),
         number: None,
+        markup: vec![],
     };
     if matches!(node.kind, MathKind::Diagram(_))
         || matches!(&node.kind, MathKind::Code(s) if s.contains("cetz"))
@@ -835,6 +918,7 @@ fn serialize_with(block: &BlockNode, style: Style, number: Option<usize>) -> (St
         args: 0,
         indent: String::new(),
         number,
+        markup: vec![],
     };
     w.block(block);
     (w.out, w.map)
@@ -1443,5 +1527,88 @@ mod tests {
         assert_eq!(typ, format!("{PREAMBLE}\nHi\n\n$ x $\n"));
         let mut world = BridgeWorld::new();
         compile(&mut world, &typ).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod inline_call_tests {
+    use super::*;
+    use crate::{Around, BridgeWorld, block_document, compile};
+
+    fn typed_text(keys: &str) -> model::Editor {
+        let mut e = model::Editor::new(Document::new());
+        e.insert_text(keys);
+        e
+    }
+
+    fn both(keys: &str) -> (String, String) {
+        let e = typed_text(keys);
+        let block = &e.doc().blocks[0];
+        (
+            serialize_block_styled(block, Style::Edit).0,
+            serialize_block_styled(block, Style::Readable).0,
+        )
+    }
+
+    #[test]
+    fn inline_calls_serialize() {
+        let cases = [
+            ("a *b* c", "a #strong[b] c", "a *b* c"),
+            ("_i_, *b*.", "#emph[i], #strong[b];.", "_i_, *b*."),
+            ("x *y", "x #strong[y]", "x *y*"),
+            (
+                "*a _b *c* d_ e*",
+                "#strong[a #emph[b #strong[c] d] e]",
+                "*a _b #strong[c] d_ e*",
+            ),
+            ("*b *", "#strong[b ]", "#strong[b ]"),
+            ("*$x$*", "#strong[$x$]", "*$x$*"),
+            (
+                "see #link(\"https://x.org\")[here](1)",
+                "see #link(\"https://x.org\")[here];(1)",
+                "see #link(\"https://x.org\")[here];(1)",
+            ),
+            (
+                "x #cl[",
+                "x #cl[#text(fill: rgb(0, 0, 0, 0))[x]]",
+                "x #cl[]",
+            ),
+        ];
+        for (keys, edit, readable) in cases {
+            assert_eq!(both(keys), (edit.into(), readable.into()), "{keys}");
+        }
+    }
+
+    /// Every state while typing compiles, and the export renders like the
+    /// editor's render.
+    #[test]
+    fn inline_calls_compile_and_export_the_same() {
+        let mut world = BridgeWorld::new();
+        let mut render = |snippet: &str| {
+            let (src, _) = block_document(&Around::default(), snippet, 400.0);
+            let doc = compile(&mut world, &src).unwrap_or_else(|e| panic!("{e:?}\n{src}"));
+            crate::render_page(&doc.pages()[0], 2.0).data
+        };
+        let texts = [
+            "a *bold* and _it_ (*x*) *y*, _z_.",
+            "*a _b *c* d_ e* x#strong[y]z",
+            "see #link(\"https://typst.app\")[the _site_]. #underline[u](1)",
+            "*$x^2$ is* _$y$_",
+        ];
+        for keys in texts {
+            let mut e = model::Editor::new(Document::new());
+            for c in keys.chars() {
+                e.insert_text(&c.to_string());
+                let block = &e.doc().blocks[0];
+                render(&serialize_block_styled(block, Style::Edit).0);
+            }
+            let block = &e.doc().blocks[0];
+            let edit = serialize_block_styled(block, Style::Edit).0;
+            let read = serialize_block_styled(block, Style::Readable).0;
+            assert!(
+                render(&edit) == render(&read),
+                "renders differ for {keys:?}:\n  edit:     {edit}\n  readable: {read}"
+            );
+        }
     }
 }

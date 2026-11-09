@@ -17,8 +17,8 @@ pub enum Seq {
     Blocks,
     /// The body of an environment (by its block id).
     Body(NodeId),
-    /// The inline list of a paragraph or heading, or an environment's title
-    /// (by block id).
+    /// The inline list of a paragraph or heading, an environment's title
+    /// (by block id), or the body of an inline call (by its id).
     Inlines(NodeId),
     /// The nodes of a math row (by row id).
     Row(NodeId),
@@ -179,34 +179,18 @@ impl SeqMut<'_> {
 }
 
 /// The chars of text inline or raw block `id`, in any block at any depth.
-fn text_in(blocks: &mut [BlockNode], id: NodeId) -> Result<SeqMut<'_>, OpError> {
-    for block in blocks {
-        match &mut block.kind {
-            Block::RawTypst(s) | Block::Diagram(s) if block.id == id => {
-                return Ok(SeqMut::Text(s));
-            }
-            Block::RawTypst(_) | Block::Diagram(_) | Block::DisplayMath(_) => {}
-            Block::Paragraph(inlines)
-            | Block::Heading { inlines, .. }
-            | Block::Env { title: inlines, .. }
-            | Block::Item { term: inlines, .. }
-                if inlines.iter().any(|i| i.id == id) =>
-            {
-                let inline = inlines.iter_mut().find(|i| i.id == id).expect("found");
-                return match &mut inline.kind {
-                    Inline::Text(s) => Ok(SeqMut::Text(s)),
-                    Inline::Math(_) => Err(OpError::KindMismatch),
-                };
-            }
-            Block::Env { body, .. } | Block::Item { body, .. } => {
-                if let Ok(seq) = text_in(body, id) {
-                    return Ok(seq);
-                }
-            }
-            Block::Paragraph(_) | Block::Heading { .. } => {}
-        }
+fn text_in(doc: &mut Document, id: NodeId) -> Result<SeqMut<'_>, OpError> {
+    if doc.block(id).is_some() {
+        return match &mut doc.block_mut(id).expect("found").kind {
+            Block::RawTypst(s) | Block::Diagram(s) => Ok(SeqMut::Text(s)),
+            _ => Err(OpError::KindMismatch),
+        };
     }
-    Err(OpError::NotFound(Seq::Text(id)))
+    match doc.inline_mut(id).map(|i| &mut i.kind) {
+        Some(Inline::Text(s)) => Ok(SeqMut::Text(s)),
+        Some(_) => Err(OpError::KindMismatch),
+        None => Err(OpError::NotFound(Seq::Text(id))),
+    }
 }
 
 /// Byte offset of char index `ch` (which may equal the char count).
@@ -225,16 +209,15 @@ impl Document {
                 .map(SeqMut::Blocks)
                 .ok_or_else(not_found),
             Seq::Header => Ok(SeqMut::Text(&mut self.header)),
-            Seq::Inlines(block) => self
-                .block_mut(block)
-                .and_then(|b| b.kind.text_inlines_mut())
+            Seq::Inlines(owner) => self
+                .inlines_of_mut(owner)
                 .map(SeqMut::Inlines)
                 .ok_or_else(not_found),
             Seq::Row(row) => self
                 .find_row_mut(row)
                 .map(|r| SeqMut::Row(&mut r.nodes))
                 .ok_or_else(not_found),
-            Seq::Text(id) => text_in(&mut self.blocks, id),
+            Seq::Text(id) => text_in(self, id),
         }
     }
 

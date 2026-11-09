@@ -46,7 +46,10 @@ pub fn document() -> Document {
     let t2 = b.t(" sites with local dimension ");
     let d = b.i("d");
     let m2 = b.m(vec![d]);
-    let t3 = b.t(". A matrix product state is given by matrices ");
+    let t3a = b.t(". A ");
+    let term = b.t("matrix product state");
+    let term = b.0.inline_call("emph", "", vec![term]);
+    let t3 = b.t(" is given by matrices ");
     let a = b.i("A");
     let i = b.i("i");
     let ai = b.sup(a, vec![i]);
@@ -55,7 +58,7 @@ pub fn document() -> Document {
     let (chi, times, chi2) = (b.s("χ"), b.s("×"), b.s("χ"));
     let m4 = b.m(vec![chi, times, chi2]);
     let t5 = b.t(", one for every basis state of a site; its coefficients are");
-    blocks.push(b.0.paragraph(vec![t1, m1, t2, m2, t3, m3, t4, m4, t5]));
+    blocks.push(b.0.paragraph(vec![t1, m1, t2, m2, t3a, term, t3, m3, t4, m4, t5]));
 
     let site = |b: &mut B, k: &str| {
         let i = b.i("i");

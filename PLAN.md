@@ -617,3 +617,39 @@ M12 is split: M12a the generic call node, M12b the atoms (primes, text in math, 
   Shift+Enter for a line break.
 
 Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing.
+
+## M13a — Calls in text: bold, italic, `#name[…]` (2026-11-09)
+
+- Model: `Inline::Call { name, args, body }`, the body an inline list with the
+  paragraph invariant (text, formula or call, text, …), so calls nest as in Typst.
+  Bold and italic are the calls `strong` and `emph`. Path step `Step::Body` into a
+  call's body (`[Index(1), Body, Index(0)]`); `Document::inline_at` finds the innermost
+  inline list a path goes through (owner, list, index), and everything that took the
+  inline index from `path[0]` uses it (`TextPos` has `owner`/`prefix`, `RowPos::base`
+  is the path length to the formula). `Seq::Inlines(id)` takes a call's id for its
+  body; `Selected::Formula` became `Selected::Inline { path }` (formula or call).
+  File format 9.
+- Typing (`markup_char`, `insert_inline`): `*`/`_` start `strong`/`emph` with the
+  caret inside, and leave the innermost call when it is the same kind; after a letter
+  or digit they are plain text (measured with Typst's parser: `a*b*c`, `snake_case`
+  are text); `\*`, `\_`, `\]` turn the backslash into the char. `#name[`,
+  `#name(args)[` and `#name` + space (not the whole paragraph, which stays a block
+  call) make a call; `]` and Esc leave the innermost call. A call left empty goes
+  (on `*`/`]`/Esc at once; when the caret moves away, as its own undo step,
+  `drop_left_call`, like empty titles).
+- Backspace after a call selects it, then deletes it (as formulas); at the start of
+  a body: an empty call goes, else ←. Enter inside calls splits them with the
+  paragraph (`split_inlines`): the new paragraph starts with the rest of each call,
+  the caret inside; a call with nothing after the caret is not continued.
+- Rendering: `#name(args)[body]` in the editor (an empty body shows the transparent
+  `x` of empty paragraphs, so the caret has a glyph); `;` after the call when the
+  text after it starts with `.` or `(` (it would continue the expression). Export
+  writes `*…*`/`_…_` when Typst reads them back the same (no letter or digit
+  touching the delimiters, no space inside them, no empty text next to them, not
+  inside the same markup), else the call (`markup_ok`; tests compare the pixels
+  of both styles).
+- Caret: `list_stops` recurses into bodies; the positions just before and after a
+  call take the place of its first and last inner stop (correct across line wraps;
+  the box only as a fallback).
+- Not yet: Ctrl+B/Ctrl+I on a selection (no text selection yet); editing a call's
+  arguments after typing them.

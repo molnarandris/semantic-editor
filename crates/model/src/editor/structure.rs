@@ -2,16 +2,18 @@
 
 use super::*;
 
+/// What splitting a text block gives: the ops, the inlines of the new
+/// block and the caret's path in them.
+type Split = (Vec<Op>, Vec<InlineNode>, Option<Vec<Step>>);
+
 impl Editor {
     /// Caret after the formula: in the text after an inline formula, or in
     /// the paragraph after a display formula (created if needed).
     pub(super) fn leave_formula(&mut self, p: &RowPos) -> bool {
         self.groups.clear();
-        if p.base == 1 {
-            let Step::Index(i) = p.path[0] else {
-                return false;
-            };
-            return self.jump(cursor(p.block, vec![Step::Index(i + 1)], 0));
+        if let Some((mut path, i)) = p.formula() {
+            path.push(Step::Index(i + 1));
+            return self.jump(cursor(p.block, path, 0));
         }
         self.leave_block(p.place)
     }
@@ -66,7 +68,8 @@ impl Editor {
     }
 
     /// Escape: drop the selection, else leave the innermost structure (caret
-    /// just after it), else leave the formula, else leave the environment.
+    /// just after it), else leave the formula, else the inline call, else
+    /// the environment.
     pub fn escape(&mut self) -> bool {
         self.finish_word();
         if self.selected.take().is_some() {
@@ -78,6 +81,9 @@ impl Editor {
             return self.leave_block(place);
         }
         let Some(p) = self.row_pos() else {
+            if self.text_pos().is_some_and(|pos| pos.nested()) {
+                return self.leave_call();
+            }
             if let Some(env) = self.title_env() {
                 return self.jump(cursor(env, vec![], 1));
             }
@@ -105,11 +111,9 @@ impl Editor {
         self.finish_word();
         self.selected = None;
         if let Some(p) = self.row_pos() {
-            if p.base == 1 {
-                let Step::Index(i) = p.path[0] else {
-                    return false;
-                };
-                self.caret = cursor(p.block, vec![Step::Index(i + 1)], 0);
+            if let Some((mut path, i)) = p.formula() {
+                path.push(Step::Index(i + 1));
+                self.caret = cursor(p.block, path, 0);
             } else {
                 return self.paragraph_after(p.place);
             }
@@ -159,37 +163,17 @@ impl Editor {
             ];
             return self.commit(ops, after, Last::Other);
         }
-        let (place, i, c, len) = (pos.place, pos.inline, pos.offset, pos.len);
-        let block_id = pos.block.id;
-        let inlines = pos.inlines;
-        let n = inlines.len();
-        let tail: String = pos.chars()[c..].iter().collect();
-        let moved: Vec<InlineNode> = inlines[i + 1..].to_vec();
-        let heading = match &pos.block.kind {
+        let place = pos.place;
+        let old = pos.block.clone();
+        let caret = self.caret.clone();
+        let Some((mut ops, new_inlines, path)) = self.split_inlines(&old, &caret) else {
+            return false;
+        };
+        let heading = match &old.kind {
             // Enter at the very end of a heading starts a paragraph.
-            Block::Heading { level, .. } if !(c == len && i + 1 == n) => Some(*level),
+            Block::Heading { level, .. } if path.is_some() => Some(*level),
             _ => None,
         };
-        let text_id = inlines[i].id;
-
-        let mut ops = vec![];
-        if c < len {
-            ops.push(Op::Delete {
-                seq: Seq::Text(text_id),
-                index: c,
-                count: len - c,
-            });
-        }
-        if i + 1 < n {
-            ops.push(Op::Delete {
-                seq: Seq::Inlines(block_id),
-                index: i + 1,
-                count: n - i - 1,
-            });
-        }
-        let first = self.doc.text(tail.trim_start());
-        let mut new_inlines = vec![first];
-        new_inlines.extend(moved);
         let block = match heading {
             Some(level) => self.doc.heading(level, new_inlines),
             None => self.doc.paragraph(new_inlines),
@@ -197,13 +181,93 @@ impl Editor {
         if let Some(item) = item {
             return self.item_enter(item, place, Some((ops, block)));
         }
-        let after = cursor(block.id, vec![Step::Index(0)], 0);
+        let path = path.unwrap_or(vec![Step::Index(0)]);
+        let after = cursor(block.id, path, 0);
         ops.push(Op::Insert {
             seq: place.seq(),
             index: place.index + 1,
             items: Items::Blocks(vec![block]),
         });
         self.commit(ops, after, Last::Other)
+    }
+
+    /// Ops cutting the caret's text block at the caret, what follows it
+    /// (the inlines of the new block) and the caret's path in them (`None`:
+    /// nothing follows). Inline calls around the caret are split too: the
+    /// new block starts with the rest of each, the caret inside (a call with
+    /// nothing left after the caret is not continued).
+    fn split_inlines(&mut self, block: &BlockNode, caret: &CursorPath) -> Option<Split> {
+        let at = self.doc.inline_at(block, &caret.path)?;
+        let (owner, i, list) = (at.owner, at.index, at.inlines.to_vec());
+        let mut prefix = caret.path[..at.prefix].to_vec();
+        let chars: Vec<char> = text_of(&list[i]).chars().collect();
+        let (c, len) = (caret.offset, chars.len());
+        let tail: String = chars[c..].iter().collect();
+        let mut ops = vec![];
+        if c < len {
+            ops.push(Op::Delete {
+                seq: Seq::Text(list[i].id),
+                index: c,
+                count: len - c,
+            });
+        }
+        if i + 1 < list.len() {
+            ops.push(Op::Delete {
+                seq: Seq::Inlines(owner),
+                index: i + 1,
+                count: list.len() - i - 1,
+            });
+        }
+        let first = match prefix.is_empty() {
+            true => self.doc.text(tail.trim_start()),
+            false => self.doc.text(&tail),
+        };
+        let mut rest = vec![first];
+        rest.extend(list[i + 1..].iter().cloned());
+        // Calls continued in the new block (they hold the caret there).
+        let mut kept = 0;
+        // Out through the calls around the caret, innermost first.
+        while prefix.len() >= 2 {
+            prefix.pop(); // Body
+            let at = self.doc.inline_at(block, &prefix)?;
+            let (owner, k, list) = (at.owner, at.index, at.inlines.to_vec());
+            prefix.pop(); // Index(k)
+            // The text after the call stays (emptied), as the list's end;
+            // what it held moves on.
+            let after = text_of(&list[k + 1]).to_string();
+            if !after.is_empty() {
+                ops.push(Op::Delete {
+                    seq: Seq::Text(list[k + 1].id),
+                    index: 0,
+                    count: after.chars().count(),
+                });
+            }
+            if k + 2 < list.len() {
+                ops.push(Op::Delete {
+                    seq: Seq::Inlines(owner),
+                    index: k + 2,
+                    count: list.len() - k - 2,
+                });
+            }
+            let mut outer = vec![];
+            if let Inline::Call { name, args, .. } = &list[k].kind
+                && !is_empty_text(&rest)
+            {
+                outer.push(self.doc.inline_call(name, args, rest));
+                kept += 1;
+            }
+            outer.push(self.doc.text(&after));
+            outer.extend(list[k + 2..].iter().cloned());
+            rest = outer;
+        }
+        let rest = self.doc.normalized_inlines(rest);
+        let mut path = vec![];
+        for _ in 0..kept {
+            path.extend([Step::Index(1), Step::Body]);
+        }
+        path.push(Step::Index(0));
+        let path = (!is_empty_text(&rest)).then_some(path);
+        Some((ops, rest, path))
     }
 
     /// Make the caret's paragraph or heading a heading of `level`, or a
