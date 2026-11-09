@@ -605,6 +605,14 @@ M12 is split: M12a the generic call node, M12b the atoms (primes, text in math, 
   another break) is written `\ #sem-slot()` in the editor, inside the break's span,
   so the new line shows a placeholder and the caret after the break sits in it,
   centred like in any empty slot (test `caret_on_an_empty_new_line`).
+- Marks for what the render does not show, only on the formula being edited (the
+  display formula, or the inline formula holding the caret): a thin line at each `&`
+  (between its neighbours' stops) and `↵` after the end of a line with a break.
+  Drawn by the widget over the render (`caret::formula_marks`, test
+  `marks_of_the_formula_being_edited`), not written into the Typst: measured, a
+  zero-width box at `&` changes the spacing around `=`/`+` (it is an ordinary atom),
+  a bare `place` too, and drawing in the widget needs no recompile when the caret
+  enters or leaves a formula.
 - Not yet: editing inside a text after leaving it (Backspace from its end only);
   Shift+Enter for a line break.
 

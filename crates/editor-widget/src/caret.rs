@@ -7,7 +7,9 @@
 //! position at the left edge of each node and after the last one, and the
 //! middle of an empty slot; positions in a row span the row's height.
 
-use model::{Block, BlockNode, CursorPath, Inline, MathKind, MathNode, MathRow, Step};
+use model::{
+    Block, BlockNode, CursorPath, Document, Inline, MathKind, MathNode, MathRow, Step, Target,
+};
 use typst_bridge::{BlockLayout, Rect};
 
 /// Advance used for chars that produced no glyph, in pt (≈ a space at 11 pt).
@@ -423,6 +425,61 @@ fn line_near(l: &BlockLayout, r: Rect) -> f64 {
         )
 }
 
+/// A mark over the formula being edited, where the render shows nothing:
+/// an alignment point (`&`, a thin line between its neighbours) or a line
+/// break (`\\`, after the end of its line). Drawn by the widget: in the
+/// render a mark would change the formula's spacing (measured).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Mark {
+    Align { x: f64, top: f64, bottom: f64 },
+    Break { x: f64, top: f64, bottom: f64 },
+}
+
+/// The marks of the formula the caret is in (a display formula, or the
+/// inline formula holding it), from the stops of its block; none when the
+/// caret is not in a formula.
+pub fn formula_marks(doc: &Document, caret: &CursorPath, stops: &[Stop]) -> Vec<Mark> {
+    let Some(block) = doc.block(caret.block) else {
+        return vec![];
+    };
+    let is_row = |path: &[Step]| matches!(doc.walk(block, path), Ok(Target::Row { .. }));
+    let formula = match &caret.path[..] {
+        _ if is_row(&[]) => &[][..],
+        [first, ..] if is_row(&[*first]) => &caret.path[..1],
+        _ => return vec![],
+    };
+    let mut out = vec![];
+    for s in stops {
+        let c = &s.cursor;
+        if c.block != caret.block || !c.path.starts_with(formula) {
+            continue;
+        }
+        let Ok(Target::Row { row }) = doc.walk(block, &c.path) else {
+            continue;
+        };
+        match row.nodes.get(c.offset).map(|n| &n.kind) {
+            Some(MathKind::Align) => {
+                let next = stops
+                    .iter()
+                    .find(|t| t.cursor.path == c.path && t.cursor.offset == c.offset + 1)
+                    .map_or(s.x, |t| t.x);
+                out.push(Mark::Align {
+                    x: (s.x + next) / 2.0,
+                    top: s.top,
+                    bottom: s.bottom,
+                });
+            }
+            Some(MathKind::Linebreak) => out.push(Mark::Break {
+                x: s.x,
+                top: s.top,
+                bottom: s.bottom,
+            }),
+            _ => {}
+        }
+    }
+    out
+}
+
 /// The stop for a caret; if it is not among the stops (layout not updated
 /// yet), the nearest earlier position in the same container.
 pub fn find<'a>(stops: &'a [Stop], cursor: &CursorPath) -> Option<&'a Stop> {
@@ -611,6 +668,43 @@ mod tests {
             (s[2].x - (slot.x + slot.w / 2.0)).abs() < 0.01,
             "{s:?} {slot:?}"
         );
+    }
+
+    /// Marks show for the formula the caret is in: `&` between its
+    /// neighbours, `\\` at the end of its line; none with the caret in
+    /// text.
+    #[test]
+    fn marks_of_the_formula_being_edited() {
+        let mut d = Document::empty();
+        let (a, b, c) = (d.ident("a"), d.ident("b"), d.ident("c"));
+        let eq = d.sym("=");
+        let al = d.node(MathKind::Align);
+        let br = d.node(MathKind::Linebreak);
+        let block = d.display(vec![a, al, eq, b, br, c]);
+        let id = block.id;
+        let l = layout_of(&block, 300.0);
+        let s = stops(&block, Some(&l));
+        d.blocks = vec![block];
+        let caret = CursorPath {
+            block: id,
+            path: vec![],
+            offset: 0,
+        };
+        let marks = formula_marks(&d, &caret, &s);
+        let [Mark::Align { x: ax, .. }, Mark::Break { x: bx, .. }] = marks[..] else {
+            panic!("{marks:?}");
+        };
+        assert!(s[1].x < ax && ax < s[2].x, "{ax} {s:?}");
+        assert_eq!(bx, s[4].x);
+        let mut p = Document::empty();
+        let text = p.paragraph(vec![]);
+        let caret = CursorPath {
+            block: text.id,
+            path: vec![Step::Index(0)],
+            offset: 0,
+        };
+        p.blocks = vec![text];
+        assert!(formula_marks(&p, &caret, &s).is_empty());
     }
 
     /// A numbered display formula: the number belongs to no node, so the

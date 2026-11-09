@@ -309,7 +309,10 @@ functions and packages.
 - `phi(x)` where `phi` is a symbol is not a call (already representable).
 - Later: matrices (`mat(…; …)`, 2D arguments).
 - Split 2026-11-09: **M12a** the call node, **M12b** the atoms; both done (see
-  PLAN.md). Line break typed as in Typst, `\` then space.
+  PLAN.md). Line break typed as in Typst, `\` then space; an empty new line shows a
+  placeholder with the caret in it. While a formula is being edited (caret in it),
+  `&` shows as a thin line and a line break as `↵` at the end of its line; finished
+  formulas show neither (decided 2026-11-09).
 
 ### M13 — Text markup and inline calls
 

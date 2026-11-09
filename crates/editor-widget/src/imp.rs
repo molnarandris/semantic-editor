@@ -331,6 +331,9 @@ impl WidgetImpl for SemEditor {
             y += h + BLOCK_SPACING_PT * zoom;
         }
 
+        if obj.has_focus() {
+            self.snapshot_formula_marks(snapshot, x0, scroll);
+        }
         if obj.has_focus()
             && self.caret_on.get()
             && let Some(r) = self.caret_rect()
@@ -658,6 +661,51 @@ impl SemEditor {
             (1.0, 0.35)
         };
         snapshot.append_border(&outline, &[width; 4], &[blue(alpha); 4]);
+    }
+
+    /// The alignment points and line breaks of the formula being edited,
+    /// which the render does not show: a thin line at `&`, `↵` at the end
+    /// of a line.
+    fn snapshot_formula_marks(&self, snapshot: &gtk::Snapshot, x0: f64, scroll: f64) {
+        let zoom = self.zoom.get();
+        let caret = self.editor.borrow().caret().clone();
+        let Some(index) = self.editor.borrow().doc().top_index(caret.block) else {
+            return;
+        };
+        let Some(&top) = self.block_tops().get(index) else {
+            return;
+        };
+        let stops = self.block_stops(index);
+        let marks = caret::formula_marks(self.editor.borrow().doc(), &caret, &stops);
+        let color = gdk::RGBA::new(0.42, 0.39, 0.56, 0.55);
+        for mark in marks {
+            match mark {
+                caret::Mark::Align { x, top: t, bottom } => {
+                    let r = graphene::Rect::new(
+                        (x0 + x * zoom - 0.5).round() as f32,
+                        (top + t * zoom - scroll) as f32,
+                        1.0,
+                        ((bottom - t) * zoom) as f32,
+                    );
+                    snapshot.append_color(&color, &r);
+                }
+                caret::Mark::Break { x, top: t, bottom } => {
+                    let layout = self.obj().create_pango_layout(Some("↵"));
+                    let mut font = gtk::pango::FontDescription::new();
+                    font.set_absolute_size((bottom - t) * zoom * 0.6 * gtk::pango::SCALE as f64);
+                    layout.set_font_description(Some(&font));
+                    let (_, h) = layout.pixel_size();
+                    let y = top + (t + bottom) / 2.0 * zoom - scroll - h as f64 / 2.0;
+                    snapshot.save();
+                    snapshot.translate(&graphene::Point::new(
+                        (x0 + x * zoom + 2.0) as f32,
+                        y as f32,
+                    ));
+                    snapshot.append_layout(&layout, &color);
+                    snapshot.restore();
+                }
+            }
+        }
     }
 
     fn snapshot_highlights(&self, snapshot: &gtk::Snapshot, x0: f64, scroll: f64) {
