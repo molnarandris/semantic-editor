@@ -140,6 +140,12 @@ pub struct SemEditor {
     goal_x: Cell<Option<f64>>,
     /// Scroll the caret into view when its block is rendered.
     reveal: Cell<bool>,
+    /// The completion list while a reference is typed: the chosen entry,
+    /// the label typed when it was chosen (a new one starts at the top),
+    /// and the rows as last drawn (widget coordinates), for clicks.
+    completion: Cell<usize>,
+    completion_typed: RefCell<String>,
+    completion_rows: RefCell<Vec<(graphene::Rect, String)>>,
 
     hadjustment: RefCell<Option<gtk::Adjustment>>,
     vadjustment: RefCell<Option<gtk::Adjustment>>,
@@ -346,6 +352,9 @@ impl WidgetImpl for SemEditor {
         {
             snapshot.append_color(&gdk::RGBA::new(0.1, 0.1, 0.12, 1.0), &r);
         }
+        if obj.has_focus() {
+            self.snapshot_completions(snapshot);
+        }
     }
 }
 
@@ -415,6 +424,9 @@ impl SemEditor {
             let Some(obj) = weak.upgrade() else {
                 return glib::Propagation::Proceed;
             };
+            if obj.imp().completion_key(key) {
+                return glib::Propagation::Stop;
+            }
             match command_for(key, state) {
                 Some(cmd) => {
                     obj.imp().run(cmd);
@@ -456,7 +468,9 @@ impl SemEditor {
             if let Some(obj) = weak.upgrade() {
                 obj.grab_focus();
                 let imp = obj.imp();
-                if let Some(env) = imp.heading_at(x, y)
+                if let Some(label) = imp.completion_at(x, y) {
+                    imp.choose_completion(&label);
+                } else if let Some(env) = imp.heading_at(x, y)
                     && imp.editor.borrow_mut().edit_title(env)
                 {
                     // An environment's heading: edit (or add) its title
@@ -702,6 +716,158 @@ impl SemEditor {
             let outline = gsk::RoundedRect::from_rect(rect, 2.0);
             snapshot.append_color(&blue(0.04), &rect);
             snapshot.append_border(&outline, &[1.0; 4], &[blue(0.35); 4]);
+        }
+    }
+
+    /// The labels offered while a reference is typed: those containing what
+    /// was typed, in document order, each with what it labels and its number
+    /// once known ("section 2.1", "equation 3", "lemma 1").
+    fn completions(&self) -> Vec<(String, String)> {
+        let ed = self.editor.borrow();
+        let Some(typed) = ed.ref_typing() else {
+            return vec![];
+        };
+        if *self.completion_typed.borrow() != typed {
+            self.completion.set(0);
+            *self.completion_typed.borrow_mut() = typed.clone();
+        }
+        let views = self.views.borrow();
+        let numbers: HashMap<&str, String> = views
+            .iter()
+            .flat_map(|v| &v.targets)
+            .map(|t| {
+                let n: Vec<String> = t.value.iter().map(i64::to_string).collect();
+                (t.label.as_str(), n.join("."))
+            })
+            .collect();
+        ed.doc()
+            .labels()
+            .into_iter()
+            .filter(|(label, _)| label.contains(typed.as_str()))
+            .map(|(label, block)| {
+                let kind = match &block.kind {
+                    Block::Heading { .. } => "section",
+                    Block::DisplayMath(_) => "equation",
+                    Block::Env { name, .. } => name.as_str(),
+                    _ => "",
+                };
+                let desc = match numbers.get(label) {
+                    Some(n) => format!("{kind} {n}"),
+                    None => kind.to_string(),
+                };
+                (label.to_string(), desc)
+            })
+            .collect()
+    }
+
+    /// Keys for the completion list while it shows: ↑/↓ choose, Enter or
+    /// Tab take the chosen label. Returns whether the key was used.
+    fn completion_key(&self, key: gdk::Key) -> bool {
+        let list = self.completions();
+        if list.is_empty() {
+            return false;
+        }
+        let i = self.completion.get().min(list.len() - 1);
+        match key {
+            gdk::Key::Down => self.completion.set((i + 1) % list.len()),
+            gdk::Key::Up => self.completion.set((i + list.len() - 1) % list.len()),
+            gdk::Key::Return | gdk::Key::KP_Enter | gdk::Key::Tab => {
+                self.choose_completion(&list[i].0);
+                return true;
+            }
+            _ => return false,
+        }
+        self.obj().queue_draw();
+        true
+    }
+
+    fn choose_completion(&self, label: &str) {
+        self.editor.borrow_mut().complete_ref(label);
+        self.after_command(true);
+    }
+
+    /// The completion row at widget point `(x, y)`, if the list shows.
+    fn completion_at(&self, x: f64, y: f64) -> Option<String> {
+        self.completion_rows
+            .borrow()
+            .iter()
+            .find(|(r, _)| r.contains_point(&graphene::Point::new(x as f32, y as f32)))
+            .map(|(_, label)| label.clone())
+    }
+
+    /// The completion list, below the caret: each label with what it labels,
+    /// the chosen one highlighted.
+    fn snapshot_completions(&self, snapshot: &gtk::Snapshot) {
+        let list = self.completions();
+        let mut rows = self.completion_rows.borrow_mut();
+        rows.clear();
+        let Some(caret) = self.caret_rect().filter(|_| !list.is_empty()) else {
+            return;
+        };
+        let obj = self.obj();
+        let layouts: Vec<_> = list
+            .iter()
+            .map(|(label, desc)| {
+                let l = obj.create_pango_layout(Some(label));
+                let d = obj.create_pango_layout(Some(desc));
+                (l, d)
+            })
+            .collect();
+        let (pad, gap) = (6.0_f32, 18.0_f32);
+        let label_w = layouts
+            .iter()
+            .map(|(l, _)| l.pixel_size().0)
+            .max()
+            .unwrap_or(0) as f32;
+        let desc_w = layouts
+            .iter()
+            .map(|(_, d)| d.pixel_size().0)
+            .max()
+            .unwrap_or(0) as f32;
+        let row_h = layouts
+            .iter()
+            .map(|(l, _)| l.pixel_size().1)
+            .max()
+            .unwrap_or(16) as f32
+            + 4.0;
+        let (x, y) = (caret.x(), caret.y() + caret.height() + 4.0);
+        let width = label_w + gap + desc_w + 2.0 * pad;
+        let shown = list.len().min(8);
+        let frame = graphene::Rect::new(x, y, width, row_h * shown as f32 + 2.0 * 3.0);
+        let outline = gsk::RoundedRect::from_rect(frame, 4.0);
+        snapshot.push_rounded_clip(&outline);
+        snapshot.append_color(&gdk::RGBA::WHITE, &frame);
+        snapshot.pop();
+        snapshot.append_border(
+            &outline,
+            &[1.0; 4],
+            &[gdk::RGBA::new(0.0, 0.0, 0.0, 0.25); 4],
+        );
+        let chosen = self.completion.get().min(list.len() - 1);
+        // Keep the chosen row in the window of rows shown.
+        let first = chosen.saturating_sub(shown - 1);
+        for (k, ((label, _), (l, d))) in list
+            .iter()
+            .zip(&layouts)
+            .enumerate()
+            .skip(first)
+            .take(shown)
+        {
+            let top = y + 3.0 + row_h * (k - first) as f32;
+            let row = graphene::Rect::new(x + 2.0, top, width - 4.0, row_h);
+            if k == chosen {
+                let r = gsk::RoundedRect::from_rect(row, 3.0);
+                snapshot.push_rounded_clip(&r);
+                snapshot.append_color(&gdk::RGBA::new(0.21, 0.52, 0.89, 0.18), &row);
+                snapshot.pop();
+            }
+            snapshot.save();
+            snapshot.translate(&graphene::Point::new(x + pad, top + 2.0));
+            snapshot.append_layout(l, &gdk::RGBA::new(0.1, 0.1, 0.12, 1.0));
+            snapshot.translate(&graphene::Point::new(label_w + gap, 0.0));
+            snapshot.append_layout(d, &gdk::RGBA::new(0.4, 0.42, 0.48, 1.0));
+            snapshot.restore();
+            rows.push((row, label.clone()));
         }
     }
 

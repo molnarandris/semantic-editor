@@ -759,3 +759,10 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
   (`references_through_stand_ins`); a forward reference settles in two rounds
   with every render compiling (`references_resolve_through_reports`).
 - A label defined twice shows its pill in red.
+- Completion: while a reference is typed, a list under the caret offers the labels
+  containing what was typed, in document order, each with what it labels and its
+  number from the reports ("equation 3", "lemma 1"). Drawn by the widget like the
+  pills (no GTK popover: the editor keeps the focus and the input method), keys
+  taken before the normal ones: ↑/↓ choose (back to the top when the typed label
+  changes), Enter or Tab take it (`Editor::complete_ref`), a click on a row too;
+  other keys type on and refine it.
