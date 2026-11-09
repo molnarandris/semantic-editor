@@ -209,14 +209,12 @@ impl Editor {
             return false;
         };
         let mut moved = siblings[ip.index].clone();
-        if let (
-            Some(Block::Item { kind: outer, .. }),
-            Block::Item { kind, .. },
-        ) = (self.doc.block(parent).map(|b| &b.kind), &mut moved.kind)
+        if let (Some(Block::Item { kind: outer, .. }), Block::Item { kind, .. }) =
+            (self.doc.block(parent).map(|b| &b.kind), &mut moved.kind)
+            && *kind != ListKind::Term
+            && *outer != ListKind::Term
         {
-            if *kind != ListKind::Term && *outer != ListKind::Term {
-                *kind = *outer;
-            }
+            *kind = *outer;
         }
         if let Some(body) = moved.kind.body_mut() {
             body.extend(siblings[ip.index + 1..].iter().cloned());
