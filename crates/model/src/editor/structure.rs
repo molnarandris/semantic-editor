@@ -138,6 +138,10 @@ impl Editor {
         if let Some(owner) = self.title_env().or_else(|| self.term_item()) {
             return self.body_start(owner).is_some_and(|c| self.jump(c));
         }
+        // In a caption: out of the figure, just after it.
+        if let Some(figure) = self.caption_of_caret() {
+            return self.jump(cursor(figure, vec![], 1));
+        }
         let Some(pos) = self.text_pos() else {
             let Some(place) = self.doc.place(self.caret.block) else {
                 return false;

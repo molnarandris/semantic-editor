@@ -883,6 +883,9 @@ impl Editor {
             (None, None) if self.ref_before().is_some() => {
                 "reference: type its label · ↑/↓ and Enter → choose · space → done"
             }
+            (None, None) if self.caption_of_caret().is_some() => {
+                "caption · Enter → on after the figure · Backspace in an empty one → no caption"
+            }
             (None, None) if self.next_to_ref() => {
                 "reference · Ctrl+click → go to its target, Alt+← → back · Backspace → select it"
             }
@@ -951,6 +954,15 @@ impl Editor {
         let (_, mut path) = self.call_around(&self.caret.path[..at.prefix])?;
         path.push(Step::Body);
         Some(path)
+    }
+
+    /// The figure whose caption the caret is in.
+    fn caption_of_caret(&self) -> Option<NodeId> {
+        let block = self.doc.block(self.caret.block)?;
+        if !matches!(block.kind, Block::Caption(_)) {
+            return None;
+        }
+        self.doc.place(block.id)?.parent
     }
 
     /// Whether the caret is in text right before or after a reference.

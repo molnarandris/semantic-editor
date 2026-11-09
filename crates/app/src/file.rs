@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 /// alignment points and line breaks in formulas. 9: calls in text
 /// (`Inline::Call`: bold, italic, `#name[…]`). 10: inline code
 /// (`Inline::Raw`). 11: block labels (`label`, absent when empty).
-/// 12: references (`Inline::Ref`).
-pub const FORMAT_VERSION: u32 = 12;
+/// 12: references (`Inline::Ref`). 13: figure captions (`Block::Caption`).
+pub const FORMAT_VERSION: u32 = 13;
 
 #[derive(Serialize)]
 struct SemFileOut<'a> {
@@ -119,7 +119,7 @@ mod tests {
             "<eq:square>",
             "/ Bond dimension: the size",
             "#align(center)[",
-            "@sec:mps, @eq:mps, @eq:abs and @thm:fundamental.",
+            "@sec:mps, @eq:mps, @eq:abs, @fig:chain and @thm:fundamental.",
         ] {
             assert!(tail.contains(part), "missing {part:?}");
         }
@@ -134,7 +134,17 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(refs, ["sec:mps", "eq:mps", "eq:abs", "thm:fundamental"]);
+        assert_eq!(
+            refs,
+            [
+                "sec:mps",
+                "eq:mps",
+                "eq:abs",
+                "fig:chain",
+                "thm:fundamental"
+            ]
+        );
+        assert!(typ.contains("caption: [A matrix product state on four sites.])["));
         assert!(refs.iter().all(|r| labels.contains(r)), "{labels:?}");
     }
 

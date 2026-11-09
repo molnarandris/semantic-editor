@@ -43,6 +43,7 @@ fn inline_text(v: &[InlineNode]) -> String {
 fn block_text(b: &BlockNode) -> String {
     match &b.kind {
         Block::Paragraph(v) | Block::Heading { inlines: v, .. } => inline_text(v),
+        Block::Caption(v) => format!("cap({})", inline_text(v)),
         Block::DisplayMath(_) => "$$".into(),
         Block::RawTypst(s) | Block::Diagram(s) => s.clone(),
         Block::Env {
@@ -1507,4 +1508,50 @@ fn links_in_a_block() {
         [vec![Index(1), Body], vec![Index(3), Body, Index(1), Body]]
     );
     assert_eq!(block.ref_ids().len(), 1);
+}
+
+/// `#figure ` starts a figure with an empty caption under its body; → goes
+/// on into the caption, Enter in it leaves the figure; Backspace in an empty
+/// caption removes it; unwrapping keeps the caption's text as a paragraph.
+#[test]
+fn figures_and_captions() {
+    let mut e = Editor::default();
+    e.insert_text("#figure Body");
+    assert_eq!(texts(&e), ["#figure[Body|cap()]"]);
+    assert!(e.move_right());
+    e.insert_text("A caption");
+    assert_eq!(texts(&e), ["#figure[Body|cap(A caption)]"]);
+    assert!(e.hint().starts_with("caption"));
+    // Enter: out of the figure, just after it.
+    assert!(e.enter());
+    assert_eq!(e.caret().path, Vec::<Step>::new());
+    assert_eq!(e.caret().offset, 1);
+    e.doc().check_invariants().unwrap();
+    // Backspace at the start of a caption with text: ←, no join.
+    let mut e = Editor::default();
+    e.insert_text("#figure Body");
+    e.move_right();
+    e.insert_text("x");
+    e.move_left();
+    assert!(e.backspace());
+    assert_eq!(texts(&e), ["#figure[Body|cap(x)]"]);
+    // An empty caption goes.
+    let mut e = Editor::default();
+    e.insert_text("#figure Body");
+    e.move_right();
+    assert!(e.backspace());
+    assert_eq!(texts(&e), ["#figure[Body]"]);
+    // Unwrapping: the caption's text becomes a paragraph.
+    let mut e = Editor::default();
+    e.insert_text("#figure Body");
+    e.move_right();
+    e.insert_text("Cap");
+    let body = e.doc().blocks[0].kind.body().unwrap()[0].clone();
+    e.set_caret(e.doc().start_of(&body));
+    assert!(e.backspace(), "marks the figure");
+    assert!(e.backspace(), "unwraps it");
+    assert_eq!(texts(&e), ["Body", "Cap"]);
+    e.doc().check_invariants().unwrap();
+    while e.undo() {}
+    assert_eq!(texts(&e), [""]);
 }

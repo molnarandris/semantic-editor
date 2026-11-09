@@ -781,3 +781,22 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
   inside them (`BlockNode::links`, `caret::call_outline`).
 - Not yet: a reference still being typed when the file is saved keeps a trailing
   `.`/`:` (the next key would have moved it); citations (M16).
+
+## M16a — Figures with captions (2026-11-09)
+
+- Model: `Block::Caption(inlines)`, the last block of a figure's body: a text block
+  for the caret (`text_inlines`, new `own_inlines` for start/end positions), but not
+  a paragraph (`inlines()` leaves it out, so it never joins or splits into a display
+  formula). File format 13.
+- `#figure ` (a block call) starts with an empty caption under the body paragraph;
+  → from the body goes on into it. Enter in a caption leaves the figure (caret just
+  after it); Backspace at its start: an empty caption goes, else ←. An "empty"
+  figure (empty paragraph + empty caption) is removed by Backspace like an empty
+  environment; unwrapping turns the caption into a paragraph. Status bar hint.
+- Source: `#figure(caption: [Cap])[…]` (with other arguments: `args, caption: […]`),
+  the caption written through `w.block`, so its spans map and the caret works in
+  it; an empty caption shows the transparent `x` in the editor and is left out of
+  the export. Labels and references work as for theorems (the stand-in is
+  `#figure[]`, counter `figure.where(kind: image)`).
+- The sample's chain diagram is now a captioned, labelled figure, referenced in the
+  last paragraph.

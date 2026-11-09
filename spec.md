@@ -435,6 +435,16 @@ Titles decided 2026-11-08: optional, never added by default; positional
 - Figures as block calls with a body and a caption (content arguments), labelled.
 - Footnotes (inline call, M13) with numbering through the chain.
 - Bibliography: embedded (as in the user's paper) or a file (needs project files).
+- Split 2026-11-09: **M16a** figures with captions; **M16b** footnotes numbered
+  through the chain; **M16c** bibliography and citations (`@key`), numbered in
+  document order (each citing block gets the earlier citations as hidden ones
+  before it, so Typst numbers them as in the whole document).
+- M16a decisions (2026-11-09): a figure is a block call (`#figure ` as for
+  environments) whose body ends with a caption: a text block of its own
+  (`Block::Caption`), edited in place under the figure and written as the call's
+  `caption:` argument, `#figure(caption: [Cap])[…]`. A new figure starts with an empty
+  caption; Backspace in an empty caption removes it. Figures are labelled and
+  referenced like the other targets.
 
 ### M17 — Import `.typ` files
 

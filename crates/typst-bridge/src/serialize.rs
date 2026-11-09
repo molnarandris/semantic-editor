@@ -78,6 +78,11 @@ fn typing_call(inlines: &[InlineNode]) -> bool {
     starts_ok && (after.is_empty() || !name.is_empty() && after.starts_with('('))
 }
 
+/// Inlines holding only an empty text.
+fn is_empty_text(inlines: &[InlineNode]) -> bool {
+    matches!(inlines, [InlineNode { kind: Inline::Text(s), .. }] if s.is_empty())
+}
+
 /// The Typst source of an empty math row (a visible placeholder box).
 pub const SLOT: &str = "#sem-slot()";
 
@@ -357,9 +362,36 @@ impl Writer {
             } => {
                 w.out.push('#');
                 w.out.push_str(name);
-                if !args.is_empty() {
+                // A figure's caption, the last block of its body, is its
+                // `caption:` argument. An empty one shows only in the editor.
+                let (body, caption) = match body.split_last() {
+                    Some((
+                        last @ BlockNode {
+                            kind: Block::Caption(c),
+                            ..
+                        },
+                        rest,
+                    )) if !(w.style == Style::Readable && is_empty_text(c)) => (rest, Some(last)),
+                    Some((
+                        BlockNode {
+                            kind: Block::Caption(_),
+                            ..
+                        },
+                        rest,
+                    )) => (rest, None),
+                    _ => (&body[..], None),
+                };
+                if !args.is_empty() || caption.is_some() {
                     w.out.push('(');
                     w.out.push_str(args);
+                    if let Some(caption) = caption {
+                        if !args.is_empty() {
+                            w.out.push_str(", ");
+                        }
+                        w.out.push_str("caption: [");
+                        w.block(caption);
+                        w.out.push(']');
+                    }
                     w.out.push(')');
                 }
                 // The title is the first content argument, as in ctheorems
@@ -377,6 +409,9 @@ impl Writer {
                 w.nl();
                 w.out.push(']');
             }
+            // In a figure, written by the figure; elsewhere (not made by the
+            // editor) like a paragraph.
+            Block::Caption(inlines) => w.text_block(inlines, false),
             Block::Item { kind, term, body } => {
                 let number = w.number.take().filter(|_| w.style == Style::Edit);
                 match (kind, number) {
@@ -1632,6 +1667,52 @@ mod tests {
         assert_eq!(typ, format!("{PREAMBLE}\nHi\n\n$ x $\n"));
         let mut world = BridgeWorld::new();
         compile(&mut world, &typ).unwrap();
+    }
+
+    /// A figure's caption is its `caption:` argument; an empty one only
+    /// shows in the editor. A labelled figure is referenced as "Figure 1".
+    #[test]
+    fn figures() {
+        let mut e = model::Editor::new(Document::new());
+        e.insert_text("#figure Body");
+        e.move_right();
+        e.insert_text("A *bold* caption");
+        let mut d = e.doc().clone();
+        d.blocks[0].label = "fig".into();
+        let figure = &d.blocks[0];
+        assert_eq!(
+            ser(figure),
+            "#figure(caption: [A #strong[bold] caption])[\nBody\n] <fig>"
+        );
+        assert_eq!(
+            serialize_block_styled(figure, Style::Readable).0,
+            "#figure(caption: [A *bold* caption])[\nBody\n] <fig>"
+        );
+        let refs = d.raw("See @fig.");
+        d.blocks.push(refs);
+        let typ = serialize_document(&d);
+        let mut world = BridgeWorld::new();
+        compile(&mut world, &typ).unwrap_or_else(|e| panic!("{e:?}\n{typ}"));
+        // A new figure's empty caption.
+        let mut e = model::Editor::new(Document::new());
+        e.insert_text("#figure x");
+        let figure = &e.doc().blocks[0];
+        assert_eq!(
+            ser(figure),
+            "#figure(caption: [#text(fill: rgb(0, 0, 0, 0))[x]])[\nx\n]"
+        );
+        assert_eq!(
+            serialize_block_styled(figure, Style::Readable).0,
+            "#figure[\nx\n]"
+        );
+        // A diagram in a figure renders in the editor.
+        let mut d = Document::empty();
+        let diagram = d.diagram("circle((0, 0))");
+        let cap = d.text("Cap");
+        let cap = d.caption(vec![cap]);
+        let figure = d.env("figure", vec![diagram, cap]);
+        let (src, _) = block_document(&Around::default(), &ser(&figure), 300.0);
+        compile(&mut world, &src).unwrap_or_else(|e| panic!("{e:?}\n{src}"));
     }
 
     /// Labels follow what they label; references to them resolve.

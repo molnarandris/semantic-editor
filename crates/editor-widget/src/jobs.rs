@@ -107,7 +107,7 @@ pub fn counter_sensitive(block: &BlockNode) -> bool {
             true
         }
         Block::RawTypst(source) => !is_code(source),
-        Block::Paragraph(_) | Block::Diagram(_) => false,
+        Block::Paragraph(_) | Block::Diagram(_) | Block::Caption(_) => false,
     }
 }
 
@@ -519,12 +519,17 @@ mod tests {
             d.reference("nowhere"),
             d.text("."),
         );
-        let para = d.paragraph(vec![see, r1, and, r2, end]);
+        let (also, r3) = (d.text(" Also "), d.reference("fig"));
+        let para = d.paragraph(vec![see, r1, and, r2, end, r3, also]);
         let (a, b) = (d.text("A"), d.text("B"));
         let first = d.heading(1, vec![a]);
         let mut second = d.heading(1, vec![b]);
         second.label = "sec:b".into();
-        d.blocks = vec![para, first, second];
+        let (body, cap) = (d.text("Body"), d.text("Cap"));
+        let (body, cap) = (d.paragraph(vec![body]), d.caption(vec![cap]));
+        let mut figure = d.env("figure", vec![body, cap]);
+        figure.label = "fig".into();
+        d.blocks = vec![para, first, second, figure];
         let header = "#set heading(numbering: \"1.1\")\n";
         let (tx, rx) = mpsc::channel();
         let worker = Worker::spawn(None, move |r| tx.send(r).unwrap());
@@ -567,7 +572,13 @@ mod tests {
             }
         }
         assert_eq!(views[2].targets.len(), 1, "the heading reported its label");
+        assert_eq!(views[3].targets.len(), 1, "the figure reported its label");
         assert!(views[0].around.suffix.contains("<sec:b>"), "a stand-in");
+        assert!(
+            views[0].around.suffix.contains("#figure[] <fig>"),
+            "{}",
+            views[0].around.suffix
+        );
         assert!(views[0].around.prefix.contains("\"@nowhere\""), "red");
     }
 

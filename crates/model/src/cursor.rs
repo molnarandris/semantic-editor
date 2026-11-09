@@ -184,6 +184,7 @@ impl Document {
             Block::Env { .. } if path.is_empty() => Ok(Target::Edge { block }),
             Block::Paragraph(inlines)
             | Block::Heading { inlines, .. }
+            | Block::Caption(inlines)
             | Block::Env { title: inlines, .. }
             | Block::Item { term: inlines, .. } => walk_inlines(inlines, path),
             Block::DisplayMath(row) => walk_row(row, path),
@@ -249,7 +250,7 @@ impl Document {
                 },
             };
         }
-        let path = if block.kind.inlines().is_some() {
+        let path = if block.kind.own_inlines().is_some() {
             vec![Step::Index(0)]
         } else {
             vec![]
@@ -270,7 +271,7 @@ impl Document {
         } {
             return self.end_of(last);
         }
-        let path = match block.kind.inlines() {
+        let path = match block.kind.own_inlines() {
             Some(inlines) => vec![Step::Index(inlines.len().saturating_sub(1))],
             None => vec![],
         };
@@ -369,7 +370,9 @@ impl Document {
             }
         };
         match &block.kind {
-            Block::Paragraph(inlines) => inline_positions(inlines, &mut out),
+            Block::Paragraph(inlines) | Block::Caption(inlines) => {
+                inline_positions(inlines, &mut out)
+            }
             Block::Heading { inlines, .. } => {
                 inline_positions(inlines, &mut out);
                 label(&mut out);
@@ -423,6 +426,7 @@ impl Document {
             Block::DisplayMath(row) => row,
             Block::Paragraph(inlines)
             | Block::Heading { inlines, .. }
+            | Block::Caption(inlines)
             | Block::Env { title: inlines, .. }
             | Block::Item { term: inlines, .. } => {
                 let Some(Step::Index(i)) = path.first() else {

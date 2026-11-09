@@ -157,7 +157,12 @@ impl Editor {
             let place = pos.place;
             let body = self.doc.paragraph(vec![]);
             let mut after = self.doc.start_of(&body);
-            let mut env = self.doc.env(&name, vec![body]);
+            let mut blocks = vec![body];
+            // A figure starts with an empty caption under its body.
+            if name == "figure" {
+                blocks.push(self.doc.caption(vec![]));
+            }
+            let mut env = self.doc.env(&name, blocks);
             if let (Some(a), Block::Env { args, .. }) = (args, &mut env.kind) {
                 *args = a;
             }

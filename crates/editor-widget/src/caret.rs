@@ -63,7 +63,7 @@ pub fn stops(block: &BlockNode, layout: Option<&BlockLayout>) -> Vec<Stop> {
         while let Some(first) = block.kind.body().and_then(|b| b.first()) {
             block = first;
         }
-        let start = match block.kind.inlines() {
+        let start = match block.kind.own_inlines() {
             Some(_) => vec![Step::Index(0)],
             None => vec![],
         };
@@ -264,7 +264,7 @@ fn label_stops(block: &BlockNode, line: f64, width: f64) -> Vec<Stop> {
 /// The stops of `block` without its label.
 fn content_stops(block: &BlockNode, l: &BlockLayout, top: bool) -> Vec<Stop> {
     match &block.kind {
-        Block::Paragraph(inlines) | Block::Heading { inlines, .. } => {
+        Block::Paragraph(inlines) | Block::Heading { inlines, .. } | Block::Caption(inlines) => {
             inline_stops(block, inlines, l)
         }
         Block::DisplayMath(row) => {
@@ -795,6 +795,26 @@ mod tests {
         // End stays in the text.
         let lines = lines(&s);
         assert!(!line_edge(&s, &lines[0], true).unwrap().label);
+        // A figure: its caption's text has stops, under the body.
+        let mut e = model::Editor::new(Document::new());
+        e.insert_text("#figure Body");
+        e.move_right();
+        e.insert_text("Cap");
+        let block = e.doc().blocks[0].clone();
+        let l = layout_of(&block, 300.0);
+        let s = super::stops(&block, Some(&l));
+        let got: Vec<_> = s.iter().map(|s| s.cursor.clone()).collect();
+        assert_eq!(got, e.doc().positions(&block));
+        let caption = block.kind.body().unwrap()[1].id;
+        let body_line = s
+            .iter()
+            .find(|s| s.cursor.block != caption && !s.edge)
+            .unwrap()
+            .line;
+        assert!(
+            s.iter()
+                .any(|s| s.cursor.block == caption && s.line > body_line + 5.0)
+        );
         // An environment: before the position after it.
         let mut e = model::Editor::new(Document::new());
         e.insert_text("#block x");

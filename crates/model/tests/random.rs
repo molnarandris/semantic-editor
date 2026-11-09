@@ -88,7 +88,9 @@ fn all_cursors(doc: &Document) -> Vec<CursorPath> {
     let mut out = vec![];
     for b in doc.leaves() {
         match &b.kind {
-            Block::Paragraph(inlines) | Block::Heading { inlines, .. } => {
+            Block::Paragraph(inlines)
+            | Block::Heading { inlines, .. }
+            | Block::Caption(inlines) => {
                 for (i, inline) in inlines.iter().enumerate() {
                     match &inline.kind {
                         Inline::Text(s) => (0..=s.chars().count()).for_each(|o| {

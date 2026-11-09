@@ -108,7 +108,8 @@ pub fn document() -> Document {
          tensor with one physical leg and two virtual legs, and contracted virtual legs form the chain:",
     );
     blocks.push(b.0.paragraph(vec![t1, m1, t2]));
-    blocks.push(b.0.diagram(
+    // A figure: the diagram, with a caption and a label.
+    let chain = b.0.diagram(
         "for i in range(4) {
   let x = i * 1.6
   line((x, -0.35), (x, -0.9))
@@ -118,7 +119,12 @@ pub fn document() -> Document {
 for i in range(3) {
   line(\"A\" + str(i) + \".east\", \"A\" + str(i + 1) + \".west\")
 }",
-    ));
+    );
+    let caption = b.t("A matrix product state on four sites.");
+    let caption = b.0.caption(vec![caption]);
+    let mut figure = b.0.env("figure", vec![chain, caption]);
+    figure.label = "fig:chain".into();
+    blocks.push(figure);
     let t = b.t("Two cases to keep in mind:");
     blocks.push(b.0.paragraph(vec![t]));
     let t1 = b.t("Product states have ");
@@ -449,8 +455,8 @@ fn typed_section(doc: Document) -> Document {
     e.insert_text("Headings, formulas and theorems carry labels, shown beside the page. ");
     // References: `@` and the label (a list offers the labels); a click on
     // one follows it, Alt+← comes back.
-    e.insert_text("References show their numbers: @sec:mps, @eq:mps, @eq:abs and ");
-    e.insert_text("@thm:fundamental.");
+    e.insert_text("References show their numbers: @sec:mps, @eq:mps, @eq:abs, ");
+    e.insert_text("@fig:chain and @thm:fundamental.");
     // Ends the reference: its trailing `.` goes back to the text.
     e.escape();
     e.doc().clone()

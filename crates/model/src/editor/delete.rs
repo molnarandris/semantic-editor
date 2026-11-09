@@ -44,11 +44,22 @@ impl Editor {
                     return false;
                 };
                 // The body takes the environment's place, ids and all, so
-                // the caret stays where it is.
+                // the caret stays where it is; a figure's caption becomes a
+                // paragraph.
+                let body = body
+                    .iter()
+                    .cloned()
+                    .map(|mut b| {
+                        if let Block::Caption(inlines) = b.kind {
+                            b.kind = Block::Paragraph(inlines);
+                        }
+                        b
+                    })
+                    .collect();
                 let insert = Op::Insert {
                     seq: place.seq(),
                     index: place.index,
-                    items: Items::Blocks(body.clone()),
+                    items: Items::Blocks(body),
                 };
                 let after = self.caret.clone();
                 self.commit(vec![delete_block(place), insert], after, Last::Other)
@@ -190,6 +201,18 @@ impl Editor {
             // The start of a term: an empty one drops the item's marker.
             return is_empty_text(term) && self.unwrap_item(block_id, true);
         }
+        if let Block::Caption(inlines) = &pos.block.kind {
+            // The start of a caption: an empty one goes, else ←.
+            if !is_empty_text(inlines) {
+                return self.move_left();
+            }
+            let place = pos.place;
+            let Some(before) = self.doc.sibling(place, -1) else {
+                return false;
+            };
+            let after = self.doc.end_of(before);
+            return self.commit(vec![delete_block(place)], after, Last::Other);
+        }
         let place = pos.place;
         if place.index == 0
             && let Some(item) = self.item_of(block_id)
@@ -210,11 +233,21 @@ impl Editor {
             let Some(env) = place.parent else {
                 return false;
             };
-            let empty = self
-                .doc
-                .block(env)
-                .and_then(|b| b.kind.body())
-                .is_some_and(|body| body.len() == 1 && is_empty_text_block(&body[0]));
+            // Empty: one empty paragraph (a figure's: and an empty caption).
+            let empty =
+                self.doc.block(env).and_then(|b| b.kind.body()).is_some_and(
+                    |body| match &body[..] {
+                        [only] => is_empty_text_block(only),
+                        [
+                            para,
+                            BlockNode {
+                                kind: Block::Caption(caption),
+                                ..
+                            },
+                        ] => is_empty_text_block(para) && is_empty_text(caption),
+                        _ => false,
+                    },
+                );
             if empty {
                 let env_place = self.doc.place(env).expect("environment of the caret");
                 let (ops, after) = self.remove_block(env_place);

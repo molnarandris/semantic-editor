@@ -61,6 +61,9 @@ pub enum Block {
         term: Vec<InlineNode>,
         body: Vec<BlockNode>,
     },
+    /// The caption of a figure: the last block of its body, edited in place
+    /// under it, written as the call's `caption:` argument.
+    Caption(Vec<InlineNode>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -277,11 +280,23 @@ impl Block {
         }
     }
 
-    /// The inlines the caret can type in: a paragraph's or heading's, an
-    /// environment's title or a term item's term.
+    /// The inlines of a text block: a paragraph, heading or caption.
+    pub fn own_inlines(&self) -> Option<&Vec<InlineNode>> {
+        match self {
+            Block::Paragraph(inlines)
+            | Block::Heading { inlines, .. }
+            | Block::Caption(inlines) => Some(inlines),
+            _ => None,
+        }
+    }
+
+    /// The inlines the caret can type in: a paragraph's, heading's or
+    /// caption's, an environment's title or a term item's term.
     pub fn text_inlines(&self) -> Option<&Vec<InlineNode>> {
         match self {
-            Block::Paragraph(inlines) | Block::Heading { inlines, .. } => Some(inlines),
+            Block::Paragraph(inlines)
+            | Block::Heading { inlines, .. }
+            | Block::Caption(inlines) => Some(inlines),
             Block::Env { title, .. } | Block::Item { term: title, .. } => Some(title),
             _ => None,
         }
@@ -289,7 +304,9 @@ impl Block {
 
     pub fn text_inlines_mut(&mut self) -> Option<&mut Vec<InlineNode>> {
         match self {
-            Block::Paragraph(inlines) | Block::Heading { inlines, .. } => Some(inlines),
+            Block::Paragraph(inlines)
+            | Block::Heading { inlines, .. }
+            | Block::Caption(inlines) => Some(inlines),
             Block::Env { title, .. } | Block::Item { term: title, .. } => Some(title),
             _ => None,
         }
@@ -318,6 +335,7 @@ impl BlockNode {
             Block::DisplayMath(row) => vec![row],
             Block::Paragraph(inlines)
             | Block::Heading { inlines, .. }
+            | Block::Caption(inlines)
             | Block::Env { title: inlines, .. }
             | Block::Item { term: inlines, .. } => {
                 let mut out = vec![];
@@ -333,6 +351,7 @@ impl BlockNode {
             Block::DisplayMath(row) => vec![row],
             Block::Paragraph(inlines)
             | Block::Heading { inlines, .. }
+            | Block::Caption(inlines)
             | Block::Env { title: inlines, .. }
             | Block::Item { term: inlines, .. } => {
                 let mut out = vec![];
@@ -352,6 +371,7 @@ impl BlockNode {
             Block::Diagram(_) => "diagram",
             Block::Env { .. } => "environment",
             Block::Item { .. } => "list item",
+            Block::Caption(_) => "caption",
         }
     }
 
@@ -668,7 +688,9 @@ impl Document {
             for block in blocks {
                 f(&mut block.id);
                 match &mut block.kind {
-                    Block::Paragraph(inlines) | Block::Heading { inlines, .. } => {
+                    Block::Paragraph(inlines)
+                    | Block::Heading { inlines, .. }
+                    | Block::Caption(inlines) => {
                         inline_ids(inlines, f);
                     }
                     Block::DisplayMath(row) => row.visit_ids(f),
@@ -704,7 +726,10 @@ impl Document {
 
     fn normalize_blocks(&mut self, blocks: &mut Vec<BlockNode>) {
         for block in blocks.iter_mut() {
-            if let Some(inlines) = block.kind.inlines_mut() {
+            if let Block::Paragraph(inlines)
+            | Block::Heading { inlines, .. }
+            | Block::Caption(inlines) = &mut block.kind
+            {
                 let old = std::mem::take(inlines);
                 *inlines = self.normalized_inlines(old);
             } else if let Block::Env { title, body, .. }
@@ -1131,6 +1156,16 @@ impl Document {
             label: String::new(),
             id: self.fresh_id(),
             kind: Block::Paragraph(inlines),
+        }
+    }
+
+    /// A figure's caption (the last block of its body).
+    pub fn caption(&mut self, inlines: Vec<InlineNode>) -> BlockNode {
+        let inlines = self.normalized_inlines(inlines);
+        BlockNode {
+            label: String::new(),
+            id: self.fresh_id(),
+            kind: Block::Caption(inlines),
         }
     }
 
