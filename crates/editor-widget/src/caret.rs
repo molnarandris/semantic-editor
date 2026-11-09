@@ -115,8 +115,15 @@ fn row_stops(
         depth,
         ..stop(block, path, offset, x, top, bottom, line)
     };
+    // An empty formula: after its placeholder, where typed text appears;
+    // an empty slot in a structure: in its middle.
     if row.nodes.is_empty() {
-        out.push(at(path, 0, rb.x + rb.w / 2.0));
+        let x = if depth == 1 {
+            rb.right()
+        } else {
+            rb.x + rb.w / 2.0
+        };
+        out.push(at(path, 0, x));
         return;
     }
     let mut right = rb.x;
@@ -503,7 +510,8 @@ mod tests {
     }
 
     /// A numbered display formula: the number belongs to no node, so the
-    /// caret ends right after the formula (also with one node).
+    /// caret ends right after the formula (also with one node), and in an
+    /// empty one sits right after the placeholder.
     #[test]
     fn numbered_display_formulas() {
         let mut world = BridgeWorld::new();
@@ -513,8 +521,8 @@ mod tests {
         };
         let mut d = Document::empty();
         let x = d.ident("x");
-        let one = d.display(vec![x]);
-        for block in [one] {
+        let (one, empty) = (d.display(vec![x]), d.display(vec![]));
+        for block in [one, empty] {
             let (snippet, map) = serialize_block(&block);
             let (src, offset) = block_document(&around, &snippet, 300.0);
             let doc = compile(&mut world, &src).unwrap();
