@@ -502,6 +502,34 @@ mod tests {
         );
     }
 
+    /// A numbered display formula: the number belongs to no node, so the
+    /// caret ends right after the formula (also with one node).
+    #[test]
+    fn numbered_display_formulas() {
+        let mut world = BridgeWorld::new();
+        let around = Around {
+            header: "#set math.equation(numbering: \"(1)\")\n".into(),
+            ..Around::default()
+        };
+        let mut d = Document::empty();
+        let x = d.ident("x");
+        let one = d.display(vec![x]);
+        for block in [one] {
+            let (snippet, map) = serialize_block(&block);
+            let (src, offset) = block_document(&around, &snippet, 300.0);
+            let doc = compile(&mut world, &src).unwrap();
+            let l = raw_layout(&world, &doc.pages()[0], offset).resolve(&map);
+            let row = block.rows()[0].id;
+            let rb = l.box_of(row).unwrap();
+            assert!(
+                rb.right() < 200.0,
+                "the row box stops before the number: {rb:?}"
+            );
+            let end = stops(&block, Some(&l)).last().unwrap().x;
+            assert!((end - rb.right()).abs() < 0.01, "{end} vs {rb:?}");
+        }
+    }
+
     /// In a numbered heading without text the caret sits after the number,
     /// where typed text appears.
     #[test]

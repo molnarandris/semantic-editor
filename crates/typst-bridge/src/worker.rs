@@ -111,8 +111,14 @@ struct Cached {
     raw: Arc<RawLayout>,
 }
 
+/// Bumped when the geometry extracted from a render changes, so layouts
+/// cached on disk by older builds are not reused. 2: generated text (an
+/// equation's number) no longer counts as the nodes after its element's start.
+const LAYOUT_VERSION: u32 = 2;
+
 fn cache_key(job: &CompileJob) -> u64 {
     let mut h = DefaultHasher::new();
+    LAYOUT_VERSION.hash(&mut h);
     job.around.hash(&mut h);
     job.snippet.hash(&mut h);
     job.width_pt.to_bits().hash(&mut h);

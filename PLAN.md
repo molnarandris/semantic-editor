@@ -537,5 +537,13 @@ Done before M11–M13, at the user's request (2026-11-08). Implementation notes:
 - In text: type `$` then Insert Diagram, which gives `$#box(…)$`, laid out like the
   box in text. A separate text inline kind was not added: a third inline kind would
   touch every place that relies on text and formulas alternating.
+- Fix (2026-11-09, user report): with a numbered display formula the caret ended
+  after the number when the formula had one node, and sat in the middle of the line
+  in an empty one. Typst gives generated text (the number "(1)") the equation's span
+  with a delta counting its own chars, so its third char landed on the formula's
+  first node. A glyph's delta now counts only for spans of leaf syntax nodes (source
+  text); otherwise it stays at the element's start (`layout.rs`, `span_info`). Same
+  for heading numbers longer than the `= ` before the text. `LAYOUT_VERSION` in the
+  render cache key, so cached layouts from older builds are not reused.
 
 Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing.

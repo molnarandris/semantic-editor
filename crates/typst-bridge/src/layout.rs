@@ -10,9 +10,9 @@ use std::ops::Range;
 
 use model::NodeId;
 use serde::{Deserialize, Serialize};
-use typst::WorldExt;
 use typst::layout::{Abs, Frame, FrameItem, Point, Transform};
 use typst::syntax::Span;
+use typst::{World, WorldExt};
 use typst_layout::Page;
 
 use crate::compile::BLOCK_PAD_PT;
@@ -114,7 +114,8 @@ struct Mark {
 
 struct Walker<'a> {
     world: &'a BridgeWorld,
-    ranges: HashMap<Span, Option<Range<usize>>>,
+    /// Source range of a span, and whether it is a leaf (source text).
+    ranges: HashMap<Span, Option<(Range<usize>, bool)>>,
     marks: Vec<Mark>,
     /// Text glyphs: (source offset, cluster char count, rect, baseline).
     text: Vec<(usize, usize, Rect, f64)>,
@@ -122,10 +123,22 @@ struct Walker<'a> {
 
 impl Walker<'_> {
     fn range(&mut self, span: Span) -> Option<Range<usize>> {
+        self.span_info(span).map(|(range, _)| range)
+    }
+
+    fn span_info(&mut self, span: Span) -> Option<(Range<usize>, bool)> {
         let world = self.world;
         self.ranges
             .entry(span)
-            .or_insert_with(|| world.range(span))
+            .or_insert_with(|| {
+                let range = world.range(span)?;
+                let leaf = world
+                    .source(span.id()?)
+                    .ok()
+                    .and_then(|s| s.find(span).map(|n| n.children().len() == 0))
+                    .unwrap_or(false);
+                Some((range, leaf))
+            })
             .clone()
     }
 
@@ -161,10 +174,15 @@ impl Walker<'_> {
                         let rect = Rect::from_corners(a, b);
                         x += advance;
                         let (span, delta) = glyph.span;
-                        let Some(range) = self.range(span) else {
+                        let Some((range, leaf)) = self.span_info(span) else {
                             continue;
                         };
-                        let offset = range.start + delta as usize;
+                        // The delta counts chars into source text. Text
+                        // Typst generates (an equation's or heading's
+                        // number) has the element's span with a delta
+                        // counting its own chars, which would run into the
+                        // nodes after the element's start: it stays there.
+                        let offset = range.start + if leaf { delta as usize } else { 0 };
                         let chars = text.text[glyph.range()].chars().count();
                         let baseline = pos.transform(ts).y.to_pt();
                         self.marks.push(Mark { offset, rect });
