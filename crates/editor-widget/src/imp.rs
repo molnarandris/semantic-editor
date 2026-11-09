@@ -298,6 +298,7 @@ impl WidgetImpl for SemEditor {
         snapshot.append_color(&gdk::RGBA::WHITE, &paper);
         if obj.has_focus() {
             self.snapshot_env_outline(snapshot, x0, scroll);
+            self.snapshot_call_outline(snapshot, x0, scroll);
             self.snapshot_highlights(snapshot, x0, scroll);
         }
 
@@ -661,6 +662,39 @@ impl SemEditor {
             (1.0, 0.35)
         };
         snapshot.append_border(&outline, &[width; 4], &[blue(alpha); 4]);
+    }
+
+    /// The inline call the caret is in (bold, italic, `#name[…]`): tinted
+    /// and outlined like an environment, one box per line it spans.
+    fn snapshot_call_outline(&self, snapshot: &gtk::Snapshot, x0: f64, scroll: f64) {
+        let zoom = self.zoom.get();
+        let (block, call) = {
+            let ed = self.editor.borrow();
+            let Some(call) = ed.call_focus() else {
+                return;
+            };
+            (ed.caret().block, call)
+        };
+        let Some(index) = self.editor.borrow().doc().top_index(block) else {
+            return;
+        };
+        let Some(&top) = self.block_tops().get(index) else {
+            return;
+        };
+        let stops = self.block_stops(index);
+        let pad = 2.0 * zoom;
+        let blue = |a: f32| gdk::RGBA::new(0.21, 0.52, 0.89, a);
+        for r in caret::call_outline(&stops, block, &call) {
+            let rect = graphene::Rect::new(
+                (x0 + r.x * zoom - pad) as f32,
+                (top + r.y * zoom - scroll - pad) as f32,
+                (r.w * zoom + 2.0 * pad) as f32,
+                (r.h * zoom + 2.0 * pad) as f32,
+            );
+            let outline = gsk::RoundedRect::from_rect(rect, 2.0);
+            snapshot.append_color(&blue(0.04), &rect);
+            snapshot.append_border(&outline, &[1.0; 4], &[blue(0.35); 4]);
+        }
     }
 
     /// The alignment points and line breaks of the formula being edited,

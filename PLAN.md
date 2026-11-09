@@ -653,3 +653,7 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
   the box only as a fallback).
 - Not yet: Ctrl+B/Ctrl+I on a selection (no text selection yet); editing a call's
   arguments after typing them.
+- Follow-up (user request): the call the caret is in (bold, italic, any `#name[…]`)
+  is tinted and outlined like an environment: `Editor::call_focus` gives the
+  innermost call, `caret::call_outline` one box per line from the stops inside it
+  (a wrapped call gets a box on each line), drawn by `snapshot_call_outline`.

@@ -529,6 +529,39 @@ pub fn formula_marks(doc: &Document, caret: &CursorPath, stops: &[Stop]) -> Vec<
     out
 }
 
+/// The outline of the inline call at `call` (a path) in `block`: one box
+/// per line its text spans, from the stops inside it (top, bottom and the
+/// extent of each line).
+pub fn call_outline(stops: &[Stop], block: model::NodeId, call: &[Step]) -> Vec<Rect> {
+    let mut body = call.to_vec();
+    body.push(Step::Body);
+    let inside: Vec<Stop> = stops
+        .iter()
+        .filter(|s| s.cursor.block == block && s.cursor.path.starts_with(&body))
+        .cloned()
+        .collect();
+    lines(&inside)
+        .into_iter()
+        .map(|line| {
+            let (mut x0, mut x1) = (f64::MAX, f64::MIN);
+            let (mut top, mut bottom) = (f64::MAX, f64::MIN);
+            for &i in &line {
+                let s = &inside[i];
+                x0 = x0.min(s.x);
+                x1 = x1.max(s.x);
+                top = top.min(s.top);
+                bottom = bottom.max(s.bottom);
+            }
+            Rect {
+                x: x0,
+                y: top,
+                w: x1 - x0,
+                h: bottom - top,
+            }
+        })
+        .collect()
+}
+
 /// The stop for a caret; if it is not among the stops (layout not updated
 /// yet), the nearest earlier position in the same container.
 pub fn find<'a>(stops: &'a [Stop], cursor: &CursorPath) -> Option<&'a Stop> {
@@ -1047,6 +1080,32 @@ mod tests {
             let xs: Vec<_> = s.iter().filter(|s| s.depth == 0).map(|s| s.x).collect();
             assert!(xs.windows(2).all(|w| w[0] <= w[1] + 0.01), "{keys}: {xs:?}");
         }
+    }
+
+    /// The outline of a call covers its text, one box per line.
+    #[test]
+    fn outline_of_an_inline_call() {
+        let mut e = model::Editor::new(Document::new());
+        e.insert_text("a *bold* c");
+        let block = e.doc().blocks[0].clone();
+        let l = layout_of(&block, 300.0);
+        let s = stops(&block, Some(&l));
+        let call = [Step::Index(1)];
+        let boxes = call_outline(&s, block.id, &call);
+        assert_eq!(boxes.len(), 1);
+        let bold = l.box_of(block.kind.inlines().unwrap()[1].id).unwrap();
+        let b = boxes[0];
+        assert!(
+            (b.x - bold.x).abs() < 0.5 && (b.right() - bold.right()).abs() < 0.5,
+            "{b:?} {bold:?}"
+        );
+        // Wrapped over lines: a box per line.
+        let mut e = model::Editor::new(Document::new());
+        e.insert_text("a *bold words that go on and on over the end of a narrow line* c");
+        let block = e.doc().blocks[0].clone();
+        let l = layout_of(&block, 120.0);
+        let s = stops(&block, Some(&l));
+        assert!(call_outline(&s, block.id, &call).len() > 1);
     }
 
     #[test]

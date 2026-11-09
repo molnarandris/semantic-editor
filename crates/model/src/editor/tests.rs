@@ -1248,3 +1248,19 @@ fn an_empty_call_left_goes() {
         assert_eq!(texts(&e), ["a **b"]);
     }
 }
+
+#[test]
+fn call_focus_is_the_innermost_call() {
+    let mut e = Editor::default();
+    e.insert_text("a *b _c $x");
+    let p = |v: &[Step]| Some(v.to_vec());
+    assert_eq!(
+        e.call_focus(),
+        p(&[Step::Index(1), Step::Body, Step::Index(1)])
+    );
+    e.insert_text("$");
+    e.escape();
+    assert_eq!(e.call_focus(), p(&[Step::Index(1)]));
+    e.escape();
+    assert_eq!(e.call_focus(), None);
+}

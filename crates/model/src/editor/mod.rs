@@ -891,6 +891,15 @@ impl Editor {
         Some((self.doc.env_around(parent)?, true))
     }
 
+    /// The path of the innermost inline call (bold, italic, `#name[…]`)
+    /// holding the caret, in the caret's block, to outline it.
+    pub fn call_focus(&self) -> Option<Vec<Step>> {
+        let block = self.doc.block(self.caret.block)?;
+        let at = self.doc.inline_at(block, &self.caret.path)?;
+        let (_, path) = self.call_around(&self.caret.path[..at.prefix])?;
+        Some(path)
+    }
+
     /// Whether the next Backspace unwraps the focused environment.
     pub fn env_marked(&self) -> bool {
         matches!(self.selected, Some(Selected::Unwrap { .. }))
