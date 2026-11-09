@@ -98,7 +98,9 @@ impl Selection {
                 };
                 Some(match inlines.get(*i)?.kind {
                     Inline::Text(_) => ((*i, c.offset), (*i, c.offset)),
-                    Inline::Math(_) | Inline::Call { .. } => ((*i, 0), (*i + 1, 0)),
+                    Inline::Math(_) | Inline::Call { .. } | Inline::Raw(_) => {
+                        ((*i, 0), (*i + 1, 0))
+                    }
                 })
             };
             let (sa, ea) = bound(a)?;

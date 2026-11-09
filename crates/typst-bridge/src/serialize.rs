@@ -428,7 +428,8 @@ impl Writer {
         for (i, inline) in inlines.iter().enumerate() {
             let line_start = at_line_start && i == 0;
             self.node(inline.id, |w| match &inline.kind {
-                Inline::Text(s) => w.text(inline.id, s, line_start),
+                Inline::Text(s) => w.text(inline.id, s, line_start, i + 1 == inlines.len()),
+                Inline::Raw(s) => w.raw(inline.id, s),
                 Inline::Math(row) => {
                     w.out.push('$');
                     w.row(row);
@@ -479,14 +480,22 @@ impl Writer {
         }
     }
 
-    fn text(&mut self, id: NodeId, s: &str, line_start: bool) {
+    /// A text inline; `last` if it ends its inline list (a line break at
+    /// its end then leaves an empty line, which the editor shows).
+    fn text(&mut self, id: NodeId, s: &str, line_start: bool, last: bool) {
         let mut starts = Vec::with_capacity(s.len() + 1);
         let chars: Vec<char> = s.chars().collect();
         // "1." at the start of a line would become a numbered list.
         let digits = chars.iter().take_while(|c| c.is_ascii_digit()).count();
         let enum_dot = line_start && digits > 0 && chars.get(digits) == Some(&'.');
+        // An empty line after a line break shows a transparent `x` in the
+        // editor, at the position after the break, so the caret has a place.
+        let mut placeholder = false;
         for (i, &c) in chars.iter().enumerate() {
             starts.push(self.out.len());
+            if std::mem::take(&mut placeholder) {
+                self.out.push_str("x]");
+            }
             let next = chars.get(i + 1).copied();
             let escape = match c {
                 '\\' | '#' | '$' | '*' | '_' | '`' | '<' | '@' | '[' | ']' | '~' => true,
@@ -499,7 +508,18 @@ impl Writer {
                 _ => false,
             };
             match c {
-                '\n' | '\r' => self.out.push(' '),
+                // A line break; written with a space so it also works in a
+                // heading, where a newline would end it.
+                '\n' => {
+                    self.out.push_str("\\ ");
+                    let empty_line = next == Some('\n') || next.is_none() && last;
+                    if empty_line && self.style == Style::Edit {
+                        self.out.push_str("#text(fill: rgb(0, 0, 0, 0))[");
+                        placeholder = true;
+                    }
+                }
+                '\r' => self.out.push(' '),
+                '\u{a0}' => self.out.push('~'),
                 _ if escape => {
                     self.out.push('\\');
                     self.out.push(c);
@@ -508,6 +528,39 @@ impl Writer {
             }
         }
         starts.push(self.out.len());
+        if placeholder {
+            self.out.push_str("x]");
+        }
+        self.map.texts.push((id, starts));
+    }
+
+    /// Inline code, `` `…` ``, with every char mapped. Empty code shows a
+    /// transparent `x` in the editor; code holding a backtick is written as
+    /// a `raw` call.
+    fn raw(&mut self, id: NodeId, s: &str) {
+        let mut starts = Vec::with_capacity(s.len() + 1);
+        if s.is_empty() && self.style == Style::Edit {
+            self.out.push_str("#text(fill: rgb(0, 0, 0, 0))[");
+            starts.push(self.out.len());
+            self.out.push_str("x]");
+            self.map.texts.push((id, starts));
+            return;
+        }
+        let call = s.is_empty() || s.contains('`');
+        self.out.push_str(if call { "#raw(\"" } else { "`" });
+        for c in s.chars() {
+            starts.push(self.out.len());
+            match c {
+                '"' | '\\' if call => {
+                    self.out.push('\\');
+                    self.out.push(c);
+                }
+                '\n' if call => self.out.push_str("\\n"),
+                _ => self.out.push(c),
+            }
+        }
+        starts.push(self.out.len());
+        self.out.push_str(if call { "\")" } else { "`" });
         self.map.texts.push((id, starts));
     }
 
@@ -1594,6 +1647,8 @@ mod inline_call_tests {
             "*a _b *c* d_ e* x#strong[y]z",
             "see #link(\"https://typst.app\")[the _site_]. #underline[u](1)",
             "*$x^2$ is* _$y$_",
+            "run `ls -l` and `a\"b` -- or --- x~y z\\ next\\ \\ end",
+            "`code` *`in bold`*",
         ];
         for keys in texts {
             let mut e = model::Editor::new(Document::new());

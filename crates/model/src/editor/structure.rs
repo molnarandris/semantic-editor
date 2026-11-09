@@ -81,6 +81,9 @@ impl Editor {
             return self.leave_block(place);
         }
         let Some(p) = self.row_pos() else {
+            if self.raw_pos().is_some() {
+                return self.leave_raw();
+            }
             if self.text_pos().is_some_and(|pos| pos.nested()) {
                 return self.leave_call();
             }
@@ -110,6 +113,9 @@ impl Editor {
     pub fn enter(&mut self) -> bool {
         self.finish_word();
         self.selected = None;
+        if let Some(pos) = self.raw_pos() {
+            self.caret = pos.at(pos.inline + 1, 0);
+        }
         if let Some(p) = self.row_pos() {
             if let Some((mut path, i)) = p.formula() {
                 path.push(Step::Index(i + 1));
@@ -219,7 +225,7 @@ impl Editor {
             });
         }
         let first = match prefix.is_empty() {
-            true => self.doc.text(tail.trim_start()),
+            true => self.doc.text(tail.trim_start_matches(' ')),
             false => self.doc.text(&tail),
         };
         let mut rest = vec![first];

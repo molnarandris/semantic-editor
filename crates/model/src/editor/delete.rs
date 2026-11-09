@@ -102,6 +102,22 @@ impl Editor {
         if let Some(block) = self.source_block().or_else(|| self.edge_env()) {
             return self.select(Selected::Block { block });
         }
+        if let Some(pos) = self.raw_pos() {
+            // Inline code: chars go; at its start, empty code goes, else ←.
+            if pos.offset > 0 {
+                let op = Op::Delete {
+                    seq: Seq::Text(pos.inlines[pos.inline].id),
+                    index: pos.offset - 1,
+                    count: 1,
+                };
+                let after = pos.at(pos.inline, pos.offset - 1);
+                return self.commit(vec![op], after, Last::Deleting);
+            }
+            if pos.len == 0 {
+                return self.leave_raw();
+            }
+            return self.move_left();
+        }
         let Some(pos) = self.text_pos() else {
             return false;
         };
@@ -366,13 +382,18 @@ impl Editor {
     /// doubled or leading the paragraph. Returns the op and the new caret.
     pub(super) fn delete_char(&self, pos: &TextPos, k: usize) -> (Op, CursorPath) {
         let chars = pos.chars();
-        let ws = |i: usize| chars.get(i).is_some_and(|c| c.is_whitespace());
-        let leading = k == 0 && pos.inline == 0 && !pos.nested() && ws(1);
+        let ws = |i: usize| chars.get(i).is_some_and(|&c| collapses(c));
+        let space = |i: usize| chars.get(i) == Some(&' ');
+        // A space that would lead the paragraph or a line goes too.
+        let leading = (k == 0 && pos.inline == 0 && !pos.nested() || k > 0 && chars[k - 1] == '\n')
+            && space(k + 1);
         let doubled = k > 0 && ws(k - 1) && ws(k + 1);
-        let (index, count) = if doubled {
+        let (index, count) = if leading {
+            (k, 2)
+        } else if doubled && space(k - 1) {
             (k - 1, 2)
-        } else if leading {
-            (0, 2)
+        } else if doubled && space(k + 1) {
+            (k, 2)
         } else {
             (k, 1)
         };
@@ -396,6 +417,18 @@ impl Editor {
         }
         if let Some(block) = self.source_block().or_else(|| self.edge_env()) {
             return self.select(Selected::Block { block });
+        }
+        if let Some(pos) = self.raw_pos() {
+            if pos.offset == pos.len {
+                return self.move_right();
+            }
+            let op = Op::Delete {
+                seq: Seq::Text(pos.inlines[pos.inline].id),
+                index: pos.offset,
+                count: 1,
+            };
+            let after = self.caret.clone();
+            return self.commit(vec![op], after, Last::Deleting);
         }
         if let Some(p) = self.row_pos() {
             self.finish_word();
@@ -447,8 +480,8 @@ impl Editor {
 /// The text to append to `head` when joining it with `tail`, without
 /// doubling a space at the seam or leading the paragraph with one.
 pub(super) fn joined_tail(head: &str, tail: &str, head_starts_block: bool) -> String {
-    if head.ends_with(char::is_whitespace) || head.is_empty() && head_starts_block {
-        tail.trim_start().into()
+    if head.ends_with(collapses) || head.is_empty() && head_starts_block {
+        tail.trim_start_matches(' ').into()
     } else {
         tail.into()
     }

@@ -135,8 +135,10 @@ fn walk_inlines<'a>(inlines: &'a [InlineNode], path: &[Step]) -> Result<Target<'
     };
     let inline = inlines.get(*i).ok_or(0usize)?;
     match &inline.kind {
-        Inline::Text(text) if path.len() == 1 => Ok(Target::Text { inline, text }),
-        Inline::Text(_) => Err(1),
+        Inline::Text(text) | Inline::Raw(text) if path.len() == 1 => {
+            Ok(Target::Text { inline, text })
+        }
+        Inline::Text(_) | Inline::Raw(_) => Err(1),
         Inline::Math(row) => walk_row(row, &path[1..]).map_err(|n| n + 1),
         Inline::Call { body, .. } => match path.get(1) {
             Some(Step::Body) => walk_inlines(body, &path[2..]).map_err(|n| n + 2),
@@ -319,7 +321,7 @@ impl Document {
                 let mut path = prefix.to_vec();
                 path.push(Step::Index(i));
                 match &inline.kind {
-                    Inline::Text(s) => {
+                    Inline::Text(s) | Inline::Raw(s) => {
                         for k in 0..=s.chars().count() {
                             out.push(CursorPath {
                                 block,
@@ -416,6 +418,13 @@ impl Document {
                             i = *j;
                         }
                         (Inline::Math(_), _) => break,
+                        (Inline::Raw(_), _) => {
+                            crumbs.push(Crumb {
+                                label: "code",
+                                path_len: consumed + 1,
+                            });
+                            return crumbs;
+                        }
                         _ => return crumbs,
                     }
                 }

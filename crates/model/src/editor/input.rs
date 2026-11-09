@@ -52,6 +52,9 @@ impl Editor {
         if self.row_pos().is_some() {
             return self.math_char(c);
         }
+        if self.raw_pos().is_some() {
+            return self.raw_char(c);
+        }
         self.selected = None;
         // Just before/after an environment: typing starts a paragraph there.
         if let Some((place, offset)) = self.edge() {
@@ -65,7 +68,7 @@ impl Editor {
         if c == '$' {
             return self.insert_formula();
         }
-        if matches!(c, '*' | '_' | ']')
+        if matches!(c, '*' | '_' | ']' | '`' | '~' | '-' | ' ')
             && let Some(done) = self.markup_char(c)
         {
             return done;
@@ -174,17 +177,21 @@ impl Editor {
             return self.insert_inline(call, strip);
         }
         let mut space_before = pos.offset == 0 && pos.inline == 0 && !pos.nested()
-            || pos.offset > 0 && chars[pos.offset - 1].is_whitespace();
+            || pos.offset > 0 && collapses(chars[pos.offset - 1]);
         let mut out = String::new();
         for c in s.chars() {
-            let c = if c.is_whitespace() { ' ' } else { c };
+            let c = if c.is_whitespace() && c != NBSP {
+                ' '
+            } else {
+                c
+            };
             if c.is_control() || c == ' ' && space_before {
                 continue;
             }
             space_before = c == ' ';
             out.push(c);
         }
-        if chars.get(pos.offset).is_some_and(|c| c.is_whitespace()) && out.ends_with(' ') {
+        if chars.get(pos.offset).is_some_and(|&c| collapses(c)) && out.ends_with(' ') {
             out.pop();
         }
         let s = out;
@@ -243,29 +250,50 @@ impl Editor {
         self.commit(ops, after, Last::Other)
     }
 
-    /// `*` (bold), `_` (italic) and `]` in text, as in Typst: `*` starts a
-    /// `strong` call or leaves the one the caret is in; after a letter or
-    /// digit it is just a star (`a*b`), and `\*` makes a literal one. `]`
-    /// leaves the innermost call. `None`: the char is plain text.
+    /// Typst's markup in text: `*` (bold) and `_` (italic) start a call or
+    /// leave the one the caret is in, but after a letter or digit they are
+    /// just chars (`a*b`, `snake_case`); `]` leaves the innermost call; `` ` ``
+    /// starts inline code; `~` is a non-breaking space; `--` an en dash,
+    /// `---` an em dash; `\` then space a line break. A `\` before any of
+    /// them makes the char literal. `None`: the char is plain text.
     fn markup_char(&mut self, c: char) -> Option<bool> {
         let pos = self.text_pos()?;
         let chars = pos.chars();
         let before = pos.offset.checked_sub(1).map(|k| chars[k]);
         let call = self.call_around(&pos.prefix).map(|(name, _)| name);
-        if before == Some('\\') {
+        let text = pos.inlines[pos.inline].id;
+        let typing = Last::Typing { space: false };
+        // Replace the char before the caret by `by`.
+        let retype = |e: &mut Self, by: char| {
             let op = Op::Replace {
-                seq: Seq::Text(pos.inlines[pos.inline].id),
-                index: pos.offset - 1,
+                seq: Seq::Text(text),
+                index: e.caret.offset - 1,
                 count: 1,
-                items: Items::Text(c.into()),
+                items: Items::Text(by.into()),
             };
-            let after = self.caret.clone();
-            return Some(self.commit(vec![op], after, Last::Typing { space: false }));
+            let after = e.caret.clone();
+            e.commit(vec![op], after, typing)
+        };
+        if before == Some('\\') {
+            return Some(retype(self, if c == ' ' { '\n' } else { c }));
         }
         let name = match c {
             '*' => "strong",
             '_' => "emph",
-            _ => return call.map(|_| self.leave_call()),
+            ']' => return call.map(|_| self.leave_call()),
+            '`' => {
+                let node = self.doc.raw_inline("");
+                return Some(self.insert_inline(node, 0));
+            }
+            '~' => return Some(self.text_insert(&NBSP.to_string())),
+            '-' => {
+                return match before {
+                    Some('-') => Some(retype(self, '–')),
+                    Some('–') => Some(retype(self, '—')),
+                    _ => None,
+                };
+            }
+            _ => return None,
         };
         if call.as_deref() == Some(name) {
             return Some(self.leave_call());
@@ -275,6 +303,65 @@ impl Editor {
         }
         let node = self.doc.inline_call(name, "", vec![]);
         Some(self.insert_inline(node, 0))
+    }
+
+    /// Typing in inline code: everything is kept as typed; `` ` `` ends it.
+    fn raw_char(&mut self, c: char) -> bool {
+        self.selected = None;
+        let Some(pos) = self.raw_pos() else {
+            return false;
+        };
+        if c == '`' {
+            return self.leave_raw();
+        }
+        if c.is_control() {
+            return false;
+        }
+        let op = Op::Insert {
+            seq: Seq::Text(pos.inlines[pos.inline].id),
+            index: pos.offset,
+            items: Items::Text(c.into()),
+        };
+        let after = pos.at(pos.inline, pos.offset + 1);
+        self.commit(vec![op], after, Last::Typing { space: c == ' ' })
+    }
+
+    /// Leave the inline code the caret is in: caret just after it. Empty
+    /// code goes.
+    pub(super) fn leave_raw(&mut self) -> bool {
+        let Some(pos) = self.raw_pos() else {
+            return false;
+        };
+        if pos.len == 0 {
+            let path = pos.at(pos.inline, 0).path;
+            let block = pos.block.id;
+            return match self.remove_inline(block, &path) {
+                Some((ops, after)) => self.commit(ops, after, Last::Other),
+                None => false,
+            };
+        }
+        let after = pos.at(pos.inline + 1, 0);
+        self.jump(after)
+    }
+
+    /// Shift+Enter: a line break in text (`\` in Typst) or in a formula.
+    pub fn line_break(&mut self) -> bool {
+        self.finish_word();
+        self.selected = None;
+        if let Some(p) = self.row_pos() {
+            let node = self.doc.node(MathKind::Linebreak);
+            return self.type_node(&p, node);
+        }
+        let Some(pos) = self.text_pos() else {
+            return false;
+        };
+        let op = Op::Insert {
+            seq: Seq::Text(pos.inlines[pos.inline].id),
+            index: pos.offset,
+            items: Items::Text("\n".into()),
+        };
+        let after = pos.at(pos.inline, pos.offset + 1);
+        self.commit(vec![op], after, Last::Other)
     }
 
     /// The name and path of the inline call whose body holds the inline

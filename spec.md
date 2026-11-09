@@ -332,6 +332,14 @@ functions and packages.
   Backspace after a call selects it, then deletes it; in an empty call it goes. Enter
   inside a call splits it with the paragraph. Typst draws everything; export writes
   `*…*`/`_…_` where Typst reads them back the same, else `#strong[…]`.
+  While the caret is in a call, it is outlined like an environment (one box per
+  line it spans; user request 2026-11-09).
+- M13b decisions (2026-11-09): inline code `` `…` `` is its own inline (`Inline::Raw`),
+  edited in place: `` ` `` starts it and `` ` `` ends it, everything typed in between
+  is kept verbatim. A line break is a `\n` in the text (written `\ `), typed as in
+  Typst (`\` then space) or with Shift+Enter. `~` is a non-breaking space, `--` an en
+  dash, `---` an em dash, stored as the Unicode chars (`\~` and `\-` type the literal
+  chars). Not done: soft hyphen `-?`, `...`, smart quotes (Typst already sets them).
 
 ### M14 — Nested blocks: theorem environments and lists
 

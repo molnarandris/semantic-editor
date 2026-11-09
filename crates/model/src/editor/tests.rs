@@ -28,6 +28,7 @@ fn inline_text(v: &[InlineNode]) -> String {
         .map(|i| match &i.kind {
             Inline::Text(s) => s.clone(),
             Inline::Math(_) => "$".into(),
+            Inline::Raw(s) => format!("`{s}`"),
             Inline::Call { name, args, body } => match name.as_str() {
                 "strong" => format!("*{}*", inline_text(body)),
                 "emph" => format!("_{}_", inline_text(body)),
@@ -1263,4 +1264,62 @@ fn call_focus_is_the_innermost_call() {
     assert_eq!(e.call_focus(), p(&[Step::Index(1)]));
     e.escape();
     assert_eq!(e.call_focus(), None);
+}
+
+#[test]
+fn inline_code() {
+    let mut e = Editor::default();
+    e.insert_text("run `a *b* $x` now");
+    assert_eq!(texts(&e), ["run `a *b* $x` now"]);
+    // Backspace at the start of the text after it selects it.
+    caret_at(&mut e, 0, 2, 0);
+    assert!(e.backspace());
+    assert!(e.selected().is_some());
+    // Edited in place: the caret goes into it with ←.
+    e.escape();
+    e.move_left();
+    e.insert_text("!");
+    assert_eq!(texts(&e), ["run `a *b* $x!` now"]);
+    e.backspace();
+    e.backspace();
+    assert_eq!(texts(&e), ["run `a *b* $` now"]);
+    // Empty code goes when left.
+    let mut e = Editor::default();
+    e.insert_text("a ``b");
+    assert_eq!(texts(&e), ["a b"]);
+    let mut e = Editor::default();
+    e.insert_text("a `");
+    e.move_left();
+    assert_eq!(texts(&e), ["a "]);
+    e.doc().check_invariants().unwrap();
+    // `\`` is a literal backtick.
+    let mut e = Editor::default();
+    e.insert_text("a \\`");
+    assert_eq!(texts(&e), ["a `"]);
+}
+
+#[test]
+fn dashes_spaces_and_line_breaks() {
+    let mut e = Editor::default();
+    e.insert_text("1--2, a --- b, x~y, \\- \\~ - z");
+    assert_eq!(texts(&e), ["1–2, a — b, x\u{a0}y, - ~ - z"]);
+    // `\` then space, or Shift+Enter: a line break; spaces after it are
+    // not kept (Typst drops them).
+    let mut e = Editor::default();
+    e.insert_text("a\\  b");
+    assert!(e.line_break());
+    e.insert_text(" c");
+    assert_eq!(texts(&e), ["a\nb\nc"]);
+    // Backspace takes it back like a char.
+    caret_at(&mut e, 0, 0, 2);
+    assert!(e.backspace());
+    assert_eq!(texts(&e), ["ab\nc"]);
+    // In a formula, Shift+Enter is a formula line break.
+    let mut e = Editor::default();
+    e.insert_text("$a");
+    assert!(e.line_break());
+    let Inline::Math(row) = &e.doc().blocks[0].kind.inlines().unwrap()[1].kind else {
+        panic!()
+    };
+    assert_eq!(row.nodes[1].kind, MathKind::Linebreak);
 }

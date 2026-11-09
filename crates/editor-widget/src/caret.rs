@@ -298,7 +298,7 @@ fn list_stops(
     let mut per: Vec<Vec<Option<Stop>>> = inlines
         .iter()
         .map(|i| match &i.kind {
-            Inline::Text(s) => vec![None; s.chars().count() + 1],
+            Inline::Text(s) | Inline::Raw(s) => vec![None; s.chars().count() + 1],
             Inline::Math(_) | Inline::Call { .. } => vec![],
         })
         .collect();
@@ -348,7 +348,7 @@ fn list_stops(
                     slot.get_or_insert(s);
                 }
             }
-            Inline::Text(_) => {
+            Inline::Text(_) | Inline::Raw(_) => {
                 let slots = &mut per[i];
                 let glyphs = l.glyphs.iter().filter(|g| g.node == inline.id);
                 // A position takes the glyph that starts there (so a wrapped
@@ -384,6 +384,21 @@ fn list_stops(
                 }
                 for s in ends {
                     if let Some(slot) = slots.get_mut(s.cursor.offset) {
+                        slot.get_or_insert(s);
+                    }
+                }
+                // Inline code: the texts around it end and start at its box.
+                if let (Inline::Raw(_), Some(r)) = (&inline.kind, l.box_of(inline.id)) {
+                    let line = line_near(l, r);
+                    if i > 0 {
+                        let offset = per[i - 1].len().saturating_sub(1);
+                        let s = stop(block, at(i - 1), offset, r.x, r.y, r.bottom(), line);
+                        if let Some(slot) = per[i - 1].last_mut() {
+                            slot.get_or_insert(s);
+                        }
+                    }
+                    if let Some(slot) = per.get_mut(i + 1).and_then(|v| v.first_mut()) {
+                        let s = stop(block, at(i + 1), 0, r.right(), r.y, r.bottom(), line);
                         slot.get_or_insert(s);
                     }
                 }
@@ -1064,6 +1079,10 @@ mod tests {
     #[test]
     fn stops_in_inline_calls() {
         for keys in [
+            "a `code` c",
+            "`x y` and `` and `a`",
+            "a\\ b\\ ",
+            "a~b -- c",
             "a *bold* c",
             "*x _y $a$ z_*.",
             "see #underline[it] now",
@@ -1077,9 +1096,42 @@ mod tests {
             let s = stops(&block, Some(&l));
             let got: Vec<_> = s.iter().map(|s| s.cursor.clone()).collect();
             assert_eq!(got, e.doc().positions(&block), "{keys}");
-            let xs: Vec<_> = s.iter().filter(|s| s.depth == 0).map(|s| s.x).collect();
-            assert!(xs.windows(2).all(|w| w[0] <= w[1] + 0.01), "{keys}: {xs:?}");
+            // Left to right on a line; a line break starts a new line.
+            let xs: Vec<_> = s
+                .iter()
+                .filter(|s| s.depth == 0)
+                .map(|s| (s.x, s.line))
+                .collect();
+            assert!(
+                xs.windows(2)
+                    .all(|w| w[0].0 <= w[1].0 + 0.01 || w[1].1 > w[0].1 + 2.0),
+                "{keys}: {xs:?}"
+            );
         }
+        // Every char of inline code has its own place (monospace: even steps).
+        let mut e = model::Editor::new(Document::new());
+        e.insert_text("a `code` c");
+        let block = e.doc().blocks[0].clone();
+        let s = stops(&block, Some(&layout_of(&block, 300.0)));
+        let xs: Vec<f64> = s
+            .iter()
+            .filter(|s| s.cursor.path == [Step::Index(1)])
+            .map(|s| s.x)
+            .collect();
+        let steps: Vec<f64> = xs.windows(2).map(|w| w[1] - w[0]).collect();
+        assert_eq!(xs.len(), 5);
+        assert!(
+            steps.iter().all(|d| (d - steps[0]).abs() < 0.1 && *d > 3.0),
+            "{xs:?}"
+        );
+        // After a line break the caret is at the start of the next line, on
+        // an empty one too.
+        let mut e = model::Editor::new(Document::new());
+        e.insert_text("ab\\ ");
+        let block = e.doc().blocks[0].clone();
+        let s = stops(&block, Some(&layout_of(&block, 300.0)));
+        assert_eq!(s.len(), 4);
+        assert!(s[3].x.abs() < 0.5 && s[3].line > s[2].line + 5.0, "{s:?}");
     }
 
     /// The outline of a call covers its text, one box per line.

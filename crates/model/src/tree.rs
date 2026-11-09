@@ -80,6 +80,9 @@ pub struct InlineNode {
 pub enum Inline {
     Text(String),
     Math(MathRow),
+    /// Inline code, `` `…` ``: its text kept verbatim, set in a monospace
+    /// font. Edited in place like text.
+    Raw(String),
     /// A call with a content body in text: `#strong[…]` (written `*…*`),
     /// `#emph[…]` (`_…_`), `#cl[…]`, `#link("…")[…]`. Typst draws it; the
     /// body is edited in place and alternates like a paragraph's inlines.
@@ -113,6 +116,7 @@ impl InlineNode {
         match &self.kind {
             Inline::Text(_) => "text",
             Inline::Math(_) => "math",
+            Inline::Raw(_) => "code",
             Inline::Call { name, .. } => match name.as_str() {
                 "strong" => "bold",
                 "emph" => "italic",
@@ -129,7 +133,7 @@ fn inline_rows<'a>(inlines: &'a [InlineNode], out: &mut Vec<&'a MathRow>) {
         match &inline.kind {
             Inline::Math(row) => out.push(row),
             Inline::Call { body, .. } => inline_rows(body, out),
-            Inline::Text(_) => {}
+            Inline::Text(_) | Inline::Raw(_) => {}
         }
     }
 }
@@ -139,7 +143,7 @@ fn inline_rows_mut<'a>(inlines: &'a mut [InlineNode], out: &mut Vec<&'a mut Math
         match &mut inline.kind {
             Inline::Math(row) => out.push(row),
             Inline::Call { body, .. } => inline_rows_mut(body, out),
-            Inline::Text(_) => {}
+            Inline::Text(_) | Inline::Raw(_) => {}
         }
     }
 }
@@ -584,7 +588,7 @@ impl Document {
                 match &mut inline.kind {
                     Inline::Math(row) => row.visit_ids(f),
                     Inline::Call { body, .. } => inline_ids(body, f),
-                    Inline::Text(_) => {}
+                    Inline::Text(_) | Inline::Raw(_) => {}
                 }
             }
         }
@@ -668,7 +672,7 @@ impl Document {
                 ) => {
                     prev.push_str(s);
                 }
-                (Inline::Math(_) | Inline::Call { .. }, last)
+                (Inline::Math(_) | Inline::Call { .. } | Inline::Raw(_), last)
                     if last
                         .as_ref()
                         .is_none_or(|l| !matches!(l.kind, Inline::Text(_))) =>
@@ -729,6 +733,7 @@ impl Document {
                     Inline::Text(_) if want_text => {}
                     Inline::Math(row) if !want_text => row_ids(row, check)?,
                     Inline::Call { body, .. } if !want_text => inline_ids(inline.id, body, check)?,
+                    Inline::Raw(_) if !want_text => {}
                     _ => return Err(format!("{owner:?}: inline {i} breaks alternation")),
                 }
             }
@@ -922,6 +927,13 @@ impl Document {
         InlineNode {
             id: self.fresh_id(),
             kind: Inline::Text(s.into()),
+        }
+    }
+
+    pub fn raw_inline(&mut self, s: &str) -> InlineNode {
+        InlineNode {
+            id: self.fresh_id(),
+            kind: Inline::Raw(s.into()),
         }
     }
 

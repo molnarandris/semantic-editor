@@ -12,8 +12,9 @@ use serde::{Deserialize, Serialize};
 /// 6: code and diagrams in formulas (`MathKind::Code`, `MathKind::Diagram`).
 /// 7: function calls in formulas (`MathKind::Call`). 8: primes, text,
 /// alignment points and line breaks in formulas. 9: calls in text
-/// (`Inline::Call`: bold, italic, `#name[…]`).
-pub const FORMAT_VERSION: u32 = 9;
+/// (`Inline::Call`: bold, italic, `#name[…]`). 10: inline code
+/// (`Inline::Raw`).
+pub const FORMAT_VERSION: u32 = 10;
 
 #[derive(Serialize)]
 struct SemFileOut<'a> {

@@ -613,8 +613,8 @@ M12 is split: M12a the generic call node, M12b the atoms (primes, text in math, 
   zero-width box at `&` changes the spacing around `=`/`+` (it is an ordinary atom),
   a bare `place` too, and drawing in the widget needs no recompile when the caret
   enters or leaves a formula.
-- Not yet: editing inside a text after leaving it (Backspace from its end only);
-  Shift+Enter for a line break.
+- Not yet: editing inside a text after leaving it (Backspace from its end only).
+  (Shift+Enter for a line break: done in M13b.)
 
 Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing.
 
@@ -657,3 +657,29 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
   is tinted and outlined like an environment: `Editor::call_focus` gives the
   innermost call, `caret::call_outline` one box per line from the stops inside it
   (a wrapped call gets a box on each line), drawn by `snapshot_call_outline`.
+
+## M13b — Inline code, line breaks, `~`, dashes (2026-11-09)
+
+- Inline code: `Inline::Raw(String)`, a non-text inline in the alternation (text,
+  code, text). The caret goes inside it like text (`Target::Text`, its chars are
+  positions; `Editor::raw_pos`), but none of the text rules apply: `raw_char` keeps
+  every char as typed, `` ` `` or Esc leave it (empty code goes, also when the caret
+  moves away: `drop_left_call` handles it), Backspace/Delete take chars, at its start
+  ←; Enter leaves it first. From outside it behaves like a formula (Backspace after
+  it selects it). Written `` `…` ``, or `#raw("…")` when it holds a backtick (or is
+  empty, in the export); empty in the editor: the transparent `x`. Raw glyphs map to
+  chars like text (measured: every char gets its own stop, evenly spaced). File
+  format 10.
+- Line break: a `\n` in the text, written `\ ` (a space rather than a newline, so it
+  works in headings too). Typed `\` then space (as in Typst; `markup_char` turns the
+  `\` into the break) or Shift+Enter (`Editor::line_break`, which in a formula
+  inserts a formula line break). `collapses()` treats `\n` like a space for the
+  no-double-spaces rules (a space after a break is not kept), and Backspace removing
+  a char between a break and a space takes the space, never the break. A break that
+  leaves an empty line (at the end, or before another break) is followed by the
+  transparent `x` in the editor, mapped to the position after the break, so the
+  caret shows at the start of the new line.
+- `~` types a non-breaking space (U+00A0, written `~`); `--` → –, then `-` → —
+  (stored as the chars, written as is). A `\` before `* _ ] ` ~ -` types that char
+  literally. Typing normalises other whitespace to a space but keeps U+00A0.
+- Not yet: showing non-breaking spaces (they look like spaces); `-?`, `...`.

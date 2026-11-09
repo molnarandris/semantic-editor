@@ -360,6 +360,8 @@ enum Command {
     Backspace,
     Delete,
     Enter,
+    /// Shift+Enter: a line break.
+    LineBreak,
     /// Ctrl+Enter: open the caret's raw/diagram block in the source dialog.
     EditSource,
     Undo,
@@ -522,6 +524,7 @@ impl SemEditor {
                 return;
             }
             Command::Enter => _ = ed.enter(),
+            Command::LineBreak => _ = ed.line_break(),
             Command::Undo => _ = ed.undo(),
             Command::Redo => _ = ed.redo(),
             Command::Escape => _ = ed.escape(),
@@ -1375,6 +1378,7 @@ fn command_for(key: gdk::Key, state: gdk::ModifierType) -> Option<Command> {
         Key::BackSpace => Command::Backspace,
         Key::Delete | Key::KP_Delete => Command::Delete,
         Key::Return | Key::KP_Enter | Key::ISO_Enter if ctrl => Command::EditSource,
+        Key::Return | Key::KP_Enter | Key::ISO_Enter if shift => Command::LineBreak,
         Key::Return | Key::KP_Enter | Key::ISO_Enter => Command::Enter,
         Key::Escape => Command::Escape,
         Key::ISO_Left_Tab => Command::PrevSlot,

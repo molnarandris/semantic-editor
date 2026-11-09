@@ -396,6 +396,15 @@ impl Editor {
     }
 
     fn text_pos(&self) -> Option<TextPos<'_>> {
+        self.pos_in(false)
+    }
+
+    /// The caret's position in inline code (`` `…` ``).
+    fn raw_pos(&self) -> Option<TextPos<'_>> {
+        self.pos_in(true)
+    }
+
+    fn pos_in(&self, raw: bool) -> Option<TextPos<'_>> {
         let c = &self.caret;
         let place = self.doc.place(c.block)?;
         let block = self.doc.at(place)?;
@@ -403,8 +412,9 @@ impl Editor {
         if c.path.len() != at.prefix + 1 {
             return None;
         }
-        let Inline::Text(text) = &at.inlines.get(at.index)?.kind else {
-            return None;
+        let text = match (&at.inlines.get(at.index)?.kind, raw) {
+            (Inline::Text(text), false) | (Inline::Raw(text), true) => text,
+            _ => return None,
         };
         Some(TextPos {
             place,
@@ -590,8 +600,8 @@ impl Editor {
     }
 
     /// After the caret moved from `old`: if `old` was in an empty inline
-    /// call (`*` typed, then the caret moved away), remove the call (its own
-    /// undo step); the caret keeps its place.
+    /// call or inline code (`*` typed, then the caret moved away), remove it
+    /// (its own undo step); the caret keeps its place.
     fn drop_left_call(&mut self, old: &CursorPath) {
         let Some(block) = self.doc.block(old.block) else {
             return;
@@ -599,11 +609,18 @@ impl Editor {
         let Some(at) = self.doc.inline_at(block, &old.path) else {
             return;
         };
-        if at.prefix == 0 || !is_empty_text(at.inlines) {
+        let empty_raw = matches!(&at.inlines[at.index].kind, Inline::Raw(s) if s.is_empty());
+        let (call, inside) = if empty_raw && old.path.len() == at.prefix + 1 {
+            (old.path.clone(), old.path.clone())
+        } else if at.prefix > 0 && is_empty_text(at.inlines) {
+            (
+                old.path[..at.prefix - 1].to_vec(),
+                old.path[..at.prefix].to_vec(),
+            )
+        } else {
             return;
-        }
-        let call = old.path[..at.prefix - 1].to_vec();
-        if self.caret.block == old.block && self.caret.path.starts_with(&old.path[..at.prefix]) {
+        };
+        if self.caret.block == old.block && self.caret.path.starts_with(&inside) {
             return;
         }
         // Where the caret is, by the inline it is in (ids survive the edit).
@@ -845,6 +862,7 @@ impl Editor {
             }
             (None, Some(p)) if p.nested() => "Tab → next slot · Esc → leave structure",
             (None, Some(_)) => "/ fraction · ^ _ scripts · Esc or $ → leave formula",
+            (None, None) if self.raw_pos().is_some() => "code, kept as typed · ` or Esc → end it",
             (None, None) if let Some(hint) = self.inline_call_hint() => hint,
             (None, None) if let Some(hint) = self.call_hint() => hint,
             (None, _) if self.term_item().is_some() => "term · : or Enter → on to the description",
@@ -861,7 +879,7 @@ impl Editor {
                 "Esc → just after the environment · click its heading → title · Enter on an empty last paragraph → leave"
             }
             (None, None) => {
-                "$ → formula · *bold* _italic_ · = and space → section · - + / and space → list · #name and space → environment"
+                "$ → formula · *bold* _italic_ `code` · = and space → section · - + / and space → list · #name and space → environment"
             }
         }
     }
@@ -976,7 +994,16 @@ fn delete_block(place: Place) -> Op {
 
 fn text_of(inline: &InlineNode) -> &str {
     match &inline.kind {
-        Inline::Text(s) => s,
+        Inline::Text(s) | Inline::Raw(s) => s,
         Inline::Math(_) | Inline::Call { .. } => "",
     }
+}
+
+/// A non-breaking space (`~` in Typst).
+pub(super) const NBSP: char = '\u{a0}';
+
+/// Whether `c` is a space Typst collapses with its neighbours: a plain
+/// space or a line break (a non-breaking space is not).
+pub(super) fn collapses(c: char) -> bool {
+    c == ' ' || c == '\n'
 }
