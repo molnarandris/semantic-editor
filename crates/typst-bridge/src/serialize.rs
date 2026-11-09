@@ -44,6 +44,36 @@ pub const CETZ_VERSION: &str = cetz_version!();
 /// The import that diagram blocks need.
 pub const CETZ_IMPORT: &str = concat!("#import \"@preview/cetz:", cetz_version!(), "\"");
 
+/// Opens the code font of a call being typed (closed by `]`).
+const CODE_TEXT: &str = "#text(font: \"DejaVu Sans Mono\", size: 0.9em, fill: rgb(\"#6b6390\"))[";
+
+/// Whether a paragraph is a block call being typed: `#`, `#name` or
+/// `#name(…`, as the whole paragraph (what typing space or `(` turns into a
+/// call, see `Editor::insert_text`).
+fn typing_call(inlines: &[InlineNode]) -> bool {
+    let [
+        InlineNode {
+            kind: Inline::Text(s),
+            ..
+        },
+    ] = inlines
+    else {
+        return false;
+    };
+    let Some(rest) = s.strip_prefix('#') else {
+        return false;
+    };
+    let end = rest
+        .find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '-'))
+        .unwrap_or(rest.len());
+    let (name, after) = rest.split_at(end);
+    let starts_ok = name
+        .chars()
+        .next()
+        .is_none_or(|c| c.is_alphabetic() || c == '_');
+    starts_ok && (after.is_empty() || !name.is_empty() && after.starts_with('('))
+}
+
 /// The Typst source of an empty math row (a visible placeholder box).
 pub const SLOT: &str = "#sem-slot()";
 
@@ -228,6 +258,13 @@ impl Writer {
                 }
                 w.out.push(' ');
                 w.text_block(inlines, false);
+            }
+            // A call being typed (`#align(cen`) shows in a code font in the
+            // editor: space or `(` will make it a call.
+            Block::Paragraph(inlines) if w.style == Style::Edit && typing_call(inlines) => {
+                w.out.push_str(CODE_TEXT);
+                w.text_block(inlines, false);
+                w.out.push(']');
             }
             Block::Paragraph(inlines) => w.text_block(inlines, true),
             Block::DisplayMath(row) => {
@@ -1049,6 +1086,36 @@ mod tests {
         let item = d.item(ListKind::Numbered, vec![one]);
         assert_eq!(serialize_block_numbered(&item, Some(3)).0, "3. third");
         assert_eq!(serialize_block_styled(&item, Style::Readable).0, "+ third");
+    }
+
+    /// A call being typed shows in a code font, only in the editor's
+    /// renders; other paragraphs with `#` do not.
+    #[test]
+    fn calls_being_typed_in_code_font() {
+        let mut d = Document::empty();
+        for (s, code) in [
+            ("#", true),
+            ("#ali", true),
+            ("#align(cen", true),
+            ("#align(center)", true),
+            ("a #b", false),
+            ("#1", false),
+            ("#(x", false),
+            ("# x", false),
+        ] {
+            let t = d.text(s);
+            let p = d.paragraph(vec![t]);
+            let (src, _) = serialize_block(&p);
+            assert_eq!(src.starts_with(CODE_TEXT), code, "{s:?}: {src}");
+            assert!(
+                !serialize_block_styled(&p, Style::Readable)
+                    .0
+                    .contains("#text")
+            );
+            let mut world = BridgeWorld::new();
+            let (doc, _) = block_document(&Around::default(), &src, 300.0);
+            compile(&mut world, &doc).unwrap();
+        }
     }
 
     /// A block call's source arguments come before its title and body,

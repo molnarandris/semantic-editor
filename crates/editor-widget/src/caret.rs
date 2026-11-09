@@ -485,6 +485,23 @@ mod tests {
         raw_layout(&world, &doc.pages()[0], offset).resolve(&map)
     }
 
+    /// A call being typed is set in a code font: every char still has its
+    /// stop, evenly spaced (monospace), from the start of the line.
+    #[test]
+    fn stops_in_a_call_being_typed() {
+        let mut d = Document::empty();
+        let t = d.text("#align(c");
+        let p = d.paragraph(vec![t]);
+        let s = stops(&p, Some(&layout_of(&p, 300.0)));
+        assert_eq!(s.len(), 9);
+        let steps: Vec<f64> = s.windows(2).map(|w| w[1].x - w[0].x).collect();
+        assert!(s[0].x.abs() < 1.0, "{}", s[0].x);
+        assert!(
+            steps.iter().all(|d| (d - steps[0]).abs() < 0.1 && *d > 3.0),
+            "{steps:?}"
+        );
+    }
+
     /// In a numbered heading without text the caret sits after the number,
     /// where typed text appears.
     #[test]

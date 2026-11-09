@@ -500,6 +500,10 @@ Done before M11–M13, at the user's request (2026-11-08). Implementation notes:
     a call with those arguments. A name known to take no content (`#pagebreak `) stays
     text. The status bar says which of these applies. `edit_title` refuses a function
     known to take no title.
+  - Follow-up (user request): a paragraph that is a call being typed (`#`, `#name`,
+    `#name(…`, the whole paragraph) is set in a code font in the editor's renders
+    (`typing_call`, `CODE_TEXT` in `serialize.rs`), so it is clear that space or `(`
+    will make a call. Export is unchanged (a `#` left in text is written `\#`).
   - Not yet: editing the arguments of an existing call (unwrap with Backspace at the
     start of its body and retype); functions from packages are unknown.
 
