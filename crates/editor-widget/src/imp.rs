@@ -886,8 +886,9 @@ impl SemEditor {
         }
     }
 
-    /// A light green background behind every reference in view, so links
-    /// stand out whatever the header's styling (editor only, not in Typst).
+    /// A light green background behind every reference and hyperlink in
+    /// view (a wrapped link gets one box per line), so links stand out
+    /// whatever the header's styling (editor only, not in Typst).
     fn snapshot_ref_marks(&self, snapshot: &gtk::Snapshot, x0: f64, scroll: f64) {
         let zoom = self.zoom.get();
         let height = self.obj().height() as f64;
@@ -895,7 +896,8 @@ impl SemEditor {
         let ed = self.editor.borrow();
         let views = self.views.borrow();
         let tops = self.block_tops();
-        for ((block, view), &top) in ed.doc().blocks.iter().zip(views.iter()).zip(&tops) {
+        let blocks = ed.doc().blocks.iter().zip(views.iter()).zip(&tops);
+        for (index, ((block, view), &top)) in blocks.enumerate() {
             let y0 = top - scroll;
             if y0 > height || y0 + view.height_pt() * zoom < 0.0 {
                 continue;
@@ -903,10 +905,19 @@ impl SemEditor {
             let Some(layout) = view.layout.as_ref() else {
                 continue;
             };
-            for id in block.ref_ids() {
-                let Some(r) = layout.box_of(id) else {
-                    continue;
-                };
+            let mut boxes: Vec<typst_bridge::Rect> = block
+                .ref_ids()
+                .into_iter()
+                .filter_map(|id| layout.box_of(id))
+                .collect();
+            let links = block.links();
+            if !links.is_empty() {
+                let stops = self.block_stops(index);
+                for (leaf, body) in links {
+                    boxes.extend(caret::call_outline(&stops, leaf, &body));
+                }
+            }
+            for r in boxes {
                 let rect = graphene::Rect::new(
                     (x0 + r.x * zoom - 1.5) as f32,
                     (y0 + r.y * zoom - 1.0) as f32,

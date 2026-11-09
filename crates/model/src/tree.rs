@@ -377,6 +377,38 @@ impl BlockNode {
         out
     }
 
+    /// The hyperlinks (`#link(…)[…]` calls) in this block and its nested
+    /// blocks: the block holding each and the path prefix of the caret
+    /// positions inside its text (ending with `Body`).
+    pub fn links(&self) -> Vec<(NodeId, Vec<Step>)> {
+        fn inlines(
+            block: NodeId,
+            v: &[InlineNode],
+            prefix: &[Step],
+            out: &mut Vec<(NodeId, Vec<Step>)>,
+        ) {
+            for (i, inline) in v.iter().enumerate() {
+                if let Inline::Call { name, body, .. } = &inline.kind {
+                    let mut path = prefix.to_vec();
+                    path.extend([Step::Index(i), Step::Body]);
+                    if name == "link" {
+                        out.push((block, path.clone()));
+                    }
+                    inlines(block, body, &path, out);
+                }
+            }
+        }
+        let mut out = vec![];
+        let mut all = vec![];
+        all_blocks(std::slice::from_ref(self), &mut all);
+        for block in all {
+            if let Some(v) = block.kind.text_inlines() {
+                inlines(block.id, v, &[], &mut out);
+            }
+        }
+        out
+    }
+
     /// Whether `id` is this block or inside it.
     pub fn contains(&self, id: NodeId) -> bool {
         self.id == id

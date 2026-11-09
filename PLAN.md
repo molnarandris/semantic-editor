@@ -777,6 +777,7 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
   placing the caret was more useful; the status bar says so next to a reference),
   and every reference gets a light green background drawn by the widget behind its
   box (`snapshot_ref_marks`, `BlockNode::ref_ids`), so links stand out whatever the
-  header's styling.
+  header's styling. Hyperlinks (`#link(…)[…]`) too, one box per line from the stops
+  inside them (`BlockNode::links`, `caret::call_outline`).
 - Not yet: a reference still being typed when the file is saved keeps a trailing
   `.`/`:` (the next key would have moved it); citations (M16).

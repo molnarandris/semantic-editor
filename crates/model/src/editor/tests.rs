@@ -1493,3 +1493,18 @@ fn following_references() {
     assert!(!e.go_back());
     assert!(!e.follow_ref("nowhere"));
 }
+
+/// Hyperlinks are found at any depth, with the path into their text.
+#[test]
+fn links_in_a_block() {
+    let mut e = Editor::default();
+    e.insert_text("a #link(\"x\")[b] and *#link(\"y\")[c]* @r d");
+    let block = &e.doc().blocks[0];
+    use Step::{Body, Index};
+    let paths: Vec<Vec<Step>> = block.links().into_iter().map(|(_, p)| p).collect();
+    assert_eq!(
+        paths,
+        [vec![Index(1), Body], vec![Index(3), Body, Index(1), Body]]
+    );
+    assert_eq!(block.ref_ids().len(), 1);
+}
