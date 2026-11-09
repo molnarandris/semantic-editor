@@ -450,6 +450,10 @@ Titles decided 2026-11-08: optional, never added by default; positional
   counter-sensitive, so numbers run through the document. In the editor a footnote's
   text shows under its own paragraph (where Typst puts it on the block's page,
   measured), edited in place; the export puts it at the foot of the page as usual.
+  Wishlist (user, 2026-11-09; postponed, "for now leave it as it is"): footnote texts
+  in a list at the very end of the document, the paragraph showing only the number;
+  hovering the number shows the text in a bubble. Open question then: where the
+  text is edited (the end list, the bubble, or the paragraph).
 
 ### M17 — Import `.typ` files
 
