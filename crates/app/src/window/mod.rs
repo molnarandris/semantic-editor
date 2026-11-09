@@ -231,7 +231,9 @@ impl Window {
 
     fn insert_block(self: Rc<Self>, kind: NewBlock) {
         self.editor.insert_block(kind);
-        self.open_block_editor(PreviewTarget::Block(self.editor.caret().block));
+        if let Some(target) = self.editor.source_target() {
+            self.open_block_editor(PreviewTarget::Block(target));
+        }
     }
 
     // ----- State -----

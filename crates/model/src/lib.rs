@@ -11,7 +11,8 @@ mod tree;
 
 pub use cursor::{Crumb, CursorPath, Step, Target};
 pub use editor::{
-    CallResolver, CallShape, DIAGRAM_TEMPLATE, Editor, NewBlock, Selected, SymbolResolver,
+    CallResolver, CallShape, DIAGRAM_TEMPLATE, Editor, INLINE_DIAGRAM_TEMPLATE, NewBlock, Selected,
+    SymbolResolver,
 };
 pub use history::History;
 pub use ops::{Items, Op, OpError, Seq};

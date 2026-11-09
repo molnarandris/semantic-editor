@@ -635,6 +635,50 @@ fn diagram_blocks() {
     assert_eq!(texts(&e)[1], "ef");
 }
 
+/// "Insert Diagram" in a formula inserts an inline one, a code atom: its
+/// source edits are one undo step, Ctrl+Enter finds it next to the caret,
+/// Backspace selects it, then deletes it.
+#[test]
+fn inline_diagrams() {
+    let mut e = empty_display();
+    e.insert_text("x");
+    assert!(e.insert_block(NewBlock::Diagram));
+    e.insert_text("y");
+    assert_eq!(display_of(&e, 0), "x #code y");
+    assert_eq!(e.doc().blocks.len(), 1, "no block was added");
+    let Block::DisplayMath(row) = &e.doc().blocks[0].kind else {
+        unreachable!()
+    };
+    let id = row.nodes[1].id;
+    assert_eq!(e.source_target(), None, "the caret is after y");
+    e.move_left();
+    assert_eq!(e.source_target(), Some(id), "the atom before the caret");
+    e.move_left();
+    assert_eq!(e.source_target(), Some(id), "the atom after the caret");
+    assert_eq!(e.block_source(id), Some(INLINE_DIAGRAM_TEMPLATE));
+    let caret = e.caret().clone();
+    assert!(e.set_block_source(id, "box(a)"));
+    assert!(e.set_block_source(id, "box(ab)"));
+    assert_eq!(e.caret(), &caret, "the caret stays");
+    assert_eq!(e.doc().top_block(id), Some(e.doc().blocks[0].id));
+    e.undo();
+    assert_eq!(e.block_source(id), Some(INLINE_DIAGRAM_TEMPLATE));
+    e.redo();
+    assert_eq!(e.block_source(id), Some("box(ab)"));
+
+    // Delete (caret before it) selects it; Backspace after it too.
+    assert!(e.delete());
+    assert_eq!(e.selected_ids(), vec![id]);
+    assert_eq!(e.source_target(), Some(id), "the selected atom");
+    e.escape();
+    e.move_right();
+    assert!(e.backspace());
+    assert_eq!(e.selected_ids(), vec![id]);
+    assert!(e.backspace());
+    assert_eq!(display_of(&e, 0), "x y");
+    e.doc().check_invariants().unwrap();
+}
+
 #[test]
 fn enter_at_end_of_heading_starts_paragraph() {
     let mut d = Document::empty();
@@ -709,6 +753,7 @@ fn show(row: &crate::tree::MathRow) -> String {
         .map(|n| match &n.kind {
             MathKind::Sym(s) | MathKind::Ident(s) | MathKind::Num(s) => s.clone(),
             MathKind::Slot => "□".into(),
+            MathKind::Code(_) => "#code".into(),
             MathKind::Frac { num, den } => format!("frac({}, {})", show(num), show(den)),
             MathKind::Scripts { base, sup, sub } => format!(
                 "{}{}{}",

@@ -114,6 +114,11 @@ pub enum MathKind {
         sub: Option<MathRow>,
     },
     Slot,
+    /// Typst code in a formula, written `#code`: an inline diagram
+    /// (`box(cetz.canvas({…}))`), a call of a header function (`dia({…})`).
+    /// An atom for the caret; its source is edited in the source dialog,
+    /// like a diagram block's.
+    Code(String),
 }
 
 impl Block {
@@ -338,11 +343,23 @@ impl MathNode {
             MathKind::Frac { .. } => "fraction",
             MathKind::Scripts { .. } => "scripts",
             MathKind::Slot => "slot",
+            MathKind::Code(_) => "code",
         }
     }
 }
 
 impl MathRow {
+    /// The row holding node `id` (at any depth) and the node's index in it.
+    pub fn find_node(&self, id: NodeId) -> Option<(&MathRow, usize)> {
+        if let Some(i) = self.nodes.iter().position(|n| n.id == id) {
+            return Some((self, i));
+        }
+        self.nodes
+            .iter()
+            .flat_map(|n| n.children().into_iter().map(|(_, r)| r))
+            .find_map(|r| r.find_node(id))
+    }
+
     pub fn find_row(&self, id: NodeId) -> Option<&MathRow> {
         if self.id == id {
             return Some(self);
@@ -632,6 +649,25 @@ impl Document {
         self.siblings(place.parent)?.get(index)
     }
 
+    /// The top-level block that is or contains node `id`: a block, or an
+    /// inline, row or math node in it.
+    pub fn top_block(&self, id: NodeId) -> Option<NodeId> {
+        let holds = |b: &BlockNode| {
+            let mut all = vec![];
+            all_blocks(std::slice::from_ref(b), &mut all);
+            all.into_iter().any(|b| {
+                b.id == id
+                    || b.kind
+                        .text_inlines()
+                        .is_some_and(|v| v.iter().any(|i| i.id == id))
+                    || b.rows()
+                        .into_iter()
+                        .any(|r| r.find_row(id).is_some() || r.find_node(id).is_some())
+            })
+        };
+        self.blocks.iter().find(|b| holds(b)).map(|b| b.id)
+    }
+
     /// Index of the top-level block that is or contains `id`.
     pub fn top_index(&self, id: NodeId) -> Option<usize> {
         self.blocks.iter().position(|b| b.contains(id))
@@ -662,6 +698,24 @@ impl Document {
 
     pub fn find_row_mut(&mut self, id: NodeId) -> Option<&mut MathRow> {
         find_row_in(&mut self.blocks, id)
+    }
+
+    /// The row holding math node `id`, at any depth, and the node's index.
+    pub fn find_node(&self, id: NodeId) -> Option<(&MathRow, usize)> {
+        let mut all = vec![];
+        all_blocks(&self.blocks, &mut all);
+        all.into_iter()
+            .flat_map(|b| b.rows())
+            .find_map(|r| r.find_node(id))
+    }
+
+    /// The source of code atom `id` (`MathKind::Code`).
+    pub fn code_source(&self, id: NodeId) -> Option<&str> {
+        let (row, i) = self.find_node(id)?;
+        match &row.nodes[i].kind {
+            MathKind::Code(s) => Some(s),
+            _ => None,
+        }
     }
 
     /// Whether `id` is a list item.
@@ -730,6 +784,10 @@ impl Document {
 
     pub fn slot(&mut self) -> MathNode {
         self.node(MathKind::Slot)
+    }
+
+    pub fn code(&mut self, source: &str) -> MathNode {
+        self.node(MathKind::Code(source.into()))
     }
 
     pub fn frac(&mut self, num: Vec<MathNode>, den: Vec<MathNode>) -> MathNode {

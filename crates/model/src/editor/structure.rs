@@ -271,10 +271,19 @@ impl Editor {
     }
 
     /// Insert a diagram or raw Typst block after the caret's block (in place
-    /// of it, if that is an empty paragraph); the caret goes onto it.
+    /// of it, if that is an empty paragraph); the caret goes onto it. A
+    /// diagram with the caret in a formula is an inline one, a code atom at
+    /// the caret (the caret goes after it).
     pub fn insert_block(&mut self, kind: NewBlock) -> bool {
         self.finish_word();
         self.selected = None;
+        if kind == NewBlock::Diagram
+            && let Some(p) = self.row_pos()
+        {
+            let node = self.doc.code(INLINE_DIAGRAM_TEMPLATE);
+            let op = row_insert(p.row, p.offset, node);
+            return self.commit(vec![op], p.at(p.offset + 1), Last::Other);
+        }
         let Some(place) = self.doc.place(self.caret.block) else {
             return false;
         };
@@ -296,9 +305,10 @@ impl Editor {
 
     /// The source of a raw Typst or diagram block.
     pub fn block_source(&self, block: NodeId) -> Option<&str> {
-        match &self.doc.block(block)?.kind {
-            Block::RawTypst(s) | Block::Diagram(s) => Some(s),
-            _ => None,
+        match self.doc.block(block).map(|b| &b.kind) {
+            Some(Block::RawTypst(s) | Block::Diagram(s)) => Some(s),
+            Some(_) => None,
+            None => self.doc.code_source(block),
         }
     }
 
@@ -310,6 +320,16 @@ impl Editor {
         };
         if old == source {
             return false;
+        }
+        // A code atom: replaced by one with the new source, same id; the
+        // caret stays.
+        if let Some((row, k)) = self.doc.find_node(block).map(|(r, k)| (r.id, k)) {
+            let node = MathNode {
+                id: block,
+                kind: MathKind::Code(source.into()),
+            };
+            let after = self.caret.clone();
+            return self.commit(vec![row_replace(row, k, node)], after, Last::Source(block));
         }
         let op = Op::Replace {
             seq: Seq::Text(block),

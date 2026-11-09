@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 /// 3: environments (`Env` blocks), with an optional `title` (absent when
 /// empty, so older version-3 files load unchanged). 4: list items (`Item`).
 /// 5: block calls with source arguments (`args` on `Env`, absent when empty).
-pub const FORMAT_VERSION: u32 = 5;
+/// 6: code in formulas (`MathKind::Code`).
+pub const FORMAT_VERSION: u32 = 6;
 
 #[derive(Serialize)]
 struct SemFileOut<'a> {

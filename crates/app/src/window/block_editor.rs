@@ -83,7 +83,8 @@ impl Window {
                     Some(Block::RawTypst(s)) if typst_bridge::is_code(s) => {
                         ("Code", "Definitions and rules for the blocks after it")
                     }
-                    _ => ("Raw Typst", "Typst markup"),
+                    Some(_) => ("Raw Typst", "Typst markup"),
+                    None => ("Code in a Formula", "Typst code, e.g. an inline diagram"),
                 }
             }
         };

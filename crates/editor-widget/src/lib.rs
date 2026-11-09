@@ -107,7 +107,13 @@ impl SemEditor {
         }
     }
 
-    /// The source of a raw/diagram block.
+    /// What Ctrl+Enter would open in the source dialog: the caret's
+    /// raw/diagram block or the code atom (code in a formula) next to it.
+    pub fn source_target(&self) -> Option<NodeId> {
+        self.imp().editor.borrow().source_target()
+    }
+
+    /// The source of a raw/diagram block or code atom.
     pub fn block_source(&self, block: NodeId) -> Option<String> {
         self.imp()
             .editor

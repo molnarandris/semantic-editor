@@ -56,6 +56,13 @@ pub const DIAGRAM_TEMPLATE: &str = "circle((0, 0), radius: 1)
 line((0, 0), (1, 0), mark: (end: \">\"))
 content((1.4, 0), $x$)";
 
+/// The code a new inline diagram (in a formula) starts with.
+pub const INLINE_DIAGRAM_TEMPLATE: &str = "box(baseline: 30%, cetz.canvas(length: 1em, {
+  import cetz.draw: *
+  circle((0, 0), radius: 0.5)
+  line((-0.5, 0), (0.5, 0))
+}))";
+
 /// A selected subtree, shown highlighted; Backspace/Delete remove it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Selected {
@@ -537,6 +544,32 @@ impl Editor {
         })
     }
 
+    /// The code atom (Typst code in a formula) to edit: the selected one,
+    /// else the one just before the caret, else the one just after it.
+    fn code_atom(&self) -> Option<NodeId> {
+        let code = |n: &MathNode| matches!(n.kind, MathKind::Code(_)).then_some(n.id);
+        if let Some(Selected::Nodes {
+            block, path, start, ..
+        }) = &self.selected
+        {
+            let row = self.row_id_at(*block, path)?;
+            return self.row_nodes(row).get(*start).and_then(code);
+        }
+        let p = self.row_pos()?;
+        let nodes = self.row_nodes(p.row);
+        p.offset
+            .checked_sub(1)
+            .and_then(|k| nodes.get(k))
+            .and_then(code)
+            .or_else(|| nodes.get(p.offset).and_then(code))
+    }
+
+    /// What Ctrl+Enter or a double click opens in the source dialog: the
+    /// caret's raw/diagram block or the code atom next to it.
+    pub fn source_target(&self) -> Option<NodeId> {
+        self.source_block().or_else(|| self.code_atom())
+    }
+
     /// The node just before the caret in its row.
     fn node_before(&self, p: &RowPos) -> Option<MathNode> {
         let k = p.offset.checked_sub(1)?;
@@ -669,6 +702,9 @@ impl Editor {
                 "Backspace → remove the environment, keep its text · Esc → cancel"
             }
             (Some(_), _) => "Backspace → delete selection · Esc → cancel",
+            (_, Some(_)) if self.code_atom().is_some() => {
+                "Ctrl+Enter or double click → edit code · Backspace → select, then delete"
+            }
             (None, _) if self.source_block().is_some() => {
                 "Ctrl+Enter or double click → edit source · Enter → new paragraph · Backspace → delete"
             }

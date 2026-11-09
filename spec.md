@@ -289,6 +289,10 @@ functions and packages.
   The difference is only internal: it lives inside a formula, so editing it recompiles
   the formula's block.
 - Inserting: "Insert Diagram" with the caret inside a formula inserts an inline one.
+- Done 2026-11-09 (see PLAN.md). In text, an inline diagram is a formula holding only
+  the code (`$` then Insert Diagram), not a separate inline kind. Wishlist: typing `#`
+  in a formula to start code; code atoms that are not content (`#sym.alpha`) render
+  boxed in the editor, a little wider than in the export.
 
 ### M12 — Math: generic calls and missing atoms
 

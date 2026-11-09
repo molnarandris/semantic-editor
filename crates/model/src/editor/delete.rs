@@ -193,7 +193,7 @@ impl Editor {
         if p.offset > 0 {
             let k = p.offset - 1;
             let node = &nodes[k];
-            if node.is_structure() {
+            if node.is_structure() || matches!(node.kind, MathKind::Code(_)) {
                 self.finish_word();
                 return self.select_node(&p, k);
             }
@@ -364,7 +364,7 @@ impl Editor {
             let Some(node) = self.row_nodes(p.row).get(p.offset) else {
                 return false;
             };
-            if node.is_structure() {
+            if node.is_structure() || matches!(node.kind, MathKind::Code(_)) {
                 return self.select_node(&p, p.offset);
             }
             return self.commit(

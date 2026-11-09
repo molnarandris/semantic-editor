@@ -14,10 +14,14 @@ use model::{
 /// `sem-slot` must stay a `box.with(..)`: then the box element is created at
 /// the call site and its frame carries the slot's own span. A closure
 /// (`#let sem-slot() = box(..)`) would give every slot the preamble's span.
+/// `sem-code` wraps code in a formula in the editor's renders: its
+/// transparent stroke carries the code's span, so the code gets a box even
+/// when what it draws comes from a package (CeTZ shapes carry CeTZ's spans).
 pub const PREAMBLE: &str = "\
 #set text(font: \"New Computer Modern\", size: 11pt)
 #show math.equation: set text(font: \"New Computer Modern Math\")
 #let sem-slot = box.with(width: 0.55em, height: 0.7em, stroke: (paint: luma(160), thickness: 0.5pt, dash: \"densely-dashed\"))
+#let sem-code = box.with(stroke: 0.5pt + rgb(0, 0, 0, 0))
 ";
 
 /// The header of new documents.
@@ -448,7 +452,8 @@ impl Writer {
     /// atoms do not change Typst's output; the readable style drops them
     /// only next to brackets and punctuation, where no identifier can form.
     fn space_between(&self, a: &MathNode, b: &MathNode, a_paired: bool, b_paired: bool) -> bool {
-        if self.style == Style::Edit {
+        // After code, a `;` or `,` would be read as part of it.
+        if self.style == Style::Edit || matches!(a.kind, MathKind::Code(_)) {
             return true;
         }
         let sym = |n: &MathNode, set: &[&str]| matches!(&n.kind, MathKind::Sym(s) if set.contains(&s.as_str()));
@@ -485,6 +490,15 @@ impl Writer {
             MathKind::Ident(s) => w.out.push_str(&ident_source(s, w.style)),
             MathKind::Num(s) => w.out.push_str(&num_source(s)),
             MathKind::Slot => w.out.push_str(SLOT),
+            MathKind::Code(src) if w.style == Style::Edit => {
+                w.out.push_str("#sem-code($#");
+                w.out.push_str(src);
+                w.out.push_str("$)");
+            }
+            MathKind::Code(src) => {
+                w.out.push('#');
+                w.out.push_str(src);
+            }
             MathKind::Frac { num, den } => {
                 w.group(num);
                 w.out.push('/');
@@ -696,9 +710,34 @@ pub fn serialize_block_numbered(block: &BlockNode, number: Option<usize>) -> (St
     serialize_with(block, Style::Edit, number)
 }
 
+/// Whether a block draws with CeTZ: a diagram (unless `diagrams` is
+/// false), or code in a formula that mentions it (an inline diagram), here
+/// or in a container's title or body.
+fn uses_cetz(block: &BlockNode, diagrams: bool) -> bool {
+    fn in_row(row: &MathRow) -> bool {
+        row.nodes.iter().any(|n| match &n.kind {
+            MathKind::Code(src) => src.contains("cetz"),
+            _ => n.children().into_iter().any(|(_, r)| in_row(r)),
+        })
+    }
+    diagrams && matches!(block.kind, Block::Diagram(_))
+        || block.rows().into_iter().any(in_row)
+        || block
+            .kind
+            .body()
+            .is_some_and(|body| body.iter().any(|b| uses_cetz(b, diagrams)))
+}
+
 fn serialize_with(block: &BlockNode, style: Style, number: Option<usize>) -> (String, SpanMap) {
+    let mut out = String::new();
+    // Standalone block documents import CeTZ themselves; a diagram block
+    // does so in its own code.
+    if style == Style::Edit && uses_cetz(block, false) {
+        out.push_str(CETZ_IMPORT);
+        out.push('\n');
+    }
     let mut w = Writer {
-        out: String::new(),
+        out,
         map: SpanMap::default(),
         style,
         args: 0,
@@ -722,11 +761,7 @@ pub fn serialize_document_mapped(doc: &Document) -> (String, SpanMap) {
     if !out.ends_with('\n') {
         out.push('\n');
     }
-    if doc
-        .blocks
-        .iter()
-        .any(|b| matches!(b.kind, Block::Diagram(_)))
-    {
+    if doc.blocks.iter().any(|b| uses_cetz(b, true)) {
         out.push_str(CETZ_IMPORT);
         out.push('\n');
     }
@@ -1116,6 +1151,46 @@ mod tests {
             let (doc, _) = block_document(&Around::default(), &src, 300.0);
             compile(&mut world, &doc).unwrap();
         }
+    }
+
+    /// Code in a formula: `#code` in the file, boxed in the editor's renders
+    /// so it gets a layout box (CeTZ shapes carry CeTZ's spans), without
+    /// moving what follows. CeTZ is imported where an inline diagram needs it.
+    #[test]
+    fn code_in_formulas() {
+        let mut d = Document::empty();
+        let (a, b) = (d.ident("a"), d.ident("b"));
+        let code = d.code(model::INLINE_DIAGRAM_TEMPLATE);
+        let (aid, cid, bid) = (a.id, code.id, b.id);
+        let semi = d.sym(";");
+        let m = d.math(vec![a, code, semi, b]);
+        let p = d.paragraph(vec![m]);
+        let (readable, _) = serialize_block_styled(&p, Style::Readable);
+        assert!(readable.starts_with("$a #box(baseline"), "{readable}");
+        assert!(
+            readable.ends_with("})) ; b$"),
+            "space kept before ; {readable}"
+        );
+        let (src, map) = serialize_block(&p);
+        assert!(src.starts_with(CETZ_IMPORT), "{src}");
+        let mut world = BridgeWorld::new();
+        let (doc, offset) = block_document(&Around::default(), &src, 300.0);
+        let compiled = compile(&mut world, &doc).unwrap();
+        let l = crate::raw_layout(&world, &compiled.pages()[0], offset).resolve(&map);
+        let (ra, rc, rb) = (
+            l.box_of(aid).unwrap(),
+            l.box_of(cid).expect("the code has a box"),
+            l.box_of(bid).unwrap(),
+        );
+        assert!(
+            ra.right() <= rc.x && rc.right() <= rb.x && rc.w > 10.0,
+            "{ra:?} {rc:?} {rb:?}"
+        );
+
+        d.blocks = vec![p];
+        let whole = serialize_document(&d);
+        assert_eq!(whole.matches(CETZ_IMPORT).count(), 1, "{whole}");
+        compile(&mut world, &whole).unwrap();
     }
 
     /// A block call's source arguments come before its title and body,

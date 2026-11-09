@@ -573,11 +573,12 @@ impl SemEditor {
         self.obj().emit_by_name::<()>("caret-moved", &[]);
     }
 
-    /// Ask the app to open the caret's raw/diagram block for editing.
+    /// Ask the app to open the caret's raw/diagram block, or the code atom
+    /// next to it, for editing.
     fn request_source_edit(&self) {
-        let block = self.editor.borrow().caret().block;
-        if self.editor.borrow().block_source(block).is_some() {
-            self.obj().emit_by_name::<()>("edit-source", &[&block.0]);
+        let target = self.editor.borrow().source_target();
+        if let Some(id) = target {
+            self.obj().emit_by_name::<()>("edit-source", &[&id.0]);
         }
     }
 
@@ -1101,6 +1102,10 @@ impl SemEditor {
         let Some(target) = preview.target else { return };
         let (around, snippet, map) = match target {
             PreviewTarget::Block(block) => {
+                // A nested block or a code atom: its top-level block's render.
+                let Some(block) = self.editor.borrow().doc().top_block(block) else {
+                    return;
+                };
                 let views = self.views.borrow();
                 let Some(view) = views.iter().find(|v| v.id == block) else {
                     return;

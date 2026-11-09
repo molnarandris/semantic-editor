@@ -507,4 +507,35 @@ Done before M11–M13, at the user's request (2026-11-08). Implementation notes:
   - Not yet: editing the arguments of an existing call (unwrap with Backspace at the
     start of its body and retype); functions from packages are unknown.
 
+## M11 — Inline code: diagrams inside formulas (2026-11-09)
+
+- Model: `MathKind::Code(String)`, an atom holding Typst code (without the `#`),
+  written `#code` in a formula. File format 6. `Document::find_node`/`code_source`
+  find it, `Document::top_block` gives the top-level block holding any node (the
+  preview renders that block; this also fixes the preview of a diagram nested in an
+  environment or list item).
+- Editing: "Insert Diagram" with the caret in a formula inserts one at the caret
+  (`INLINE_DIAGRAM_TEMPLATE`: `box(baseline: 30%, cetz.canvas(length: 1em, {…}))`),
+  caret after it, and opens the source dialog ("Code in a Formula") with the live
+  preview of the formula's block. Ctrl+Enter or a double click opens the code atom
+  that is selected, else just before the caret, else just after it
+  (`Editor::source_target`, used by the widget instead of the caret's block).
+  `block_source`/`set_block_source` take a code atom's id too: the atom is replaced
+  by one with the same id (one undo step per run of edits, caret stays). Backspace
+  and Delete select it first, like a structure. Status bar hint next to one.
+- Rendering: in the editor's renders the code is `#sem-code($#code$)`, `sem-code`
+  being a `box.with` with a transparent stroke (preamble). CeTZ shapes carry CeTZ's
+  spans, so without it an inline canvas has no layout box (measured: no caret stop
+  after a trailing diagram, no click target, no selection highlight); the stroke has
+  the call site's span. The `$…$` keeps the code in math, as in the file; boxes lay
+  out exactly as unwrapped (same x for what follows). The readable style always
+  keeps the space after code (a `;` right after `#x` would be read as part of it).
+- CeTZ import: a standalone render imports CeTZ when the block has code mentioning
+  `cetz` in a formula (a diagram block still imports it itself); the exported file
+  imports it once if any block, at any depth, has a diagram or such code (it used to
+  check top-level diagram blocks only).
+- In text: type `$` then Insert Diagram, which gives `$#box(…)$`, laid out like the
+  box in text. A separate text inline kind was not added: a third inline kind would
+  touch every place that relies on text and formulas alternating.
+
 Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing.
