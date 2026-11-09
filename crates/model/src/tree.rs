@@ -912,6 +912,16 @@ impl Document {
             .map(|b| b.id)
     }
 
+    /// Every label in document order, with the block it labels.
+    pub fn labels(&self) -> Vec<(&str, &BlockNode)> {
+        let mut all = vec![];
+        all_blocks(&self.blocks, &mut all);
+        all.into_iter()
+            .filter(|b| !b.label.is_empty() && b.kind.labelable())
+            .map(|b| (b.label.as_str(), b))
+            .collect()
+    }
+
     /// The source of code atom or inline diagram `id`.
     pub fn code_source(&self, id: NodeId) -> Option<&str> {
         let (row, i) = self.find_node(id)?;

@@ -11,7 +11,7 @@ use gtk::{gdk, glib, graphene, gsk};
 use model::{Block, CursorPath, Document, Editor, NodeId};
 use typst_bridge::{
     Around, BLOCK_PAD_PT, BlockLayout, CompileJob, CompileResult, CounterState, HEADER_SPECIMEN,
-    Raster, SpanMap, Worker, serialize_block, serialize_math_node,
+    LabelTarget, Raster, SpanMap, Worker, serialize_block, serialize_math_node,
 };
 
 use crate::caret::{self, Stop};
@@ -51,6 +51,9 @@ struct BlockView {
     /// submitted job, and at its end once its result arrived.
     start: Option<CounterState>,
     end: Option<CounterState>,
+    /// What the labels the block defines point to, from its latest render
+    /// (kept while a new one compiles).
+    targets: Vec<LabelTarget>,
     /// Generation of the last submitted job.
     submitted: u64,
     /// Generation of the result currently shown.
@@ -74,6 +77,7 @@ impl BlockView {
             map: SpanMap::default(),
             start: None,
             end: None,
+            targets: vec![],
             submitted: 0,
             shown: 0,
             texture: None,
@@ -765,6 +769,17 @@ impl SemEditor {
                         (blue(0.08), blue(0.35), gdk::RGBA::new(0.15, 0.3, 0.55, 1.0))
                     }
                 };
+                // A label defined twice: references to it cannot resolve.
+                let twice = !label.is_empty()
+                    && ed
+                        .doc()
+                        .labels()
+                        .iter()
+                        .filter(|(l, _)| *l == label)
+                        .count()
+                        > 1;
+                let red = gdk::RGBA::new(0.75, 0.11, 0.16, 1.0);
+                let (border, text) = if twice { (red, red) } else { (border, text) };
                 snapshot.push_rounded_clip(&pill);
                 snapshot.append_color(&fill, &rect);
                 snapshot.pop();
@@ -1201,6 +1216,7 @@ impl SemEditor {
                     snippet: &v.snippet,
                     map: &v.map,
                     end: v.end.as_ref(),
+                    targets: &v.targets,
                 })
                 .collect();
             jobs::stale_blocks(
@@ -1377,12 +1393,19 @@ impl SemEditor {
             }
             view.shown = result.generation;
             view.stops = OnceCell::new();
+            let latest = result.generation == view.submitted;
+            let mut retargeted = false;
             let end = match result.outcome {
                 Ok(rendered) => {
                     view.texture = Some(texture(rendered.raster));
                     view.texture_ppp = rendered.pixel_per_pt;
                     view.layout = Some(rendered.layout);
                     view.error = None;
+                    // New label targets: references to them render again.
+                    if latest && view.targets != rendered.targets {
+                        view.targets = rendered.targets;
+                        retargeted = true;
+                    }
                     rendered.end_state
                 }
                 Err(errors) => {
@@ -1392,11 +1415,11 @@ impl SemEditor {
             };
             // The counters this block ends with; a failed block passes its
             // start on unchanged.
-            let current = result.generation == view.submitted && view.start.is_some();
+            let current = latest && view.start.is_some();
             if current {
                 view.end = end.or_else(|| view.start.clone());
             }
-            current
+            current || retargeted
         };
         if chained {
             // The next counter-sensitive block can go now.

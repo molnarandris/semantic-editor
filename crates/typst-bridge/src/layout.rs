@@ -16,7 +16,7 @@ use typst::{World, WorldExt};
 use typst_layout::Page;
 
 use crate::compile::BLOCK_PAD_PT;
-use crate::counters::CounterState;
+use crate::counters::{CounterState, LabelTarget};
 use crate::serialize::SpanMap;
 use crate::world::BridgeWorld;
 
@@ -235,6 +235,9 @@ pub struct RawLayout {
     /// cached with it).
     #[serde(default)]
     pub(crate) end_state: Option<CounterState>,
+    /// What the labels the block defines point to (see `label_report`).
+    #[serde(default)]
+    pub(crate) targets: Vec<LabelTarget>,
 }
 
 /// Extract the raw geometry of a compiled block page. `snippet_offset` is the
@@ -271,6 +274,7 @@ pub fn raw_layout(world: &BridgeWorld, page: &Page, snippet_offset: usize) -> Ra
             .filter_map(|(o, n, r, b)| Some((local(o)?, n, r, b)))
             .collect(),
         end_state: None,
+        targets: vec![],
     }
 }
 

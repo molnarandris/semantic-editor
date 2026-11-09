@@ -21,7 +21,7 @@ use model::NodeId;
 
 use crate::TYPST_VERSION;
 use crate::compile::{Around, Raster, block_document, compile, render_page};
-use crate::counters::{self, CounterState};
+use crate::counters::{self, CounterState, LabelTarget};
 use crate::disk_cache::DiskCache;
 use crate::layout::{BlockLayout, RawLayout, raw_layout};
 use crate::serialize::SpanMap;
@@ -57,6 +57,8 @@ pub struct Rendered {
     pub pixel_per_pt: f64,
     /// Counter values at the end of the block, if `around` asked for them.
     pub end_state: Option<CounterState>,
+    /// What the labels the block defines point to, if `around` asked.
+    pub targets: Vec<LabelTarget>,
 }
 
 #[derive(Debug)]
@@ -208,6 +210,7 @@ fn run(
             layout: raw.resolve(&job.map),
             pixel_per_pt: job.pixel_per_pt,
             end_state: raw.end_state.clone(),
+            targets: raw.targets.clone(),
         });
         deliver(CompileResult {
             block: job.block,
@@ -236,6 +239,7 @@ fn compile_job(
     let raster = render_page(page, job.pixel_per_pt);
     let mut raw = raw_layout(world, page, offset);
     raw.end_state = counters::end_state(&doc);
+    raw.targets = counters::label_targets(&doc);
     Ok((Arc::new(raster), Arc::new(raw)))
 }
 

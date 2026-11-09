@@ -743,3 +743,19 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
 - Source: `#sem-code[@label]` in the editor (the box carries the span), `@label` in the
   export, `#ref(<label>)` when the text after it would continue the label (`.5`).
 - Caret: the texts around a reference end and start at its box.
+- Rendering (blocks compile alone, so a reference has no target there): a labelled
+  block's suffix gets `label_report`, metadata `<sem-labels>` giving for each label
+  the counter a reference shows and its value there (`none` if it cannot be
+  referenced: no numbering, defined twice, not a heading/equation/figure); the
+  worker returns it (`Rendered::targets`, cached with the layout). `stale_blocks`
+  builds the label table (defining block, count, report) and gives a block with
+  references, after everything else, a stand-in per resolvable label (`ref_stub`):
+  the counter set one below, then `#place(hide[<element> <label>])`, the element a
+  heading of the same level, an equation, or a call of the same environment
+  (`labels_in`). Typst then renders the reference with the header's supplements
+  and numbering. Other references get a show rule in the prefix (`missing_ref`)
+  showing a red `@label`. New targets trigger a re-submit. Measured: the stand-in
+  render's text equals the whole document's, and stand-ins add no height
+  (`references_through_stand_ins`); a forward reference settles in two rounds
+  with every render compiling (`references_resolve_through_reports`).
+- A label defined twice shows its pill in red.

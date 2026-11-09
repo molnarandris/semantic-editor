@@ -17,7 +17,10 @@ pub use code::{code_display, is_code};
 pub use compile::{
     Around, BLOCK_PAD_PT, Raster, block_document, compile, compile_pdf, render_page,
 };
-pub use counters::{CounterState, chain_code, initial_state, tracked_counters};
+pub use counters::{
+    CounterState, LabelTarget, chain_code, initial_state, label_report, missing_ref, ref_stub,
+    tracked_counters,
+};
 pub use layout::{BlockLayout, GlyphBox, RawLayout, Rect, raw_layout};
 pub use serialize::{
     CETZ_IMPORT, CETZ_VERSION, DEFAULT_HEADER, HEADER_SPECIMEN, PREAMBLE, SpanMap, Style,

@@ -108,6 +108,117 @@ pub fn end_state(doc: &PagedDocument) -> Option<CounterState> {
         .collect()
 }
 
+/// What a label points to, as a block that defines it reports: the counter
+/// a reference to it shows (a Typst expression, as in [`CounterState`]) and
+/// its value there.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct LabelTarget {
+    pub label: String,
+    pub counter: String,
+    pub value: Vec<i64>,
+}
+
+/// Label of the metadata that reports a block's labels.
+const LABELS_LABEL: &str = "sem-labels";
+
+/// Typst code reporting what `labels` (defined in the block) point to: for
+/// each, the counter a reference shows and its value, or `none` if it
+/// cannot be referenced (no numbering, defined twice, or not a heading,
+/// equation or figure).
+pub fn label_report(labels: &[String]) -> String {
+    if labels.is_empty() {
+        return String::new();
+    }
+    let items: Vec<String> = labels
+        .iter()
+        .map(|l| format!("label({})", quoted(l)))
+        .collect();
+    format!(
+        "\n#context [#metadata(({},).map(l => {{
+  let found = query(l)
+  if found.len() != 1 {{ return none }}
+  let el = found.first()
+  let f = el.func()
+  let expr = if f == heading {{ \"counter(heading)\" }} else if f == math.equation {{
+    \"counter(math.equation)\"
+  }} else if f == figure {{
+    \"counter(figure.where(kind: \" + repr(el.kind) + \"))\"
+  }} else {{ return none }}
+  if el.numbering == none {{ return none }}
+  (str(l), expr, eval(expr).at(el.location()))
+}})) <{LABELS_LABEL}>]",
+        items.join(", ")
+    )
+}
+
+/// The labels a compiled block reported (see [`label_report`]); those that
+/// cannot be referenced are left out.
+pub fn label_targets(doc: &PagedDocument) -> Vec<LabelTarget> {
+    let Some(label) = Label::new(PicoStr::intern(LABELS_LABEL)) else {
+        return vec![];
+    };
+    let Ok(content) = doc.introspector().query_label(label) else {
+        return vec![];
+    };
+    let Some(Value::Array(items)) = content.to_packed::<MetadataElem>().map(|m| &m.value) else {
+        return vec![];
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let Value::Array(item) = item else {
+                return None;
+            };
+            let [Value::Str(label), Value::Str(counter), Value::Array(value)] = item.as_slice()
+            else {
+                return None;
+            };
+            let value = value
+                .iter()
+                .map(|v| match v {
+                    Value::Int(n) => Some(*n),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()?;
+            Some(LabelTarget {
+                label: label.to_string(),
+                counter: counter.to_string(),
+                value,
+            })
+        })
+        .collect()
+}
+
+/// Typst code, after a block, making `target` resolvable there: an
+/// invisible `element` (a heading, equation or environment call like the
+/// one labelled) with the label, its counter set so the element gets the
+/// target's number. References in the block then render as in the full
+/// document, with the header's supplements and numbering.
+pub fn ref_stub(target: &LabelTarget, element: &str) -> String {
+    let mut value = target.value.clone();
+    if let Some(last) = value.last_mut() {
+        *last -= 1; // the element steps the counter back up
+    }
+    let items: Vec<String> = value.iter().map(i64::to_string).collect();
+    let comma = if items.len() == 1 { "," } else { "" };
+    format!(
+        "\n#{}.update(({}{comma}))\n#place(hide[{element} <{}>])",
+        target.counter,
+        items.join(", "),
+        target.label
+    )
+}
+
+/// Typst code, before a block, showing references to `label` as a red
+/// `@label` (a missing, unnumbered or duplicate target) instead of failing.
+pub fn missing_ref(label: &str) -> String {
+    format!(
+        "#show ref.where(target: label({})): _ => text(fill: rgb(\"#c01c28\"), {})\n",
+        quoted(label),
+        quoted(&format!("@{label}"))
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,5 +362,93 @@ mod tests {
             assert_eq!(fa.size(), fb.size(), "{snippet}");
             assert_eq!(fa.baseline(), fb.baseline(), "{snippet}");
         }
+    }
+
+    /// The text of a page, hidden content left out.
+    fn page_text(frame: &typst::layout::Frame, out: &mut String) {
+        for (_, item) in frame.items() {
+            match item {
+                typst::layout::FrameItem::Group(g) => page_text(&g.frame, out),
+                typst::layout::FrameItem::Text(t) => out.push_str(&t.text),
+                _ => {}
+            }
+        }
+    }
+
+    /// Labelled blocks report their targets; a block referencing them with
+    /// stand-in targets shows the references as in the full document, and
+    /// the stand-ins take no space; a missing label shows in red.
+    #[test]
+    fn references_through_stand_ins() {
+        let mut world = BridgeWorld::new();
+        let report = |labels: &[&str]| {
+            label_report(&labels.iter().map(|l| l.to_string()).collect::<Vec<_>>())
+        };
+        let mut targets = vec![];
+        for (prefix, snippet, label) in [
+            ("", "= One\n\n== Two <sec:two>", "sec:two"),
+            ("#counter(math.equation).update((2,))\n", "$ x $ <eq>", "eq"),
+            ("", "#lemma[Claim.] <lem>", "lem"),
+        ] {
+            let around = Around {
+                header: HEADER.into(),
+                prefix: prefix.into(),
+                suffix: report(&[label]),
+            };
+            targets.extend(label_targets(&compile_block(&mut world, &around, snippet)));
+        }
+        let want = |label: &str, counter: &str, value: &[i64]| LabelTarget {
+            label: label.into(),
+            counter: counter.into(),
+            value: value.to_vec(),
+        };
+        assert_eq!(
+            targets,
+            [
+                want("sec:two", "counter(heading)", &[1, 1]),
+                want("eq", "counter(math.equation)", &[3]),
+                want("lem", "counter(figure.where(kind: \"lemma\"))", &[1]),
+            ]
+        );
+        let elements = [
+            "#heading(level: 2)[]",
+            "#math.equation(block: true)[]",
+            "#lemma[]",
+        ];
+        let around = Around {
+            header: HEADER.into(),
+            prefix: missing_ref("gone"),
+            suffix: targets
+                .iter()
+                .zip(elements)
+                .map(|(t, e)| ref_stub(t, e))
+                .collect(),
+        };
+        let doc = compile_block(&mut world, &around, "See @sec:two, @eq, @lem and @gone.");
+        let mut text = String::new();
+        page_text(&doc.pages()[0].frame, &mut text);
+        // The same references in one whole document.
+        let whole = compile_block(
+            &mut world,
+            &Around {
+                header: HEADER.into(),
+                ..Around::default()
+            },
+            "= One\n\n== Two <sec:two>\n\n#counter(math.equation).update((2,))\n$ x $ <eq>\n\n\
+             #lemma[Claim.] <lem>\n\nSee @sec:two, @eq, @lem and",
+        );
+        let mut full = String::new();
+        page_text(&whole.pages()[0].frame, &mut full);
+        let refs = &full[full.rfind("See").unwrap()..];
+        assert_eq!(format!("{refs} @gone."), text);
+        let plain = compile_block(
+            &mut world,
+            &Around {
+                header: HEADER.into(),
+                ..Around::default()
+            },
+            &format!("{} \\@gone.", refs.replace('@', "\\@")),
+        );
+        assert_eq!(doc.pages()[0].frame.size(), plain.pages()[0].frame.size());
     }
 }

@@ -18,10 +18,12 @@
 
 use std::sync::Arc;
 
-use model::{Block, BlockNode, ListKind};
+use std::collections::HashMap;
+
+use model::{Block, BlockNode, Inline, InlineNode, ListKind};
 use typst_bridge::{
-    Around, CounterState, SpanMap, chain_code, code_display, initial_state, is_code,
-    serialize_block_numbered, tracked_counters,
+    Around, CounterState, LabelTarget, SpanMap, chain_code, code_display, initial_state, is_code,
+    label_report, missing_ref, ref_stub, serialize_block_numbered, tracked_counters,
 };
 
 /// What was last submitted for a block, and how its counters ended.
@@ -32,6 +34,9 @@ pub struct Submitted<'a> {
     /// Counter-sensitive blocks: the counters at the end of the submitted
     /// render, once it arrived.
     pub end: Option<&'a CounterState>,
+    /// What the labels the block defines point to, as its last render
+    /// reported.
+    pub targets: &'a [LabelTarget],
 }
 
 pub struct Job {
@@ -43,6 +48,48 @@ pub struct Job {
     pub persist: bool,
     /// Counter-sensitive blocks: the counters at the start.
     pub start: Option<CounterState>,
+}
+
+/// The labels defined in a block (nested blocks too), each with the Typst
+/// code of an invisible element like the one labelled, to stand in for it
+/// in blocks that reference it.
+fn labels_in(block: &BlockNode, out: &mut Vec<(String, String)>) {
+    if !block.label.is_empty() {
+        let element = match &block.kind {
+            Block::Heading { level, .. } => Some(format!("#heading(level: {level})[]")),
+            Block::DisplayMath(_) => Some("#math.equation(block: true)[]".to_string()),
+            Block::Env { name, args, .. } if args.is_empty() => Some(format!("#{name}[]")),
+            Block::Env { name, args, .. } => Some(format!("#{name}({args})[]")),
+            _ => None,
+        };
+        if let Some(element) = element {
+            out.push((block.label.clone(), element));
+        }
+    }
+    for child in block.kind.body().into_iter().flatten() {
+        labels_in(child, out);
+    }
+}
+
+/// The labels referenced in a block (nested blocks and inline calls too).
+fn refs_in(block: &BlockNode, out: &mut Vec<String>) {
+    fn inlines(v: &[InlineNode], out: &mut Vec<String>) {
+        for inline in v {
+            match &inline.kind {
+                Inline::Ref(label) if !label.is_empty() && !out.contains(label) => {
+                    out.push(label.clone())
+                }
+                Inline::Call { body, .. } => inlines(body, out),
+                _ => {}
+            }
+        }
+    }
+    if let Some(v) = block.kind.text_inlines() {
+        inlines(v, out);
+    }
+    for child in block.kind.body().into_iter().flatten() {
+        refs_in(child, out);
+    }
 }
 
 /// The source of a code block.
@@ -87,6 +134,31 @@ pub fn stale_blocks(
     let mut jobs = vec![];
     // Place of a numbered item in its list (items are rendered one by one).
     let mut number = 0;
+    // Labels: the block defining each (with its stand-in element) and how
+    // often it is defined; a reference resolves only to a unique label.
+    let defined: Vec<Vec<(String, String)>> = blocks
+        .iter()
+        .map(|b| {
+            let mut v = vec![];
+            labels_in(b, &mut v);
+            v
+        })
+        .collect();
+    let mut table: HashMap<&str, (usize, &str, usize)> = HashMap::new();
+    for (index, labels) in defined.iter().enumerate() {
+        for (label, element) in labels {
+            table.entry(label).or_insert((index, element, 0)).2 += 1;
+        }
+    }
+    // What they point to, as their blocks last reported.
+    let mut reported: HashMap<&str, &LabelTarget> = HashMap::new();
+    for (index, s) in submitted.iter().enumerate() {
+        for t in s.targets {
+            if table.get(t.label.as_str()).is_some_and(|d| d.0 == index) {
+                reported.insert(&t.label, t);
+            }
+        }
+    }
     for (index, block) in blocks.iter().enumerate() {
         number = match block.kind {
             Block::Item {
@@ -113,6 +185,23 @@ pub fn stale_blocks(
         } else {
             None
         };
+        // Labelled blocks (all counter-sensitive) report their targets.
+        let own: Vec<String> = defined[index].iter().map(|(l, _)| l.clone()).collect();
+        if sensitive {
+            around.suffix.push_str(&label_report(&own));
+        }
+        // References: a stand-in for each unique, reported target (after
+        // everything else), else a red `@label`.
+        let mut refs = vec![];
+        refs_in(block, &mut refs);
+        for label in refs.iter().filter(|l| !own.contains(l)) {
+            match (table.get(label.as_str()), reported.get(label.as_str())) {
+                (Some((_, element, 1)), Some(target)) => {
+                    around.suffix.push_str(&ref_stub(target, element));
+                }
+                _ => around.prefix.push_str(&missing_ref(label)),
+            }
+        }
         let (snippet, map) = serialize_block_numbered(block, (number > 0).then_some(number));
         let prev = submitted.get(index);
         let current =
@@ -149,6 +238,7 @@ mod tests {
         snippet: String,
         map: SpanMap,
         end: Option<CounterState>,
+        targets: Vec<LabelTarget>,
     }
 
     fn submitted(views: &[View]) -> Vec<Submitted<'_>> {
@@ -159,6 +249,7 @@ mod tests {
                 snippet: &v.snippet,
                 map: &v.map,
                 end: v.end.as_ref(),
+                targets: &v.targets,
             })
             .collect()
     }
@@ -181,6 +272,7 @@ mod tests {
                 snippet: job.snippet.clone(),
                 map: job.map.clone(),
                 end: None,
+                ..Default::default()
             };
         }
         jobs.iter().map(|j| j.index).collect()
@@ -303,6 +395,7 @@ mod tests {
                     around: job.around,
                     snippet: job.snippet,
                     map: job.map,
+                    ..Default::default()
                 };
             }
         }
@@ -387,6 +480,7 @@ mod tests {
                     snippet: job.snippet.clone(),
                     map: job.map.clone(),
                     end: None,
+                    ..Default::default()
                 };
                 worker.submit(CompileJob {
                     block: model::NodeId(job.index as u64),
@@ -410,6 +504,71 @@ mod tests {
             }
         }
         assert_eq!(ok, [Some(false), Some(true), Some(true)]);
+    }
+
+    /// With the compiler: references render once their targets reported,
+    /// also to a later block; a missing label shows red instead of failing.
+    /// Every render compiles, the stand-ins resolve the references.
+    #[test]
+    fn references_resolve_through_reports() {
+        let mut d = Document::empty();
+        let (see, r1, and, r2, end) = (
+            d.text("See "),
+            d.reference("sec:b"),
+            d.text(" and "),
+            d.reference("nowhere"),
+            d.text("."),
+        );
+        let para = d.paragraph(vec![see, r1, and, r2, end]);
+        let (a, b) = (d.text("A"), d.text("B"));
+        let first = d.heading(1, vec![a]);
+        let mut second = d.heading(1, vec![b]);
+        second.label = "sec:b".into();
+        d.blocks = vec![para, first, second];
+        let header = "#set heading(numbering: \"1.1\")\n";
+        let (tx, rx) = mpsc::channel();
+        let worker = Worker::spawn(None, move |r| tx.send(r).unwrap());
+        let mut views: Vec<View> = vec![];
+        let mut rounds = 0;
+        loop {
+            views.resize_with(d.blocks.len(), View::default);
+            let jobs = stale_blocks(&d.blocks, header, false, &submitted(&views));
+            if jobs.is_empty() {
+                break;
+            }
+            rounds += 1;
+            assert!(rounds < 10, "settles");
+            for job in &jobs {
+                views[job.index] = View {
+                    around: job.around.clone(),
+                    snippet: job.snippet.clone(),
+                    map: job.map.clone(),
+                    end: None,
+                    targets: std::mem::take(&mut views[job.index].targets),
+                };
+                worker.submit(CompileJob {
+                    block: model::NodeId(job.index as u64),
+                    generation: 1,
+                    around: job.around.clone(),
+                    snippet: job.snippet.clone(),
+                    map: job.map.clone(),
+                    width_pt: 300.0,
+                    pixel_per_pt: 1.0,
+                    persist: false,
+                    transient: false,
+                });
+            }
+            for _ in &jobs {
+                let r = rx.recv_timeout(Duration::from_secs(120)).unwrap();
+                let i = r.block.0 as usize;
+                let rendered = r.outcome.unwrap_or_else(|e| panic!("block {i}: {e:?}"));
+                views[i].end = rendered.end_state.or_else(|| job_start(&jobs, i));
+                views[i].targets = rendered.targets;
+            }
+        }
+        assert_eq!(views[2].targets.len(), 1, "the heading reported its label");
+        assert!(views[0].around.suffix.contains("<sec:b>"), "a stand-in");
+        assert!(views[0].around.prefix.contains("\"@nowhere\""), "red");
     }
 
     fn job_start(jobs: &[Job], index: usize) -> Option<CounterState> {
@@ -489,6 +648,7 @@ mod tests {
                         snippet: job.snippet.clone(),
                         map: job.map.clone(),
                         end: None,
+                        ..Default::default()
                     };
                     worker.submit(CompileJob {
                         block: model::NodeId(job.index as u64),
@@ -551,6 +711,7 @@ mod tests {
                     snippet: job.snippet.clone(),
                     map: job.map.clone(),
                     end: None,
+                    ..Default::default()
                 };
                 worker.submit(CompileJob {
                     block: blocks[job.index].id,
