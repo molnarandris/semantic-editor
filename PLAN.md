@@ -545,8 +545,5 @@ Done before M11–M13, at the user's request (2026-11-08). Implementation notes:
   text); otherwise it stays at the element's start (`layout.rs`, `span_info`). Same
   for heading numbers longer than the `= ` before the text. `LAYOUT_VERSION` in the
   render cache key, so cached layouts from older builds are not reused.
-- Follow-up (user request): in an empty formula (display or inline) the caret sits
-  right after the placeholder, where typed text appears; empty slots inside
-  fractions and scripts keep the caret in their middle (`row_stops`, depth 1).
 
 Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing.
