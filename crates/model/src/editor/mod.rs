@@ -734,6 +734,9 @@ impl Editor {
             (None, _) if self.source_block().is_some() => {
                 "Ctrl+Enter or double click → edit source · Enter → new paragraph · Backspace → delete"
             }
+            (None, Some(p)) if self.text_before(&p).is_some() => {
+                "text in the formula · \" → end it"
+            }
             (None, Some(p)) if self.call_word(&p, true).is_some() => {
                 if self.call_word(&p, false).is_some() {
                     "space or ( → function with its arguments"

@@ -583,4 +583,25 @@ M12 is split: M12a the generic call node, M12b the atoms (primes, text in math, 
 - Not yet: named arguments (`abs(size: …)`), `mat` rows (`;`), choosing an optional
   argument away (`root`'s empty index stays a slot).
 
+## M12b — Atoms in math (2026-11-09)
+
+- Model: `MathKind::Primes(n)`, `Text(String)`, `Align`, `Linebreak`. File format 8.
+- Typing: `'` adds a prime (one node per run, `f''` is `Primes(2)`); `"` starts text:
+  every key (space, `$`, `,` …) goes into it while the caret stays after it, `"` ends
+  it (reusing the word state: `Editor::text_before`). Backspace takes the last char of
+  a text (or one prime) back; an empty text goes. `&` is an alignment point; `\` then
+  space a line break (as in Typst; `\alpha`-style names are unchanged). Hint while
+  typing text.
+- Rendering: primes are written right after their base, with no space (measured:
+  `f '` does not attach in Typst, `f'` does), except after a fraction (they would
+  attach to the denominator) or code. Text is a quoted string; an empty one shows a
+  transparent `x` in the editor. `\` is always followed by a space, so it cannot escape
+  what comes next.
+- Multi-line formulas: `row_stops` splits a row at line breaks; each stop takes its
+  line's height and a baseline moved down with the line, and the first stop after a
+  break starts at the line's left. So ↑/↓ move between the lines and `&` columns line
+  up (test `stops_in_multi_line_formulas`).
+- Not yet: editing inside a text after leaving it (Backspace from its end only);
+  Shift+Enter for a line break.
+
 Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing.

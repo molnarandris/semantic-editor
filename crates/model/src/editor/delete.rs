@@ -198,15 +198,25 @@ impl Editor {
                 return self.select_node(&p, k);
             }
             let in_word = self.word.as_ref() == Some(&self.caret);
-            if let MathKind::Ident(s) | MathKind::Num(s) = &node.kind
-                && s.chars().count() > 1
-            {
-                let mut short = s.clone();
-                short.pop();
-                let kind = match node.kind {
-                    MathKind::Ident(_) => MathKind::Ident(short),
-                    _ => MathKind::Num(short),
-                };
+            // Words, numbers and text lose their last char, primes one
+            // prime; an empty text (being typed) goes.
+            let shorter = match &node.kind {
+                MathKind::Ident(s) | MathKind::Num(s) | MathKind::Text(s)
+                    if s.chars().count() > 1
+                        || matches!(node.kind, MathKind::Text(_)) && !s.is_empty() =>
+                {
+                    let mut short = s.clone();
+                    short.pop();
+                    Some(match node.kind {
+                        MathKind::Ident(_) => MathKind::Ident(short),
+                        MathKind::Num(_) => MathKind::Num(short),
+                        _ => MathKind::Text(short),
+                    })
+                }
+                MathKind::Primes(n) if *n > 1 => Some(MathKind::Primes(n - 1)),
+                _ => None,
+            };
+            if let Some(kind) = shorter {
                 let op = row_replace(p.row, k, MathNode { id: node.id, kind });
                 let ok = self.commit(vec![op], p.at(p.offset), Last::Deleting);
                 if in_word {

@@ -126,6 +126,14 @@ pub enum MathKind {
         name: String,
         args: Vec<MathRow>,
     },
+    /// Primes attached to what comes before, `f'`, `f''` (the count).
+    Primes(usize),
+    /// Text in a formula, `"if"`: upright text, spaces kept.
+    Text(String),
+    /// An alignment point, `&` (aligned multi-line equations).
+    Align,
+    /// A line break, `\`.
+    Linebreak,
     /// An inline CeTZ drawing: like a diagram block, only the drawing code
     /// (the body of `cetz.canvas({ import cetz.draw: * … })`), set in a box
     /// in the formula.
@@ -379,6 +387,10 @@ impl MathNode {
             MathKind::Code(_) => "code",
             MathKind::Diagram(_) => "diagram",
             MathKind::Call { .. } => "function",
+            MathKind::Primes(_) => "primes",
+            MathKind::Text(_) => "text",
+            MathKind::Align => "alignment point",
+            MathKind::Linebreak => "line break",
         }
     }
 }
@@ -795,7 +807,7 @@ impl Document {
         }
     }
 
-    fn node(&mut self, kind: MathKind) -> MathNode {
+    pub fn node(&mut self, kind: MathKind) -> MathNode {
         MathNode {
             id: self.fresh_id(),
             kind,

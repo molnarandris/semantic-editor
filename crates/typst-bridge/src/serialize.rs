@@ -452,8 +452,14 @@ impl Writer {
     /// atoms do not change Typst's output; the readable style drops them
     /// only next to brackets and punctuation, where no identifier can form.
     fn space_between(&self, a: &MathNode, b: &MathNode, a_paired: bool, b_paired: bool) -> bool {
-        // After code, a `;` or `,` would be read as part of it.
-        if self.style == Style::Edit || a.source().is_some() {
+        // Primes attach only right after their base; after a fraction they
+        // would attach to the denominator, after code be read as part of it.
+        if matches!(b.kind, MathKind::Primes(_)) {
+            return matches!(a.kind, MathKind::Frac { .. }) || a.source().is_some();
+        }
+        // After code, a `;` or `,` would be read as part of it; after `\`
+        // they would be escaped.
+        if self.style == Style::Edit || a.source().is_some() || a.kind == MathKind::Linebreak {
             return true;
         }
         let sym = |n: &MathNode, set: &[&str]| matches!(&n.kind, MathKind::Sym(s) if set.contains(&s.as_str()));
@@ -515,6 +521,14 @@ impl Writer {
                 w.out.push('#');
                 w.out.push_str(src);
             }
+            MathKind::Primes(n) => w.out.push_str(&"'".repeat(*n)),
+            // An empty text (being typed) holds its place in the editor.
+            MathKind::Text(s) if s.is_empty() && w.style == Style::Edit => {
+                w.out.push_str("#text(fill: rgb(0, 0, 0, 0), \"x\")");
+            }
+            MathKind::Text(s) => w.out.push_str(&quoted(s)),
+            MathKind::Align => w.out.push('&'),
+            MathKind::Linebreak => w.out.push('\\'),
             MathKind::Call { name, args } => {
                 // Inside the arguments a comma is written `comma`, so it
                 // cannot split them.
@@ -979,6 +993,7 @@ mod tests {
             "a times.o b arrow.r.long c eq.not x. times.q y. lt.eq.slant",
             "sqrt x+root(3,y)+cal(A),b+cases(a,b,,c)+abs(x,y)+hat(u)+floor(v)/w^2",
             "overline(underbrace(x, n))_k + binom(n,k,) + op(a, b)",
+            "f''(x) + a/b' + \"if \\ \"q\" x\"\" &= y \\ &= z \\\\ w'_2",
         ];
         let mut d = Document::empty();
         let p = d.paragraph(vec![]);
@@ -1252,6 +1267,48 @@ mod tests {
             "small index before: {ri:?} {rr:?}"
         );
         assert!(rc.x < ri.x + 1.0 && rc.right() >= rr.right(), "{rc:?}");
+    }
+
+    /// Atoms: primes right after their base (else they would not attach),
+    /// text quoted, `&` and `\` as in Typst (`\` always followed by a
+    /// space, so it cannot escape what follows).
+    #[test]
+    fn math_atoms() {
+        let mut d = Document::empty();
+        let (f, x, a, b, c) = (
+            d.ident("f"),
+            d.ident("x"),
+            d.ident("a"),
+            d.ident("b"),
+            d.ident("c"),
+        );
+        let primes = d.node(MathKind::Primes(2));
+        let (open, close, comma) = (d.sym("("), d.sym(")"), d.sym(","));
+        let text = d.node(MathKind::Text("if \"x\"".into()));
+        let (align, br, eq) = (
+            d.node(MathKind::Align),
+            d.node(MathKind::Linebreak),
+            d.sym("="),
+        );
+        let block = d.display(vec![
+            f, primes, open, x, close, text, a, align, eq, b, br, comma, c,
+        ]);
+        let (readable, _) = serialize_block_styled(&block, Style::Readable);
+        assert_eq!(readable, "$ f'' (x) \"if \\\"x\\\"\" a & = b \\ , c $");
+        let (edit, _) = serialize_block(&block);
+        assert!(edit.contains("f'' ("), "{edit}");
+        let mut world = BridgeWorld::new();
+        for src in [readable, edit] {
+            let (doc, _) = block_document(&Around::default(), &src, 300.0);
+            compile(&mut world, &doc).unwrap();
+            fn attached(n: &typst::syntax::SyntaxNode) -> bool {
+                n.kind() == typst::syntax::SyntaxKind::MathAttach || n.children().any(attached)
+            }
+            assert!(
+                attached(&typst::syntax::parse(&src)),
+                "the primes attach to f: {src}"
+            );
+        }
     }
 
     /// An inline diagram: its drawing in a box and canvas in the file, boxed

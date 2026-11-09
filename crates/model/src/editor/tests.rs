@@ -742,6 +742,48 @@ fn math_calls() {
     assert_eq!(display_of(&e, 0), "sqrt(a , b)");
 }
 
+/// Atoms: `'` adds primes, `"…"` is text (spaces and all, Backspace takes
+/// its chars back), `&` an alignment point, `\` then space a line break.
+#[test]
+fn math_atoms() {
+    let mut e = math_calls_editor();
+    e.insert_text("f''(x)");
+    assert_eq!(display_of(&e, 0), "f '' ( x )");
+    e.backspace();
+    e.backspace();
+    e.backspace();
+    e.backspace();
+    assert_eq!(display_of(&e, 0), "f '", "Backspace takes one prime");
+
+    let mut e = math_calls_editor();
+    e.insert_text("x \"if a, $b\" y");
+    assert_eq!(display_of(&e, 0), "x \"if a, $b\" y");
+    e.backspace();
+    e.backspace();
+    e.backspace();
+    assert_eq!(
+        display_of(&e, 0),
+        "x \"if a, \"",
+        "y, then chars of the text"
+    );
+    e.insert_text("z");
+    assert_eq!(
+        display_of(&e, 0),
+        "x \"if a, \" z",
+        "not typing it any more"
+    );
+    let mut e = math_calls_editor();
+    e.insert_text("\"");
+    assert_eq!(display_of(&e, 0), "\"\"");
+    e.backspace();
+    assert_eq!(display_of(&e, 0), "", "an empty text goes");
+
+    let mut e = math_calls_editor();
+    e.insert_text("a&=b\\ &=c");
+    assert_eq!(display_of(&e, 0), "a & = b \\ & = c");
+    e.doc().check_invariants().unwrap();
+}
+
 #[test]
 fn enter_at_end_of_heading_starts_paragraph() {
     let mut d = Document::empty();
@@ -818,6 +860,10 @@ fn show(row: &crate::tree::MathRow) -> String {
             MathKind::Slot => "□".into(),
             MathKind::Code(_) => "#code".into(),
             MathKind::Diagram(_) => "#diagram".into(),
+            MathKind::Primes(n) => "'".repeat(*n),
+            MathKind::Text(t) => format!("\"{t}\""),
+            MathKind::Align => "&".into(),
+            MathKind::Linebreak => "\\".into(),
             MathKind::Call { name, args } => format!(
                 "{name}({})",
                 args.iter().map(show).collect::<Vec<_>>().join(", ")

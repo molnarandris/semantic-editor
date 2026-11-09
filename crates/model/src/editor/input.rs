@@ -216,6 +216,18 @@ impl Editor {
     }
 
     pub(super) fn math_char(&mut self, c: char) -> bool {
+        // Text being typed (`"if`): everything goes into it, `"` ends it.
+        if let Some(p) = self.row_pos()
+            && let Some((id, text)) = self.text_before(&p)
+        {
+            if c == '"' {
+                self.word = None;
+                return true;
+            }
+            let ok = self.retype_node_before(&p, id, MathKind::Text(format!("{text}{c}")));
+            self.word = Some(self.caret.clone());
+            return ok;
+        }
         let mut changed = false;
         if !matches!(c, '/' | '^' | '_') && matches!(self.selected, Some(Selected::Nodes { .. })) {
             changed |= self.delete_selection();
@@ -257,6 +269,14 @@ impl Editor {
         if (c == ' ' || c == '(') && self.make_call(&p, c == '(') {
             return true;
         }
+        // `\` then space: a line break, as in Typst.
+        if c == ' '
+            && let Some((id, name)) = self.word_before(&p)
+            && name == "\\"
+        {
+            self.word = None;
+            return self.retype_node_before(&p, id, MathKind::Linebreak);
+        }
         // Finishing a word can remove a lone `\`, so look again.
         changed |= self.finish_word();
         let Some(p) = self.row_pos() else {
@@ -281,6 +301,26 @@ impl Editor {
             }
             ')' if self.groups.contains(&p.row) => self.escape() || changed,
             ',' if self.next_argument(&p) => true,
+            // `"` starts text; `'` adds a prime; `&` is an alignment point.
+            '"' => {
+                let node = self.doc.node(MathKind::Text(String::new()));
+                let ok = self.type_node(&p, node);
+                self.word = Some(self.caret.clone());
+                ok || changed
+            }
+            '\'' => match prev {
+                Some((id, MathKind::Primes(n))) => {
+                    self.retype_node_before(&p, id, MathKind::Primes(n + 1))
+                }
+                _ => {
+                    let node = self.doc.node(MathKind::Primes(1));
+                    self.type_node(&p, node) || changed
+                }
+            },
+            '&' => {
+                let node = self.doc.node(MathKind::Align);
+                self.type_node(&p, node) || changed
+            }
             c if c.is_whitespace() || c.is_control() => changed,
             c if c.is_ascii_digit() || c == '.' => match prev {
                 Some((id, MathKind::Num(n))) if c != '.' || !n.contains('.') => {
@@ -310,6 +350,18 @@ impl Editor {
                 let node = self.doc.sym(&symbols::typed_symbol(c));
                 self.type_node(&p, node)
             }
+        }
+    }
+
+    /// The text being typed in a formula (`"if`), if the caret is right
+    /// after it: its id and text.
+    pub(super) fn text_before(&self, p: &RowPos) -> Option<(NodeId, String)> {
+        match self.node_before(p) {
+            Some(MathNode {
+                id,
+                kind: MathKind::Text(t),
+            }) if self.word.as_ref() == Some(&self.caret) => Some((id, t)),
+            _ => None,
         }
     }
 

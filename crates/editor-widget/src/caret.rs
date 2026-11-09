@@ -7,7 +7,7 @@
 //! position at the left edge of each node and after the last one, and the
 //! middle of an empty slot; positions in a row span the row's height.
 
-use model::{Block, BlockNode, CursorPath, Inline, MathRow, Step};
+use model::{Block, BlockNode, CursorPath, Inline, MathKind, MathRow, Step};
 use typst_bridge::{BlockLayout, Rect};
 
 /// Advance used for chars that produced no glyph, in pt (≈ a space at 11 pt).
@@ -119,11 +119,48 @@ fn row_stops(
         out.push(at(path, 0, rb.x + rb.w / 2.0));
         return;
     }
+    // Lines of a multi-line formula (split at `\\`): each stop takes the
+    // height of its line, and its baseline is moved down with the line.
+    let lines: Vec<Rect> = row
+        .nodes
+        .split(|n| n.kind == MathKind::Linebreak)
+        .map(|nodes| {
+            nodes
+                .iter()
+                .filter_map(|n| l.box_of(n.id))
+                .reduce(|a, b| a.union(&b))
+                .unwrap_or(rb)
+        })
+        .collect();
+    let at_line = |path: Vec<Step>, offset, x, i: usize| {
+        let r = lines[i];
+        Stop {
+            depth,
+            ..stop(
+                block,
+                path,
+                offset,
+                x,
+                r.y,
+                r.bottom(),
+                line + r.y - lines[0].y,
+            )
+        }
+    };
+    let mut i = 0;
     let mut right = rb.x;
     for (k, node) in row.nodes.iter().enumerate() {
         let r = l.box_of(node.id);
         let x = r.map_or(right, |r| r.x);
-        out.push(at(path.clone(), k, x));
+        out.push(if lines.len() > 1 {
+            at_line(path.clone(), k, x, i)
+        } else {
+            at(path.clone(), k, x)
+        });
+        if node.kind == MathKind::Linebreak {
+            i += 1;
+            right = lines[i].x;
+        }
         if let Some(r) = r {
             right = r.right();
         }
@@ -133,7 +170,11 @@ fn row_stops(
             row_stops(block, p, child, l, line, depth + 1, out);
         }
     }
-    out.push(at(path, row.nodes.len(), right));
+    out.push(if lines.len() > 1 {
+        at_line(path, row.nodes.len(), right, i)
+    } else {
+        at(path, row.nodes.len(), right)
+    });
 }
 
 /// The stops of `block` in layout `l`: the whole rendered block (`top`), or
@@ -499,6 +540,36 @@ mod tests {
         assert!(
             steps.iter().all(|d| (d - steps[0]).abs() < 0.1 && *d > 3.0),
             "{steps:?}"
+        );
+    }
+
+    /// A two-line aligned formula: the stops of each line have that line's
+    /// height and baseline; the second line starts at its own left, not at
+    /// the end of the first.
+    #[test]
+    fn stops_in_multi_line_formulas() {
+        let mut d = Document::empty();
+        let (a, b, c) = (d.ident("a"), d.ident("b"), d.ident("c"));
+        let (eq1, eq2) = (d.sym("="), d.sym("="));
+        let (al1, al2) = (d.node(MathKind::Align), d.node(MathKind::Align));
+        let br = d.node(MathKind::Linebreak);
+        let block = d.display(vec![a, al1, eq1, b, br, al2, eq2, c]);
+        let l = layout_of(&block, 300.0);
+        let s = stops(&block, Some(&l));
+        assert_eq!(s.len(), 9);
+        let (first, second) = (&s[..5], &s[5..]);
+        let line1 = first[0].line;
+        assert!(first.iter().all(|t| t.line == line1), "{first:?}");
+        assert!(second.iter().all(|t| t.line > line1 + 5.0), "{second:?}");
+        assert!(second[0].top >= first[0].bottom - 1.0, "own height");
+        assert!(
+            second[0].x < first[4].x,
+            "line 2 starts left of line 1's end"
+        );
+        // Aligned at `&`: the `=` of both lines line up.
+        assert!(
+            (first[2].x - second[1].x).abs() < 0.5,
+            "{first:?} {second:?}"
         );
     }
 
