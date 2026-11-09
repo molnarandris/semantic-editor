@@ -714,3 +714,10 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
   `snapshot_label_pills` draws every label, and a faint "+ label" for the caret's
   labelable block or the environment around it (`Editor::label_focus`).
 - Not yet (M15b): references, the popover, duplicate/dangling labels.
+- Follow-up (user request): the sample document shows every feature. Labels on the
+  first heading, display formula and theorem; a `ket` macro in the header; a last
+  section typed key by key through `Editor` (`sample::typed_section`): markup,
+  inline code, dashes, `~`, a line break, formula calls, primes, text, a macro, an
+  inline diagram, labelled `cases` and aligned formulas, a term list and a block
+  call with an argument. Test `sample_has_every_feature` checks the export.
+  (Typst 0.15 has `chevron.r`; `angle.r` is gone.)

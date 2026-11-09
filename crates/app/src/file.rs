@@ -93,6 +93,36 @@ mod tests {
         assert!(pdf.starts_with(b"%PDF-"));
     }
 
+    /// The sample shows every feature: its typed section came out as typed.
+    #[test]
+    fn sample_has_every_feature() {
+        let typ = serialize_document(&sample::document());
+        let tail = &typ[typ.find("= Notation").unwrap()..];
+        for part in [
+            "$cal(H) = overline(z) + hat(x)$",
+            "root(3, x)",
+            "$f' (x) + g''$",
+            "$x \"if\" y$",
+            "$ket(ψ)$",
+            "$D = #box(baseline: 30%, cetz.canvas(",
+            "cases(x \"if\" x ≥ 0, - x \"otherwise\") $ <eq:abs>",
+            "(b + c)^2 & = (b + c) (b + c) \\ & = b^2 + 2 b c + c^2 $ <eq:square>",
+            "/ Gauge: an invertible matrix on a virtual leg.\n\n#align(center)[",
+            "= Notation and markup <sec:notation>",
+            "*bold*, _italic_, #underline[underlined]",
+            "#link(\"https://typst.app\")[link]; code is `cargo test`.",
+            "pages 3–7",
+            "pause — like",
+            "Fig.~1 together.\\ A line break",
+            "<eq:abs>",
+            "<eq:square>",
+            "/ Bond dimension: the size",
+            "#align(center)[",
+        ] {
+            assert!(tail.contains(part), "missing {part:?}");
+        }
+    }
+
     #[test]
     fn bad_files_are_rejected() {
         assert!(from_json("{").is_err());

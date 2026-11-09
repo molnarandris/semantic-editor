@@ -1,6 +1,8 @@
-//! A hard-coded document for the viewer milestone.
+//! The sample document: a short text on matrix product states that uses
+//! every feature of the editor. The first sections are built node by node;
+//! the last one is typed through the editor, as a user would.
 
-use model::{Document, InlineNode, ListKind, MathNode};
+use model::{Document, Editor, InlineNode, ListKind, MathNode, NewBlock};
 
 /// Short helpers so the sample reads roughly like the formulas it builds.
 struct B(Document);
@@ -38,7 +40,9 @@ pub fn document() -> Document {
 
     // ----- 1 Matrix product states -----
     let t = b.t("Matrix product states");
-    blocks.push(b.0.heading(1, vec![t]));
+    let mut heading = b.0.heading(1, vec![t]);
+    heading.label = "sec:mps".into();
+    blocks.push(heading);
 
     let t1 = b.t("Consider a chain of ");
     let n = b.i("n");
@@ -92,7 +96,9 @@ pub fn document() -> Document {
         b.sup(a, vec![i_n])
     };
     let rp = b.s(")");
-    blocks.push(b.0.display(vec![psi_i, eq, tr, lp, a1, a2, cdots, an, rp]));
+    let mut mps = b.0.display(vec![psi_i, eq, tr, lp, a1, a2, cdots, an, rp]);
+    mps.label = "eq:mps".into();
+    blocks.push(mps);
 
     let t1 = b.t("The bond dimension ");
     let chi = b.s("χ");
@@ -354,6 +360,7 @@ line((0, 0.25), (0, -0.25))",
     if let model::Block::Env { title: t, .. } = &mut theorem.kind {
         t.push(title);
     }
+    theorem.label = "thm:fundamental".into();
     blocks.push(theorem);
 
     let t1 = b.t(
@@ -365,8 +372,77 @@ line((0, 0.25), (0, -0.25))",
 
     b.0.blocks = blocks;
     b.0.header = format!(
-        "{}#set math.equation(numbering: \"(1)\")\n#set par(justify: true)\n",
+        "{}#set math.equation(numbering: \"(1)\")\n#set par(justify: true)\n\
+         // A macro for formulas: ket(psi) is |ψ⟩.\n\
+         #let ket(x) = $lr(|#x chevron.r)$\n",
         typst_bridge::DEFAULT_HEADER
     );
-    b.0
+    typed_section(b.0)
+}
+
+/// The last section, typed key by key at the end of `doc`.
+fn typed_section(doc: Document) -> Document {
+    let mut e = Editor::new(doc);
+    e.set_symbol_resolver(typst_bridge::resolve_symbol);
+    e.set_call_resolver(typst_bridge::call_shape);
+    e.set_math_call_resolver(typst_bridge::math_call_shape);
+    let end = e.doc().doc_end();
+    e.set_caret(end);
+
+    // A heading with a label: → at its end goes onto the label's pill.
+    e.insert_text("= Notation and markup");
+    e.move_right();
+    e.insert_text("sec:notation");
+    e.enter();
+
+    // Markup in text.
+    e.insert_text("Text can be *bold*, _italic_, #underline[underlined] or a ");
+    e.insert_text("#link(\"https://typst.app\")[link]; code is `cargo test`. ");
+    e.insert_text("Dashes join ranges, pages 3--7, or set off a pause --- like this. ");
+    e.insert_text("A non-breaking space keeps Fig.~1 together.\\ ");
+    e.insert_text("A line break starts this line.");
+    e.enter();
+
+    // Calls and atoms in formulas, and an inline diagram.
+    e.insert_text("Formulas call functions: $cal(H) = overline(z) + hat(x)$, ");
+    e.insert_text("$sqrt(2) + root(3, x)$, with primes $f'(x) + g''$, ");
+    e.insert_text("text $x \"if\" y$ and the header's macros, $ket(psi)$. ");
+    e.insert_text("A diagram can sit in a formula: $D = ");
+    e.insert_block(NewBlock::Diagram);
+    e.insert_text("$.");
+    e.enter();
+
+    // Labelled display formulas: `$$`, the formula, → onto the label.
+    e.insert_text("$$|x| = cases(x \"if\" x >= 0, -x \"otherwise\")");
+    e.move_right();
+    e.insert_text("eq:abs");
+    e.enter();
+    e.insert_text("Aligned equations put `&` where lines align and `\\` between them:");
+    e.enter();
+    // Esc leaves a superscript.
+    e.insert_text("$$(b + c)^2");
+    e.escape();
+    e.insert_text(" &= (b + c)(b + c) \\ &= b^2");
+    e.escape();
+    e.insert_text(" + 2 b c + c^2");
+    e.escape();
+    e.move_right();
+    e.insert_text("eq:square");
+    e.enter();
+
+    // A term list: `/ `, the term, `:` on to its description. Enter starts
+    // the next item (caret in its term); Enter in an empty term goes on to
+    // the description, and Enter on an empty description leaves the list.
+    e.insert_text("/ Bond dimension: the size of the virtual legs.");
+    e.enter();
+    e.insert_text("Gauge: an invertible matrix on a virtual leg.");
+    e.enter();
+    e.enter();
+    e.enter();
+
+    // A block call with an argument; Esc leaves it.
+    e.insert_text("#align(center) _A block call with an argument._");
+    e.escape();
+    e.insert_text("Headings, formulas and theorems carry labels, shown beside the page.");
+    e.doc().clone()
 }
