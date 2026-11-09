@@ -194,8 +194,10 @@ impl Editor {
     }
 
     /// Shift+Tab (or Enter on an empty item) in a nested item: it moves out,
-    /// after the item it was nested in; the blocks after it there come along
-    /// in its body, so the order stays.
+    /// after the item it was nested in, and takes that item's kind (a
+    /// numbered item under a bullet becomes a bullet); the blocks after it
+    /// there come along in its body, so the order stays. Term items keep
+    /// their kind, and no item becomes one: they have a term the others lack.
     fn outdent(&mut self, item: NodeId) -> bool {
         let (Some(ip), Some(parent)) = (self.doc.place(item), self.item_of(item)) else {
             return false;
@@ -207,6 +209,15 @@ impl Editor {
             return false;
         };
         let mut moved = siblings[ip.index].clone();
+        if let (
+            Some(Block::Item { kind: outer, .. }),
+            Block::Item { kind, .. },
+        ) = (self.doc.block(parent).map(|b| &b.kind), &mut moved.kind)
+        {
+            if *kind != ListKind::Term && *outer != ListKind::Term {
+                *kind = *outer;
+            }
+        }
         if let Some(body) = moved.kind.body_mut() {
             body.extend(siblings[ip.index + 1..].iter().cloned());
         }

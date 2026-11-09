@@ -477,6 +477,18 @@ fn lists() {
     e.enter();
     e.insert_text("two");
     assert_eq!(texts(&e), ["+[one]", "+[two]"]);
+    // Shift+Tab on a numbered item nested in a bullet: it becomes a bullet.
+    let mut e = Editor::new(Document::new());
+    e.insert_text("- a");
+    e.enter();
+    e.enter();
+    e.insert_text("+ b");
+    assert!(e.next_slot(false));
+    assert_eq!(texts(&e), ["-[a|+[b]]"]);
+    assert!(e.next_slot(true));
+    assert_eq!(texts(&e), ["-[a]", "-[b]"]);
+    check(&e);
+
     let mut e = Editor::new(Document::new());
     e.insert_text("/ Term: desc");
     assert_eq!(texts(&e), ["/Term:[desc]"]);

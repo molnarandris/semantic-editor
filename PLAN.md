@@ -481,5 +481,8 @@ Done before M11–M13, at the user's request (2026-11-08). Implementation notes:
     before (or stay in place for the first item); after a term, into the term. Tab /
     Shift+Tab (in text; in math they still visit slots): nest in the item before /
     move out a level.
+  - Fix (2026-11-09): Shift+Tab takes the kind of the item it moves out of, so a
+    numbered sub-item of a bullet list becomes a bullet (term items neither gain nor
+    lose their kind).
 
 Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing.
