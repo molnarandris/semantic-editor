@@ -1095,14 +1095,11 @@ pub(super) fn call_head(chars: &[char]) -> Option<(String, Option<String>)> {
     (depth == 0).then(|| (name, Some(args.trim().to_string())))
 }
 
-/// The call head that `chars` ends with, `#name` or `#name(args)` at the
-/// start or after a space or punctuation: where its `#` is, the name and the
-/// arguments.
+/// The call head that `chars` ends with, `#name` or `#name(args)`: where its
+/// `#` is, the name and the arguments. Also right after a letter, as Typst
+/// reads it (`word#footnote[…]`, measured).
 pub(super) fn inline_call_head(chars: &[char]) -> Option<(usize, String, Option<String>)> {
     let start = chars.iter().rposition(|&c| c == '#')?;
-    if start > 0 && chars[start - 1].is_alphanumeric() {
-        return None;
-    }
     let (name, args) = call_head(&chars[start..])?;
     Some((start, name, args))
 }

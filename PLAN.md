@@ -634,7 +634,9 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
   or digit they are plain text (measured with Typst's parser: `a*b*c`, `snake_case`
   are text); `\*`, `\_`, `\]` turn the backslash into the char. `#name[`,
   `#name(args)[` and `#name` + space (not the whole paragraph, which stays a block
-  call) make a call; `]` and Esc leave the innermost call. A call left empty goes
+  call) make a call, also right after a letter (`word#footnote[…]`; fixed in M16b,
+  measured: Typst reads it as a call); `]` and Esc leave the innermost call. A call
+  left empty goes
   (on `*`/`]`/Esc at once; when the caret moves away, as its own undo step,
   `drop_left_call`, like empty titles).
 - Backspace after a call selects it, then deletes it (as formulas); at the start of
