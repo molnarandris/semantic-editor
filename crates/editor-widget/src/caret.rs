@@ -503,7 +503,8 @@ mod tests {
     }
 
     /// A numbered display formula: the number belongs to no node, so the
-    /// caret ends right after the formula (also with one node).
+    /// caret ends right after the formula (also with one node), and in an
+    /// empty one sits in the middle of the placeholder.
     #[test]
     fn numbered_display_formulas() {
         let mut world = BridgeWorld::new();
@@ -513,20 +514,19 @@ mod tests {
         };
         let mut d = Document::empty();
         let x = d.ident("x");
-        let one = d.display(vec![x]);
-        for block in [one] {
+        for (block, empty) in [(d.display(vec![x]), false), (d.display(vec![]), true)] {
             let (snippet, map) = serialize_block(&block);
             let (src, offset) = block_document(&around, &snippet, 300.0);
             let doc = compile(&mut world, &src).unwrap();
             let l = raw_layout(&world, &doc.pages()[0], offset).resolve(&map);
-            let row = block.rows()[0].id;
-            let rb = l.box_of(row).unwrap();
+            let rb = l.box_of(block.rows()[0].id).unwrap();
             assert!(
                 rb.right() < 200.0,
-                "the row box stops before the number: {rb:?}"
+                "the row stops before the number: {rb:?}"
             );
             let end = stops(&block, Some(&l)).last().unwrap().x;
-            assert!((end - rb.right()).abs() < 0.01, "{end} vs {rb:?}");
+            let want = if empty { rb.x + rb.w / 2.0 } else { rb.right() };
+            assert!((end - want).abs() < 0.01, "{end} vs {rb:?}");
         }
     }
 
