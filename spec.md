@@ -308,6 +308,7 @@ functions and packages.
   (multi-line aligned equations; Typst lays them out, the caret follows spans).
 - `phi(x)` where `phi` is a symbol is not a call (already representable).
 - Later: matrices (`mat(…; …)`, 2D arguments).
+- Split 2026-11-09: **M12a** the call node, done (see PLAN.md); **M12b** the atoms.
 
 ### M13 — Text markup and inline calls
 

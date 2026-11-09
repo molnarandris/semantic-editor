@@ -679,6 +679,69 @@ fn inline_diagrams() {
     e.doc().check_invariants().unwrap();
 }
 
+/// What the fake bridge knows in math: `sqrt` (one slot), `root` (two),
+/// `cases` (variadic), `hat` (a symbol that can be called).
+fn fake_math_calls(_: &[&str], name: &str) -> Option<MathCallShape> {
+    let (slots, variadic) = match name {
+        "sqrt" | "hat" => (1, false),
+        "root" => (2, false),
+        "cases" => (1, true),
+        _ => return None,
+    };
+    Some(MathCallShape { slots, variadic })
+}
+
+fn math_calls_editor() -> Editor {
+    let mut e = empty_display();
+    e.set_symbol_resolver(|n| match n {
+        "hat" => Some("^".into()),
+        "phi" => Some("φ".into()),
+        _ => None,
+    });
+    e.set_math_call_resolver(fake_math_calls);
+    e
+}
+
+/// Function calls in math: the name then space (if it is not a symbol) or
+/// `(` makes the call with its slots, caret in the first; `)` or Esc leave
+/// it, `,` goes to the next argument (or adds one to `cases`), Backspace in
+/// empty arguments removes them.
+#[test]
+fn math_calls() {
+    let mut e = math_calls_editor();
+    e.insert_text("sqrt x");
+    assert_eq!(display_of(&e, 0), "sqrt(x)");
+    assert_eq!(labels(&e).last(), Some(&"argument"));
+    e.escape();
+    e.insert_text("+root(3,y)z");
+    assert_eq!(display_of(&e, 0), "sqrt(x) + root(3, y) z");
+    e.doc().check_invariants().unwrap();
+
+    // `hat` is a symbol with space, a call with `(`; `phi(` stays a symbol.
+    let mut e = math_calls_editor();
+    e.insert_text("hat hat(a)phi(b)");
+    assert_eq!(display_of(&e, 0), "^ hat(a) φ ( b )");
+
+    // `cases`: each comma adds an argument; Backspace in an empty extra one
+    // removes it, in the only (empty) one removes the call.
+    let mut e = math_calls_editor();
+    e.insert_text("cases(a,b,");
+    assert_eq!(display_of(&e, 0), "cases(a, b, )");
+    e.backspace();
+    assert_eq!(display_of(&e, 0), "cases(a, b)");
+    assert_eq!(e.caret().offset, 1, "at the end of b");
+    e.doc().check_invariants().unwrap();
+    let mut e = math_calls_editor();
+    e.insert_text("sqrt ");
+    assert_eq!(display_of(&e, 0), "sqrt()");
+    e.backspace();
+    assert_eq!(display_of(&e, 0), "");
+    // A comma in sqrt is a comma.
+    let mut e = math_calls_editor();
+    e.insert_text("sqrt(a,b)");
+    assert_eq!(display_of(&e, 0), "sqrt(a , b)");
+}
+
 #[test]
 fn enter_at_end_of_heading_starts_paragraph() {
     let mut d = Document::empty();
@@ -755,6 +818,10 @@ fn show(row: &crate::tree::MathRow) -> String {
             MathKind::Slot => "□".into(),
             MathKind::Code(_) => "#code".into(),
             MathKind::Diagram(_) => "#diagram".into(),
+            MathKind::Call { name, args } => format!(
+                "{name}({})",
+                args.iter().map(show).collect::<Vec<_>>().join(", ")
+            ),
             MathKind::Frac { num, den } => format!("frac({}, {})", show(num), show(den)),
             MathKind::Scripts { base, sup, sub } => format!(
                 "{}{}{}",

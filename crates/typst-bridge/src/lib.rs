@@ -12,7 +12,7 @@ pub mod symbols;
 pub mod worker;
 pub mod world;
 
-pub use calls::call_shape;
+pub use calls::{call_shape, math_call_shape};
 pub use code::{code_display, is_code};
 pub use compile::{
     Around, BLOCK_PAD_PT, Raster, block_document, compile, compile_pdf, render_page,

@@ -13,7 +13,7 @@
 //! - List item: no position of its own; a term item's term is addressed
 //!   like a paragraph's inlines.
 //! - Row path: pairs `Index(k), <child>` descending into node `k`'s child row
-//!   (`Num`, `Den`, `Base`, `Sup`, `Sub`); `offset` is a position `0..=len`
+//!   (`Num`, `Den`, `Base`, `Sup`, `Sub`, `Arg(i)`); `offset` is a position `0..=len`
 //!   between the row's nodes.
 
 use serde::{Deserialize, Serialize};
@@ -28,6 +28,8 @@ pub enum Step {
     Base,
     Sup,
     Sub,
+    /// Argument `i` of a function call (`sqrt(x)`, `root(3, x)`).
+    Arg(usize),
 }
 
 impl Step {
@@ -39,6 +41,7 @@ impl Step {
             Step::Base => "base",
             Step::Sup => "superscript",
             Step::Sub => "subscript",
+            Step::Arg(_) => "argument",
         }
     }
 }

@@ -515,6 +515,21 @@ impl Writer {
                 w.out.push('#');
                 w.out.push_str(src);
             }
+            MathKind::Call { name, args } => {
+                // Inside the arguments a comma is written `comma`, so it
+                // cannot split them.
+                w.args += 1;
+                w.out.push_str(name);
+                w.out.push('(');
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        w.out.push_str(", ");
+                    }
+                    w.row(arg);
+                }
+                w.out.push(')');
+                w.args -= 1;
+            }
             MathKind::Diagram(src) if w.style == Style::Edit => {
                 w.out.push_str("#sem-code($#");
                 w.inline_diagram(src);
@@ -962,6 +977,8 @@ mod tests {
             "(a+b)^2 / ( ) _ ^ 3.14.15 é ∑ #$",
             "e^(-x^2/2) ! != -> <-> 1/2/3",
             "a times.o b arrow.r.long c eq.not x. times.q y. lt.eq.slant",
+            "sqrt x+root(3,y)+cal(A),b+cases(a,b,,c)+abs(x,y)+hat(u)+floor(v)/w^2",
+            "overline(underbrace(x, n))_k + binom(n,k,) + op(a, b)",
         ];
         let mut d = Document::empty();
         let p = d.paragraph(vec![]);
@@ -969,6 +986,7 @@ mod tests {
         for keys in sessions {
             let mut e = model::Editor::new(d.clone());
             e.set_symbol_resolver(crate::resolve_symbol);
+            e.set_math_call_resolver(crate::math_call_shape);
             e.insert_text("text $");
             for c in keys.chars() {
                 e.insert_text(&c.to_string());
@@ -1200,6 +1218,40 @@ mod tests {
             let (doc, _) = block_document(&Around::default(), &src, 300.0);
             compile(&mut world, &doc).unwrap();
         }
+    }
+
+    /// Calls in math: `name(arg, …)`; a comma inside an argument is
+    /// `comma`, so it cannot split the arguments. Every argument gets a box
+    /// (the caret moves through them), the call one around its drawing.
+    #[test]
+    fn math_calls() {
+        let mut d = Document::empty();
+        let (three, y, a, b) = (d.num("3"), d.ident("y"), d.ident("a"), d.ident("b"));
+        let comma = d.sym(",");
+        let (index, radicand) = (d.row(vec![three]), d.row(vec![y]));
+        let (iid, rid) = (index.id, radicand.id);
+        let root = d.call("root", vec![index, radicand]);
+        let inner = d.row(vec![a, comma, b]);
+        let abs = d.call("abs", vec![inner]);
+        let root_id = root.id;
+        let block = d.display(vec![root, abs]);
+        let (readable, _) = serialize_block_styled(&block, Style::Readable);
+        assert_eq!(readable, "$ root(3, y) abs(a comma b) $");
+        let (src, map) = serialize_block(&block);
+        let mut world = BridgeWorld::new();
+        let (doc, offset) = block_document(&Around::default(), &src, 300.0);
+        let compiled = compile(&mut world, &doc).unwrap();
+        let l = crate::raw_layout(&world, &compiled.pages()[0], offset).resolve(&map);
+        let (ri, rr, rc) = (
+            l.box_of(iid).unwrap(),
+            l.box_of(rid).unwrap(),
+            l.box_of(root_id).unwrap(),
+        );
+        assert!(
+            ri.right() <= rr.x && ri.h < rr.h,
+            "small index before: {ri:?} {rr:?}"
+        );
+        assert!(rc.x < ri.x + 1.0 && rc.right() >= rr.right(), "{rc:?}");
     }
 
     /// An inline diagram: its drawing in a box and canvas in the file, boxed

@@ -96,6 +96,9 @@ pub struct Editor {
     /// What the functions called as blocks take, provided by the GUI from
     /// the Typst bridge. Without it, every name may take a title.
     calls: Option<CallResolver>,
+    /// What functions called in math take, from the Typst bridge. Without
+    /// it, nothing typed in math becomes a call.
+    math_calls: Option<MathCallResolver>,
 }
 
 /// Looks up a symbol name with `.modifiers`; `None` if it is not a symbol.
@@ -109,6 +112,18 @@ pub struct CallShape {
     /// Another content argument before it: a title, `#name[Title][…]`.
     pub title: bool,
 }
+
+/// What a function called in math takes: `slots` content arguments to
+/// start with; `variadic` ones (`cases`) take more, one per comma.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MathCallShape {
+    pub slots: usize,
+    pub variadic: bool,
+}
+
+/// The shape of `name` called in math given the sources defining things
+/// (as for [`CallResolver`]); `None` if it is not a function to call there.
+pub type MathCallResolver = fn(&[&str], &str) -> Option<MathCallShape>;
 
 /// The shape of function `name` given the Typst sources defining things
 /// (the header, then the raw blocks in document order); `None` if unknown.
@@ -243,6 +258,7 @@ impl Editor {
             groups: HashSet::new(),
             resolver: None,
             calls: None,
+            math_calls: None,
         }
     }
 
@@ -254,15 +270,28 @@ impl Editor {
         self.calls = Some(resolver);
     }
 
-    /// What function `name` takes as a block call, if known.
-    pub(super) fn call_shape(&self, name: &str) -> Option<CallShape> {
-        let resolve = self.calls?;
+    pub fn set_math_call_resolver(&mut self, resolver: MathCallResolver) {
+        self.math_calls = Some(resolver);
+    }
+
+    /// The header and the raw blocks: the sources that define functions.
+    fn defining_sources(&self) -> Vec<&str> {
         let mut sources = vec![self.doc.header.as_str()];
         sources.extend(self.doc.blocks.iter().filter_map(|b| match &b.kind {
             Block::RawTypst(s) => Some(s.as_str()),
             _ => None,
         }));
-        resolve(&sources, name)
+        sources
+    }
+
+    /// What function `name` takes as a block call, if known.
+    pub(super) fn call_shape(&self, name: &str) -> Option<CallShape> {
+        self.calls?(&self.defining_sources(), name)
+    }
+
+    /// What `name` takes called in math, if it is a function there.
+    pub(super) fn math_call_shape(&self, name: &str) -> Option<MathCallShape> {
+        self.math_calls?(&self.defining_sources(), name)
     }
 
     /// The symbol for a word (`\\`-commands first try the TeX table).
@@ -704,6 +733,13 @@ impl Editor {
             }
             (None, _) if self.source_block().is_some() => {
                 "Ctrl+Enter or double click → edit source · Enter → new paragraph · Backspace → delete"
+            }
+            (None, Some(p)) if self.call_word(&p, true).is_some() => {
+                if self.call_word(&p, false).is_some() {
+                    "space or ( → function with its arguments"
+                } else {
+                    "( → function with its arguments · space → symbol"
+                }
             }
             (None, Some(p)) if p.nested() => "Tab → next slot · Esc → leave structure",
             (None, Some(_)) => "/ fraction · ^ _ scripts · Esc or $ → leave formula",

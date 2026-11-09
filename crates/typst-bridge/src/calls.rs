@@ -1,11 +1,12 @@
-//! What a function called as a block (`#lemma[…]`, `#align(center)[…]`)
-//! takes: read from the `#let`s of the header and the code blocks, else from
-//! Typst's standard library. Parsing only, no compile, so it is cheap enough
-//! to run on a keystroke.
+//! What a function takes, for calls typed in the editor: as a block
+//! (`#lemma[…]`, `#align(center)[…]`) or in math (`sqrt(x)`, `root(3, x)`,
+//! `ket(psi)`). Read from the `#let`s of the header and the code blocks, else
+//! from Typst's standard library. Parsing only, no compile, so it is cheap
+//! enough to run on a keystroke.
 
 use std::sync::LazyLock;
 
-use model::CallShape;
+use model::{CallShape, MathCallShape};
 use typst::foundations::Value;
 use typst::syntax::ast::{self, Expr, LetBindingKind, Param};
 use typst::syntax::parse;
@@ -13,16 +14,32 @@ use typst::{Library, LibraryExt};
 
 static LIBRARY: LazyLock<Library> = LazyLock::new(Library::default);
 
-/// The shape of function `name` as defined by `sources` (the header, then
-/// the code blocks, in document order; a later definition wins), else by
+/// The parameters of a function written in Typst: positional ones, and
+/// whether it has a sink (`..args`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Params {
+    positional: usize,
+    sink: bool,
+}
+
+/// How `sources` (the header, then the code blocks, in document order; a
+/// later definition wins) define `name`: `Some(Some(params))` for a
+/// function written as one, `Some(None)` for anything else bound to it
+/// (`#let theorem = thmbox(…)`), `None` if they do not bind it.
+fn defined(sources: &[&str], name: &str) -> Option<Option<Params>> {
+    sources.iter().rev().find_map(|s| defined_in(s, name))
+}
+
+/// The shape of function `name` called as a block, by `sources`, else by
 /// the standard library. `None` if unknown: bound to something that is not
-/// written as a function here (`#let theorem = thmbox(…)`), imported from a
-/// package, or not defined at all.
+/// written as a function here, imported from a package, or not defined.
 pub fn call_shape(sources: &[&str], name: &str) -> Option<CallShape> {
-    for source in sources.iter().rev() {
-        if let Some(found) = defined_in(source, name) {
-            return found;
-        }
+    if let Some(found) = defined(sources, name) {
+        let p = found?;
+        return Some(CallShape {
+            body: p.positional >= 1 || p.sink,
+            title: p.positional >= 2 || p.sink,
+        });
     }
     match LIBRARY.global.scope().get(name)?.read() {
         // Built-in functions take no title; their content is positional.
@@ -37,9 +54,46 @@ pub fn call_shape(sources: &[&str], name: &str) -> Option<CallShape> {
     }
 }
 
-/// `Some(shape)` if a top-level `#let` in `source` binds `name` (the last
-/// one wins); the shape is `None` unless it is written as a function.
-fn defined_in(source: &str, name: &str) -> Option<Option<CallShape>> {
+/// The shape of `name` called in math: a function defined by `sources`,
+/// else one of Typst's math functions (`sqrt`, `cal`, `root`, `cases`) or
+/// a symbol that can be called (`hat`, `floor`). One slot per positional
+/// parameter (at least one); a variadic one makes room for more. `None` if
+/// it is not something to call: a value, a plain symbol (`phi`), unknown,
+/// or a single letter (never a call in Typst math).
+pub fn math_call_shape(sources: &[&str], name: &str) -> Option<MathCallShape> {
+    if name.chars().count() < 2 {
+        return None;
+    }
+    if let Some(found) = defined(sources, name) {
+        let p = found?;
+        return Some(MathCallShape {
+            slots: p.positional.max(1),
+            variadic: p.sink,
+        });
+    }
+    match LIBRARY.math.scope().get(name)?.read() {
+        Value::Func(func) => {
+            let fixed = func
+                .params()
+                .filter(|p| p.positional() && !p.variadic())
+                .count();
+            let variadic = func.params().any(|p| p.positional() && p.variadic());
+            Some(MathCallShape {
+                slots: (fixed + usize::from(variadic)).max(1),
+                variadic,
+            })
+        }
+        Value::Symbol(symbol) if symbol.func().is_ok() => Some(MathCallShape {
+            slots: 1,
+            variadic: false,
+        }),
+        _ => None,
+    }
+}
+
+/// How a top-level `#let` in `source` binds `name` (the last one wins), as
+/// in [`defined`].
+fn defined_in(source: &str, name: &str) -> Option<Option<Params>> {
     let root = parse(source);
     let mut found = None;
     for node in root.children() {
@@ -51,19 +105,18 @@ fn defined_in(source: &str, name: &str) -> Option<Option<CallShape>> {
                 let Some(Expr::Closure(closure)) = binding.init() else {
                     continue;
                 };
-                let mut positional = 0;
-                let mut sink = false;
+                let mut params = Params {
+                    positional: 0,
+                    sink: false,
+                };
                 for param in closure.params().children() {
                     match param {
-                        Param::Pos(_) => positional += 1,
-                        Param::Spread(_) => sink = true,
+                        Param::Pos(_) => params.positional += 1,
+                        Param::Spread(_) => params.sink = true,
                         Param::Named(_) => {}
                     }
                 }
-                found = Some(Some(CallShape {
-                    body: positional >= 1 || sink,
-                    title: positional >= 2 || sink,
-                }));
+                found = Some(Some(params));
             }
             kind => {
                 if kind.bindings().iter().any(|i| i.as_str() == name) {
@@ -105,5 +158,27 @@ mod tests {
             call_shape(&[header, "#set text(red)"], "proof"),
             shape(true, false)
         );
+    }
+
+    #[test]
+    fn math_shapes() {
+        let header = "#let ket(x) = x\n#let pair(a, b) = a\n#let many(..xs) = xs\n#let k = 1";
+        let m = |name| math_call_shape(&[header], name).map(|s| (s.slots, s.variadic));
+        assert_eq!(m("sqrt"), Some((1, false)));
+        assert_eq!(m("cal"), Some((1, false)));
+        assert_eq!(m("root"), Some((2, false)), "index and radicand");
+        assert_eq!(m("abs"), Some((1, false)), "size is named");
+        assert_eq!(m("underbrace"), Some((2, false)));
+        assert_eq!(m("cases"), Some((1, true)));
+        assert_eq!(m("binom"), Some((2, true)));
+        assert_eq!(m("hat"), Some((1, false)), "a symbol that can be called");
+        assert_eq!(m("floor"), Some((1, false)));
+        assert_eq!(m("phi"), None, "a plain symbol");
+        assert_eq!(m("nonsense"), None);
+        assert_eq!(m("ket"), Some((1, false)));
+        assert_eq!(m("pair"), Some((2, false)));
+        assert_eq!(m("many"), Some((1, true)));
+        assert_eq!(m("k"), None);
+        assert_eq!(math_call_shape(&["#let f(x) = x"], "f"), None, "one letter");
     }
 }

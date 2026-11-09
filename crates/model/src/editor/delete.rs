@@ -319,6 +319,31 @@ impl Editor {
                     }
                 }
             },
+            // All arguments empty: the call goes. An extra argument of a
+            // call that takes more (`cases`) goes, caret to the end of the
+            // one before.
+            MathKind::Call { name, args } => {
+                let Step::Arg(i) = step else {
+                    return false;
+                };
+                let min = self.math_call_shape(name).map_or(usize::MAX, |s| s.slots);
+                if args.iter().all(|a| a.nodes.is_empty()) {
+                    (vec![remove], at(j))
+                } else if i > 0 && args.len() > min {
+                    let mut n = node.clone();
+                    if let MathKind::Call { args, .. } = &mut n.kind {
+                        args.remove(i);
+                    }
+                    let prev = cursor(
+                        p.block,
+                        child_path(&parent, j, Step::Arg(i - 1)),
+                        args[i - 1].nodes.len(),
+                    );
+                    (vec![row_replace(prow, j, n)], prev)
+                } else {
+                    return self.move_left();
+                }
+            }
             _ => return false,
         };
         self.commit(ops, after, Last::Other)

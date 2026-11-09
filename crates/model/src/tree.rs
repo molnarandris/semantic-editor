@@ -119,6 +119,13 @@ pub enum MathKind {
     /// An atom for the caret; its source is edited in the source dialog,
     /// like a diagram block's.
     Code(String),
+    /// A call of a math function with content arguments, `sqrt(x)`,
+    /// `cal(A)`, `root(3, x)`, `ket(psi)` (a header function): Typst draws
+    /// it, the caret moves through the arguments.
+    Call {
+        name: String,
+        args: Vec<MathRow>,
+    },
     /// An inline CeTZ drawing: like a diagram block, only the drawing code
     /// (the body of `cetz.canvas({ import cetz.draw: * … })`), set in a box
     /// in the formula.
@@ -298,6 +305,7 @@ impl MathNode {
             (MathKind::Scripts { base, .. }, Step::Base) => Some(base),
             (MathKind::Scripts { sup, .. }, Step::Sup) => sup.as_ref(),
             (MathKind::Scripts { sub, .. }, Step::Sub) => sub.as_ref(),
+            (MathKind::Call { args, .. }, Step::Arg(i)) => args.get(i),
             _ => None,
         }
     }
@@ -309,12 +317,20 @@ impl MathNode {
             (MathKind::Scripts { base, .. }, Step::Base) => Some(base),
             (MathKind::Scripts { sup, .. }, Step::Sup) => sup.as_mut(),
             (MathKind::Scripts { sub, .. }, Step::Sub) => sub.as_mut(),
+            (MathKind::Call { args, .. }, Step::Arg(i)) => args.get_mut(i),
             _ => None,
         }
     }
 
     /// Child rows in visual/navigation order.
     pub fn children(&self) -> Vec<(Step, &MathRow)> {
+        if let MathKind::Call { args, .. } = &self.kind {
+            return args
+                .iter()
+                .enumerate()
+                .map(|(i, r)| (Step::Arg(i), r))
+                .collect();
+        }
         [Step::Num, Step::Den, Step::Base, Step::Sup, Step::Sub]
             .into_iter()
             .filter_map(|s| self.child(s).map(|r| (s, r)))
@@ -330,6 +346,7 @@ impl MathNode {
                 v.extend(sub.as_mut());
                 v
             }
+            MathKind::Call { args, .. } => args.iter_mut().collect(),
             _ => vec![],
         }
     }
@@ -343,9 +360,12 @@ impl MathNode {
         }
     }
 
-    /// True for nodes with child rows (fractions, scripts).
+    /// True for nodes with child rows (fractions, scripts, calls).
     pub fn is_structure(&self) -> bool {
-        matches!(self.kind, MathKind::Frac { .. } | MathKind::Scripts { .. })
+        matches!(
+            self.kind,
+            MathKind::Frac { .. } | MathKind::Scripts { .. } | MathKind::Call { .. }
+        )
     }
 
     pub fn label(&self) -> &'static str {
@@ -358,6 +378,7 @@ impl MathNode {
             MathKind::Slot => "slot",
             MathKind::Code(_) => "code",
             MathKind::Diagram(_) => "diagram",
+            MathKind::Call { .. } => "function",
         }
     }
 }
@@ -799,6 +820,13 @@ impl Document {
 
     pub fn code(&mut self, source: &str) -> MathNode {
         self.node(MathKind::Code(source.into()))
+    }
+
+    pub fn call(&mut self, name: &str, args: Vec<MathRow>) -> MathNode {
+        self.node(MathKind::Call {
+            name: name.into(),
+            args,
+        })
     }
 
     pub fn inline_diagram(&mut self, source: &str) -> MathNode {

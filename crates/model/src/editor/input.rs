@@ -252,6 +252,11 @@ impl Editor {
             return ok;
         }
 
+        // A function name: space (unless it is a symbol) or `(` makes the
+        // call, caret in its first argument.
+        if (c == ' ' || c == '(') && self.make_call(&p, c == '(') {
+            return true;
+        }
         // Finishing a word can remove a lone `\`, so look again.
         changed |= self.finish_word();
         let Some(p) = self.row_pos() else {
@@ -275,6 +280,7 @@ impl Editor {
                 true
             }
             ')' if self.groups.contains(&p.row) => self.escape() || changed,
+            ',' if self.next_argument(&p) => true,
             c if c.is_whitespace() || c.is_control() => changed,
             c if c.is_ascii_digit() || c == '.' => match prev {
                 Some((id, MathKind::Num(n))) if c != '.' || !n.contains('.') => {
@@ -305,6 +311,83 @@ impl Editor {
                 self.type_node(&p, node)
             }
         }
+    }
+
+    /// The identifier being typed, if the caret is right after it: its id
+    /// and name.
+    fn word_before(&self, p: &RowPos) -> Option<(NodeId, String)> {
+        match self.node_before(p) {
+            Some(MathNode {
+                id,
+                kind: MathKind::Ident(name),
+            }) if self.word.as_ref() == Some(&self.caret) => Some((id, name)),
+            _ => None,
+        }
+    }
+
+    /// Whether the word before the caret would become a call: always with
+    /// `(` (`hat(`), with space only if it is not also a symbol (`sqrt`).
+    pub(super) fn call_word(&self, p: &RowPos, paren: bool) -> Option<MathCallShape> {
+        let (_, name) = self.word_before(p)?;
+        if name.starts_with('\\') || !paren && self.lookup(&name, false).is_some() {
+            return None;
+        }
+        self.math_call_shape(&name)
+    }
+
+    /// The word before the caret becomes a call with empty arguments, the
+    /// caret in the first. After `(`, `)` leaves it from any argument.
+    fn make_call(&mut self, p: &RowPos, paren: bool) -> bool {
+        let Some(shape) = self.call_word(p, paren) else {
+            return false;
+        };
+        let Some((id, name)) = self.word_before(p) else {
+            return false;
+        };
+        let args: Vec<crate::tree::MathRow> =
+            (0..shape.slots).map(|_| self.doc.row(vec![])).collect();
+        if paren {
+            self.groups.extend(args.iter().map(|a| a.id));
+        }
+        let node = MathNode {
+            id,
+            kind: MathKind::Call { name, args },
+        };
+        self.word = None;
+        let op = row_replace(p.row, p.offset - 1, node);
+        self.commit(vec![op], p.child(p.offset - 1, Step::Arg(0)), Last::Other)
+    }
+
+    /// `,` in an argument of a call: on to the next argument; in the last
+    /// one of a call that takes more (`cases`), a new argument after it.
+    /// `false` if the comma is just a comma.
+    fn next_argument(&mut self, p: &RowPos) -> bool {
+        let Some((parent, j, Step::Arg(i))) = p.parent() else {
+            return false;
+        };
+        let Some(prow) = self.row_id_at(p.block, &parent) else {
+            return false;
+        };
+        let node = self.row_nodes(prow)[j].clone();
+        let MathKind::Call { name, args } = &node.kind else {
+            return false;
+        };
+        let next = cursor(p.block, child_path(&parent, j, Step::Arg(i + 1)), 0);
+        if i + 1 < args.len() {
+            return self.jump(next);
+        }
+        if !self.math_call_shape(name).is_some_and(|s| s.variadic) {
+            return false;
+        }
+        let row = self.doc.row(vec![]);
+        if self.groups.contains(&p.row) {
+            self.groups.insert(row.id);
+        }
+        let mut node = node.clone();
+        if let MathKind::Call { args, .. } = &mut node.kind {
+            args.insert(i + 1, row);
+        }
+        self.commit(vec![row_replace(prow, j, node)], next, Last::Other)
     }
 
     /// End the identifier being typed: a known name becomes its symbol.

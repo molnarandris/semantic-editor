@@ -238,6 +238,7 @@ impl ObjectImpl for SemEditor {
         let mut editor = self.editor.borrow_mut();
         editor.set_symbol_resolver(typst_bridge::resolve_symbol);
         editor.set_call_resolver(typst_bridge::call_shape);
+        editor.set_math_call_resolver(typst_bridge::math_call_shape);
         drop(editor);
         obj.connect_scale_factor_notify(|obj| obj.queue_allocate());
         self.setup_input();
@@ -373,6 +374,7 @@ impl SemEditor {
         let mut editor = Editor::new(doc);
         editor.set_symbol_resolver(typst_bridge::resolve_symbol);
         editor.set_call_resolver(typst_bridge::call_shape);
+        editor.set_math_call_resolver(typst_bridge::math_call_shape);
         *self.editor.borrow_mut() = editor;
         self.views.borrow_mut().clear();
         self.sync_views();

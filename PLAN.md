@@ -553,4 +553,34 @@ Done before M11–M13, at the user's request (2026-11-08). Implementation notes:
   for heading numbers longer than the `= ` before the text. `LAYOUT_VERSION` in the
   render cache key, so cached layouts from older builds are not reused.
 
+## M12a — Function calls in math (2026-11-09)
+
+M12 is split: M12a the generic call node, M12b the atoms (primes, text in math, `&`,
+`\`).
+
+- Model: `MathKind::Call { name, args: Vec<MathRow> }`, a structure whose child rows
+  are its arguments (`Step::Arg(i)`); everything generic over `children()` (positions,
+  stops, Tab to empty slots, selection, ops) works through it. File format 7.
+- What a name is (`typst_bridge::math_call_shape`, `calls.rs`, shares the `#let`
+  parsing with block calls): a function defined in the header or a code block (one
+  slot per positional parameter, a sink makes it variadic), else Typst's math scope: a
+  function (one slot per positional parameter, named ones like `abs`'s `size` do not
+  count; a variadic one, `cases`, starts with one slot), or a symbol that can be called
+  (accents and delimiters: `hat`, `tilde`, `floor`; one slot). Plain symbols (`phi`),
+  values and single letters (never calls in Typst math) are not calls. The model gets
+  it as `Editor::set_math_call_resolver` (`MathCallShape { slots, variadic }`).
+- Typing: the word then space makes the call if it is not also a symbol (`sqrt`,
+  `cal`, `ket`); `(` makes it always (`hat(`), the `(` absorbed, and `)` leaves it from
+  any argument. The caret goes into the first argument. `,` in an argument goes to the
+  next one; in the last argument of a variadic call it adds one; otherwise it is a
+  comma (written `comma`, so it cannot split the arguments). Backspace in an empty
+  argument: all empty → the call goes; an extra argument of a variadic call goes,
+  caret to the end of the one before; else ←. Backspace after a call selects it.
+  Status bar hint while typing a function's name.
+- Rendering: `name(arg, …)` in both styles; Typst draws everything, the arguments'
+  glyphs map to their rows, the call's own marks (√, bars) to the call (thanks to the
+  generated-text span fix in `layout.rs`, they no longer leak into the first node).
+- Not yet: named arguments (`abs(size: …)`), `mat` rows (`;`), choosing an optional
+  argument away (`root`'s empty index stays a slot).
+
 Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing.
