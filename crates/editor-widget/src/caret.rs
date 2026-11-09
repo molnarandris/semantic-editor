@@ -353,7 +353,7 @@ fn list_stops(
         .iter()
         .map(|i| match &i.kind {
             Inline::Text(s) | Inline::Raw(s) => vec![None; s.chars().count() + 1],
-            Inline::Math(_) | Inline::Call { .. } => vec![],
+            Inline::Math(_) | Inline::Call { .. } | Inline::Ref(_) => vec![],
         })
         .collect();
 
@@ -457,12 +457,16 @@ fn list_stops(
                     }
                 }
             }
-            Inline::Math(row) => {
+            // A formula, or a reference (an atom): the texts around it end and
+            // start at its box.
+            Inline::Math(_) | Inline::Ref(_) => {
                 let Some(r) = l.box_of(inline.id) else {
                     continue;
                 };
                 let line = line_near(l, r);
-                row_stops(block, path.clone(), row, l, line, 1, &mut inner[i]);
+                if let Inline::Math(row) = &inline.kind {
+                    row_stops(block, path.clone(), row, l, line, 1, &mut inner[i]);
+                }
                 if i > 0 {
                     let offset = per[i - 1].len().saturating_sub(1);
                     let s = stop(block, at(i - 1), offset, r.x, r.y, r.bottom(), line);

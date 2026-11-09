@@ -14,7 +14,8 @@ use serde::{Deserialize, Serialize};
 /// alignment points and line breaks in formulas. 9: calls in text
 /// (`Inline::Call`: bold, italic, `#name[…]`). 10: inline code
 /// (`Inline::Raw`). 11: block labels (`label`, absent when empty).
-pub const FORMAT_VERSION: u32 = 11;
+/// 12: references (`Inline::Ref`).
+pub const FORMAT_VERSION: u32 = 12;
 
 #[derive(Serialize)]
 struct SemFileOut<'a> {

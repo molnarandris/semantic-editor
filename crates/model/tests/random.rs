@@ -99,7 +99,7 @@ fn all_cursors(doc: &Document) -> Vec<CursorPath> {
                             })
                         }),
                         Inline::Math(r) => row(&mut out, b.id, vec![Step::Index(i)], r),
-                        Inline::Call { .. } | Inline::Raw(_) => {}
+                        Inline::Call { .. } | Inline::Raw(_) | Inline::Ref(_) => {}
                     }
                 }
             }
@@ -283,7 +283,7 @@ fn random_keystrokes_keep_the_document_sound() {
     let mut rng = Rng(0x5eed_cafe);
     let keys = [
         "a", "x", "chi", " ", "2", ".", "+", "<", "=", "-", ">", "/", "^", "_", "(", ")", "$",
-        "\\al", "é ", "\\", "*", "#cl[", "]", "`", "--", "~",
+        "\\al", "é ", "\\", "*", "#cl[", "]", "`", "--", "~", "@e", ". ",
     ];
     for round in 0..150 {
         let doc = random_doc(&mut rng);

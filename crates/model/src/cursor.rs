@@ -152,6 +152,8 @@ fn walk_inlines<'a>(inlines: &'a [InlineNode], path: &[Step]) -> Result<Target<'
             Ok(Target::Text { inline, text })
         }
         Inline::Text(_) | Inline::Raw(_) => Err(1),
+        // An atom: no position inside.
+        Inline::Ref(_) => Err(0),
         Inline::Math(row) => walk_row(row, &path[1..]).map_err(|n| n + 1),
         Inline::Call { body, .. } => match path.get(1) {
             Some(Step::Body) => walk_inlines(body, &path[2..]).map_err(|n| n + 2),
@@ -354,6 +356,7 @@ impl Document {
                         path.push(Step::Body);
                         inline_positions(block, &path, body, out);
                     }
+                    Inline::Ref(_) => {}
                 }
             }
         }

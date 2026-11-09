@@ -413,6 +413,17 @@ Titles decided 2026-11-08: optional, never added by default; positional
   stays Typst's: equations are numbered if the header numbers them (labelling does
   not number an equation by itself, which would need inventing formatting; a header
   can number only labelled equations with a show rule).
+- M15b decisions (2026-11-09): a reference is an inline atom, `Inline::Ref(label)`.
+  `@` starts one (as in Typst, also right after a letter; `\@` is a literal `@`); label
+  chars typed after it go into it, anything else ends it, and a trailing `.` or `:`
+  goes back to the text (Typst reads `@eq:abs.` as a reference and a full stop).
+  Typst renders the reference: every labelled block reports what its labels point to
+  (counter and value), and a block with references gets an invisible stand-in target
+  per label (a hidden heading, equation or call of the same environment, with the
+  counter set), so the header's supplements, numbering and show rules apply. A
+  reference to a missing, unnumbered or duplicate label shows `@label` in red
+  instead of failing. Steps: model and typing; rendering; the completion popover;
+  click to follow, Alt+← back.
 
 - Labels on figures and theorems too (all targets exist by now); citations (`@key`)
   with the bibliography.

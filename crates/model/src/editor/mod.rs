@@ -877,6 +877,9 @@ impl Editor {
             }
             (None, Some(p)) if p.nested() => "Tab → next slot · Esc → leave structure",
             (None, Some(_)) => "/ fraction · ^ _ scripts · Esc or $ → leave formula",
+            (None, None) if self.ref_before().is_some() => {
+                "reference: type its label · ↑/↓ and Enter → choose · space → done"
+            }
             (None, None) if self.label_pos().is_some() => {
                 "label (letters, digits, - _ . :) · Enter, space or Esc → leave"
             }
@@ -1032,7 +1035,7 @@ fn delete_block(place: Place) -> Op {
 fn text_of(inline: &InlineNode) -> &str {
     match &inline.kind {
         Inline::Text(s) | Inline::Raw(s) => s,
-        Inline::Math(_) | Inline::Call { .. } => "",
+        Inline::Math(_) | Inline::Call { .. } | Inline::Ref(_) => "",
     }
 }
 

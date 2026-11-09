@@ -98,7 +98,7 @@ impl Selection {
                 };
                 Some(match inlines.get(*i)?.kind {
                     Inline::Text(_) => ((*i, c.offset), (*i, c.offset)),
-                    Inline::Math(_) | Inline::Call { .. } | Inline::Raw(_) => {
+                    Inline::Math(_) | Inline::Call { .. } | Inline::Raw(_) | Inline::Ref(_) => {
                         ((*i, 0), (*i + 1, 0))
                     }
                 })

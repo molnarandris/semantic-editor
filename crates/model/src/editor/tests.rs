@@ -29,6 +29,7 @@ fn inline_text(v: &[InlineNode]) -> String {
             Inline::Text(s) => s.clone(),
             Inline::Math(_) => "$".into(),
             Inline::Raw(s) => format!("`{s}`"),
+            Inline::Ref(s) => format!("@{{{s}}}"),
             Inline::Call { name, args, body } => match name.as_str() {
                 "strong" => format!("*{}*", inline_text(body)),
                 "emph" => format!("_{}_", inline_text(body)),
@@ -1422,4 +1423,41 @@ fn block_labels() {
     assert_eq!(label(&e, 0), "l1");
     while e.undo() {}
     assert_eq!(label(&e, 0), "");
+}
+
+#[test]
+fn references() {
+    // Label chars go into the reference; a trailing `.` or `:` goes back to
+    // the text, as Typst reads it.
+    let mut e = Editor::default();
+    e.insert_text("see @eq:abs. And @sec:a: done, @x");
+    assert_eq!(texts(&e), ["see @{eq:abs}. And @{sec:a}: done, @{x}"]);
+    assert_eq!(e.ref_typing(), Some("x".into()));
+    // Backspace while typing takes chars, then the reference.
+    e.backspace();
+    assert_eq!(e.ref_typing(), Some("".into()));
+    e.backspace();
+    assert_eq!(texts(&e), ["see @{eq:abs}. And @{sec:a}: done, "]);
+    // A finished reference is an atom: Backspace selects, then deletes it.
+    let mut e = Editor::default();
+    e.insert_text("a @b c");
+    caret_at(&mut e, 0, 2, 0);
+    assert!(e.backspace());
+    assert!(e.selected().is_some());
+    assert!(e.backspace());
+    assert_eq!(texts(&e), ["a c"]);
+    // `@` alone, or `\@`, is a literal `@`.
+    let mut e = Editor::default();
+    e.insert_text("a @ b \\@c");
+    assert_eq!(texts(&e), ["a @ b @c"]);
+    // Choosing from the list completes the label.
+    let mut e = Editor::default();
+    e.insert_text("see @e");
+    assert!(e.complete_ref("eq:abs"));
+    assert_eq!(e.ref_typing(), None);
+    e.insert_text(" now");
+    assert_eq!(texts(&e), ["see @{eq:abs} now"]);
+    e.doc().check_invariants().unwrap();
+    while e.undo() {}
+    assert_eq!(texts(&e), [""]);
 }

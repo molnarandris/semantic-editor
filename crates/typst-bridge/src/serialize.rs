@@ -441,6 +441,13 @@ impl Writer {
             self.node(inline.id, |w| match &inline.kind {
                 Inline::Text(s) => w.text(inline.id, s, line_start, i + 1 == inlines.len()),
                 Inline::Raw(s) => w.raw(inline.id, s),
+                Inline::Ref(label) => {
+                    let next = match inlines.get(i + 1).map(|n| &n.kind) {
+                        Some(Inline::Text(t)) => t.as_str(),
+                        _ => "",
+                    };
+                    w.reference(label, next);
+                }
                 Inline::Math(row) => {
                     w.out.push('$');
                     w.row(row);
@@ -543,6 +550,40 @@ impl Writer {
             self.out.push_str("x]");
         }
         self.map.texts.push((id, starts));
+    }
+
+    /// A reference, `@label`, followed by the text `next`. In the editor it
+    /// is wrapped in `sem-code`, whose box carries its span (the glyphs come
+    /// from the target's supplement and numbering); one with no label yet
+    /// shows a grey `@`. Exported as `@label`, or `#ref(<label>)` when the
+    /// text after it would continue the label.
+    fn reference(&mut self, label: &str, next: &str) {
+        let mut chars = next.chars();
+        let continues =
+            |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || "-_.:".contains(c));
+        let first = chars.next();
+        let joins = match first {
+            Some('.' | ':') => continues(chars.next()),
+            c => continues(c),
+        };
+        match (self.style, label.is_empty()) {
+            (Style::Edit, true) => self.out.push_str("#sem-code[#text(fill: luma(140))[\\@]]"),
+            (Style::Edit, false) => {
+                self.out.push_str("#sem-code[@");
+                self.out.push_str(label);
+                self.out.push(']');
+            }
+            (Style::Readable, true) => self.out.push_str("\\@"),
+            (Style::Readable, false) if joins => {
+                self.out.push_str("#ref(<");
+                self.out.push_str(label);
+                self.out.push_str(">)");
+            }
+            (Style::Readable, false) => {
+                self.out.push('@');
+                self.out.push_str(label);
+            }
+        }
     }
 
     /// Inline code, `` `…` ``, with every char mapped. Empty code shows a
@@ -1609,7 +1650,22 @@ mod tests {
         let mut env = d.env("lemma", vec![p]);
         env.label = "lem".into();
         let refs = d.raw("See @sec:intro, @eq:x and @lem.");
-        d.blocks = vec![h, m, env, refs];
+        // References in text; `.5` after one would continue its label.
+        let see = d.text("Also ");
+        let r1 = d.reference("sec:intro");
+        let and = d.text(" and ");
+        let r2 = d.reference("lem");
+        let tail = d.text(".5 times.");
+        let para = d.paragraph(vec![see, r1, and, r2, tail]);
+        assert_eq!(
+            serialize_block_styled(&para, Style::Readable).0,
+            "Also @sec:intro and #ref(<lem>).5 times."
+        );
+        assert_eq!(
+            ser(&para),
+            "Also #sem-code[@sec:intro] and #sem-code[@lem].5 times."
+        );
+        d.blocks = vec![h, m, env, refs, para];
         let typ = serialize_document(&d);
         assert!(typ.contains("= Intro <sec:intro>\n"), "{typ}");
         assert!(typ.contains("$ x $ <eq:x>\n"), "{typ}");

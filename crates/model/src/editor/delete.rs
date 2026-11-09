@@ -138,6 +138,21 @@ impl Editor {
             let (op, after) = self.delete_char(&pos, pos.offset - 1);
             return self.commit(vec![op], after, Last::Deleting);
         }
+        if let Some((path, label)) = self.ref_before() {
+            // The reference being typed loses its last char; an empty one goes.
+            if label.is_empty() {
+                self.word = None;
+                let Some((ops, after)) = self.remove_inline(block_id, &path) else {
+                    return false;
+                };
+                return self.commit(ops, after, Last::Deleting);
+            }
+            let mut short = label;
+            short.pop();
+            let ok = self.relabel(&path, &short, Last::Deleting);
+            self.word = Some(self.caret.clone());
+            return ok;
+        }
         if pos.inline >= 2 {
             return self.select(Selected::Inline {
                 block: block_id,

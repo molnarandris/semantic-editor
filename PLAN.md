@@ -726,3 +726,20 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
   (`Editor::case_around`, `new_case`; a call opened with `(` is still left with `)`),
   and ↑/↓ move to the case above/below (`vertical_target`; past the first/last case,
   line moves as before). The source keeps Typst's commas.
+
+## M15b — References (2026-11-09, in progress)
+
+- Model: `Inline::Ref(label)`, a non-text inline (alternation like a formula) with no
+  caret position inside. File format 12.
+- Typing: `@` (`start_ref`) inserts an empty reference and puts the caret after it in
+  the "being typed" state (`word` == caret, `ref_before`); label chars typed then go
+  into it (`ref_char`), anything else ends it first (`finish_ref`, also run by
+  `finish_word`, so every other command ends it): a trailing `.`/`:` moves back into
+  the text after it, and an empty one becomes a literal `@`. Backspace while typing
+  takes its last char, then the reference. `complete_ref` sets the label from the
+  completion list. A finished one is an atom: Backspace after it selects, then
+  deletes. `\@` types a literal `@` (measured: Typst reads `a@b.c` as a reference, so
+  there is no exception after letters).
+- Source: `#sem-code[@label]` in the editor (the box carries the span), `@label` in the
+  export, `#ref(<label>)` when the text after it would continue the label (`.5`).
+- Caret: the texts around a reference end and start at its box.

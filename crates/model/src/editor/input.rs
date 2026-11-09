@@ -68,10 +68,18 @@ impl Editor {
             };
             return started && self.input_char(c);
         }
+        // A reference being typed takes label chars; anything else ends it.
+        if self.ref_before().is_some() {
+            if is_label_char(c) {
+                return self.ref_char(c);
+            }
+            let ended = self.finish_ref();
+            return self.input_char(c) || ended;
+        }
         if c == '$' {
             return self.insert_formula();
         }
-        if matches!(c, '*' | '_' | ']' | '`' | '~' | '-' | ' ')
+        if matches!(c, '*' | '_' | ']' | '`' | '~' | '-' | ' ' | '@')
             && let Some(done) = self.markup_char(c)
         {
             return done;
@@ -289,6 +297,7 @@ impl Editor {
                 return Some(self.insert_inline(node, 0));
             }
             '~' => return Some(self.text_insert(&NBSP.to_string())),
+            '@' => return Some(self.start_ref()),
             '-' => {
                 return match before {
                     Some('-') => Some(retype(self, '–')),
@@ -306,6 +315,152 @@ impl Editor {
         }
         let node = self.doc.inline_call(name, "", vec![]);
         Some(self.insert_inline(node, 0))
+    }
+
+    /// The reference being typed (`@eq:a` so far), if the caret is right
+    /// after it: its path and label.
+    pub(super) fn ref_before(&self) -> Option<(Vec<Step>, String)> {
+        if self.word.as_ref() != Some(&self.caret) {
+            return None;
+        }
+        let pos = self.text_pos()?;
+        if pos.offset != 0 || pos.inline == 0 {
+            return None;
+        }
+        match &pos.inlines[pos.inline - 1].kind {
+            Inline::Ref(label) => Some((pos.at(pos.inline - 1, 0).path, label.clone())),
+            _ => None,
+        }
+    }
+
+    /// The label typed so far after `@`, while a reference is being typed.
+    pub fn ref_typing(&self) -> Option<String> {
+        self.ref_before().map(|(_, label)| label)
+    }
+
+    /// `@` in text: an empty reference; the caret goes after it and label
+    /// chars typed next go into it.
+    fn start_ref(&mut self) -> bool {
+        let Some(pos) = self.text_pos() else {
+            return false;
+        };
+        let (i, c, len) = (pos.inline, pos.offset, pos.len);
+        let owner = pos.owner;
+        let after = pos.at(i + 2, 0);
+        let text_id = pos.inlines[i].id;
+        let tail: String = pos.chars()[c..].iter().collect();
+        let mut ops = vec![];
+        if c < len {
+            ops.push(Op::Delete {
+                seq: Seq::Text(text_id),
+                index: c,
+                count: len - c,
+            });
+        }
+        let node = self.doc.reference("");
+        let rest = self.doc.text(&tail);
+        ops.push(Op::Insert {
+            seq: Seq::Inlines(owner),
+            index: i + 1,
+            items: Items::Inlines(vec![node, rest]),
+        });
+        let ok = self.commit(ops, after, Last::Other);
+        self.word = Some(self.caret.clone());
+        ok
+    }
+
+    /// Replace the label of the reference at `path` (in the caret's block),
+    /// keeping its id.
+    pub(super) fn relabel(&mut self, path: &[Step], label: &str, last: Last) -> bool {
+        let Some(block) = self.doc.block(self.caret.block) else {
+            return false;
+        };
+        let Some(at) = self.doc.inline_at(block, path) else {
+            return false;
+        };
+        let id = at.inlines[at.index].id;
+        let op = Op::Replace {
+            seq: Seq::Inlines(at.owner),
+            index: at.index,
+            count: 1,
+            items: Items::Inlines(vec![InlineNode {
+                id,
+                kind: Inline::Ref(label.into()),
+            }]),
+        };
+        let after = self.caret.clone();
+        self.commit(vec![op], after, last)
+    }
+
+    /// A label char typed after `@…`: it goes into the reference.
+    fn ref_char(&mut self, c: char) -> bool {
+        let Some((path, label)) = self.ref_before() else {
+            return false;
+        };
+        let ok = self.relabel(&path, &format!("{label}{c}"), Last::Typing { space: false });
+        self.word = Some(self.caret.clone());
+        ok
+    }
+
+    /// Choose the label of the reference being typed (from the completion
+    /// list); the reference is done.
+    pub fn complete_ref(&mut self, label: &str) -> bool {
+        let Some((path, _)) = self.ref_before() else {
+            return false;
+        };
+        self.word = None;
+        self.relabel(&path, label, Last::Other)
+    }
+
+    /// End the reference being typed: a trailing `.` or `:` goes back to
+    /// the text (as Typst reads `@eq:abs.`); with no label left, the `@`
+    /// becomes a literal one.
+    pub(super) fn finish_ref(&mut self) -> bool {
+        let Some((path, label)) = self.ref_before() else {
+            return false;
+        };
+        self.word = None;
+        let bare = label.trim_end_matches(['.', ':']);
+        let trailing = &label[bare.len()..];
+        if !bare.is_empty() && trailing.is_empty() {
+            return false;
+        }
+        let block = self.caret.block;
+        let typing = Last::Typing { space: false };
+        if bare.is_empty() {
+            // No label: the reference goes, an `@` (and what followed) stays.
+            let Some((mut ops, after)) = self.remove_inline(block, &path) else {
+                return false;
+            };
+            let before = self.inline_by_path(block, &after.path).map(|i| i.id);
+            let Some(before) = before else {
+                return false;
+            };
+            let text = format!("@{trailing}");
+            let n = text.chars().count();
+            ops.push(Op::Insert {
+                seq: Seq::Text(before),
+                index: after.offset,
+                items: Items::Text(text),
+            });
+            let caret = CursorPath {
+                offset: after.offset + n,
+                ..after
+            };
+            return self.commit(ops, caret, typing);
+        }
+        let (bare, trailing) = (bare.to_string(), trailing.to_string());
+        self.relabel(&path, &bare, typing);
+        let Some(pos) = self.text_pos() else {
+            return false;
+        };
+        let op = Op::Insert {
+            seq: Seq::Text(pos.inlines[pos.inline].id),
+            index: 0,
+            items: Items::Text(trailing.clone()),
+        };
+        let after = pos.at(pos.inline, trailing.chars().count());
+        self.commit(vec![op], after, typing)
     }
 
     /// Typing in a label: the chars Typst allows in one; space leaves it.
@@ -711,6 +866,9 @@ impl Editor {
 
     /// End the identifier being typed: a known name becomes its symbol.
     pub(super) fn finish_word(&mut self) -> bool {
+        if self.ref_before().is_some() {
+            return self.finish_ref();
+        }
         let Some(w) = self.word.take() else {
             return false;
         };
