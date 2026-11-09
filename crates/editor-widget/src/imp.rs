@@ -376,6 +376,8 @@ enum Command {
     Enter,
     /// Shift+Enter: a line break.
     LineBreak,
+    /// Alt+←: back to before the last reference followed.
+    Back,
     /// Ctrl+Enter: open the caret's raw/diagram block in the source dialog.
     EditSource,
     Undo,
@@ -470,6 +472,12 @@ impl SemEditor {
                 let imp = obj.imp();
                 if let Some(label) = imp.completion_at(x, y) {
                     imp.choose_completion(&label);
+                } else if let Some(label) = imp.ref_at(x, y)
+                    && imp.editor.borrow_mut().follow_ref(&label)
+                {
+                    // A reference: to its target (Alt+← comes back).
+                    imp.goal_x.set(None);
+                    imp.after_command(true);
                 } else if let Some(env) = imp.heading_at(x, y)
                     && imp.editor.borrow_mut().edit_title(env)
                 {
@@ -544,6 +552,7 @@ impl SemEditor {
             }
             Command::Enter => _ = ed.enter(),
             Command::LineBreak => _ = ed.line_break(),
+            Command::Back => _ = ed.go_back(),
             Command::Undo => _ = ed.undo(),
             Command::Redo => _ = ed.redo(),
             Command::Escape => _ = ed.escape(),
@@ -1248,6 +1257,25 @@ impl SemEditor {
         Some((self.block_stops(index), bx, by))
     }
 
+    /// The label of the reference drawn at widget point `(x, y)`, if any.
+    fn ref_at(&self, x: f64, y: f64) -> Option<String> {
+        let zoom = self.zoom.get();
+        let cy = y + self.scroll();
+        let tops = self.block_tops();
+        let index = tops.iter().rposition(|&t| t <= cy)?;
+        let bx = (x - self.page_x(self.obj().width() as f64)) / zoom;
+        let by = (cy - tops[index]) / zoom;
+        let id = self
+            .views
+            .borrow()
+            .get(index)?
+            .layout
+            .as_ref()?
+            .hit(bx, by)?;
+        let ed = self.editor.borrow();
+        ed.doc().ref_label(id).map(str::to_string)
+    }
+
     fn locate(&self, x: f64, y: f64) -> Option<CursorPath> {
         let (stops, bx, by) = self.block_at(x, y)?;
         caret::hit(&stops, bx, by).map(|s| s.cursor.clone())
@@ -1640,8 +1668,10 @@ impl SemEditor {
 fn command_for(key: gdk::Key, state: gdk::ModifierType) -> Option<Command> {
     let ctrl = state.contains(gdk::ModifierType::CONTROL_MASK);
     let shift = state.contains(gdk::ModifierType::SHIFT_MASK);
+    let alt = state.contains(gdk::ModifierType::ALT_MASK);
     use gdk::Key;
     Some(match key {
+        Key::Left | Key::KP_Left if alt => Command::Back,
         Key::Left | Key::KP_Left => Command::Left,
         Key::Right | Key::KP_Right => Command::Right,
         Key::Up | Key::KP_Up => Command::Up,

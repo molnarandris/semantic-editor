@@ -119,9 +119,23 @@ mod tests {
             "<eq:square>",
             "/ Bond dimension: the size",
             "#align(center)[",
+            "@sec:mps, @eq:mps, @eq:abs and @thm:fundamental.",
         ] {
             assert!(tail.contains(part), "missing {part:?}");
         }
+        // The references point to labels of the document.
+        let doc = sample::document();
+        let last = doc.blocks.last().unwrap().kind.inlines().unwrap();
+        let labels: Vec<&str> = doc.labels().iter().map(|(l, _)| *l).collect();
+        let refs: Vec<&str> = last
+            .iter()
+            .filter_map(|i| match &i.kind {
+                model::Inline::Ref(label) => Some(label.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(refs, ["sec:mps", "eq:mps", "eq:abs", "thm:fundamental"]);
+        assert!(refs.iter().all(|r| labels.contains(r)), "{labels:?}");
     }
 
     #[test]

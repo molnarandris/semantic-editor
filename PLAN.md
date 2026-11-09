@@ -727,7 +727,7 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
   and ↑/↓ move to the case above/below (`vertical_target`; past the first/last case,
   line moves as before). The source keeps Typst's commas.
 
-## M15b — References (2026-11-09, in progress)
+## M15b — References (2026-11-09)
 
 - Model: `Inline::Ref(label)`, a non-text inline (alternation like a formula) with no
   caret position inside. File format 12.
@@ -766,3 +766,12 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
   taken before the normal ones: ↑/↓ choose (back to the top when the typed label
   changes), Enter or Tab take it (`Editor::complete_ref`), a click on a row too;
   other keys type on and refine it.
+- Navigation: a click on a reference (the node under the click, `BlockLayout::hit`,
+  is a reference: `Document::ref_label`) follows it (`Editor::follow_ref`): the caret
+  goes to the start of the labelled block (an environment's body) and the old caret
+  is pushed on a stack; Alt+← (`go_back`) pops it (skipping blocks deleted since).
+  The arrow keys still pass over a reference as an atom.
+- The sample's last paragraph has references to a heading, two formulas and the
+  theorem (its test checks that they point to labels of the document).
+- Not yet: a reference still being typed when the file is saved keeps a trailing
+  `.`/`:` (the next key would have moved it); citations (M16).

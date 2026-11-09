@@ -912,6 +912,19 @@ impl Document {
             .map(|b| b.id)
     }
 
+    /// The label of reference `id`, if `id` is a reference.
+    pub fn ref_label(&self, id: NodeId) -> Option<&str> {
+        fn find(inlines: &[InlineNode], id: NodeId) -> Option<&str> {
+            inlines.iter().find_map(|i| match &i.kind {
+                Inline::Ref(label) if i.id == id => Some(label.as_str()),
+                Inline::Call { body, .. } => find(body, id),
+                _ => None,
+            })
+        }
+        let block = self.block(self.inline_block(id)?)?;
+        find(block.kind.text_inlines()?, id)
+    }
+
     /// Every label in document order, with the block it labels.
     pub fn labels(&self) -> Vec<(&str, &BlockNode)> {
         let mut all = vec![];

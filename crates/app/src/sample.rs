@@ -446,6 +446,12 @@ fn typed_section(doc: Document) -> Document {
     // A block call with an argument; Esc leaves it.
     e.insert_text("#align(center) _A block call with an argument._");
     e.escape();
-    e.insert_text("Headings, formulas and theorems carry labels, shown beside the page.");
+    e.insert_text("Headings, formulas and theorems carry labels, shown beside the page. ");
+    // References: `@` and the label (a list offers the labels); a click on
+    // one follows it, Alt+← comes back.
+    e.insert_text("References show their numbers: @sec:mps, @eq:mps, @eq:abs and ");
+    e.insert_text("@thm:fundamental.");
+    // Ends the reference: its trailing `.` goes back to the text.
+    e.escape();
     e.doc().clone()
 }

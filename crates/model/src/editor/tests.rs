@@ -1461,3 +1461,35 @@ fn references() {
     while e.undo() {}
     assert_eq!(texts(&e), [""]);
 }
+
+/// Following a reference goes to the labelled block (into an environment's
+/// body); Alt+← comes back.
+#[test]
+fn following_references() {
+    let mut e = Editor::default();
+    e.insert_text("= Intro");
+    e.move_right();
+    e.insert_text("sec");
+    e.enter();
+    e.insert_text("#lemma x");
+    e.move_right();
+    e.insert_text("lem");
+    e.escape();
+    e.insert_text("See @sec and @lem. ");
+    let here = e.caret().clone();
+    // The reference's id, as a click finds it.
+    let r = e.doc().blocks[2].kind.inlines().unwrap()[3].id;
+    assert_eq!(e.doc().ref_label(r), Some("lem"));
+    assert!(e.follow_ref("lem"));
+    assert_eq!(
+        e.caret(),
+        &e.doc().start_of(&e.doc().blocks[1].kind.body().unwrap()[0])
+    );
+    assert!(e.follow_ref("sec"));
+    assert_eq!(e.caret().block, e.doc().blocks[0].id);
+    assert!(e.go_back());
+    assert!(e.go_back());
+    assert_eq!(e.caret(), &here);
+    assert!(!e.go_back());
+    assert!(!e.follow_ref("nowhere"));
+}

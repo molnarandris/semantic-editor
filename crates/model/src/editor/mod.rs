@@ -101,6 +101,8 @@ pub struct Editor {
     /// What functions called in math take, from the Typst bridge. Without
     /// it, nothing typed in math becomes a call.
     math_calls: Option<MathCallResolver>,
+    /// Where the caret was before following references (Alt+← goes back).
+    back: Vec<CursorPath>,
 }
 
 /// Looks up a symbol name with `.modifiers`; `None` if it is not a symbol.
@@ -288,6 +290,7 @@ impl Editor {
             resolver: None,
             calls: None,
             math_calls: None,
+            back: vec![],
         }
     }
 
@@ -945,6 +948,37 @@ impl Editor {
         let (_, mut path) = self.call_around(&self.caret.path[..at.prefix])?;
         path.push(Step::Body);
         Some(path)
+    }
+
+    /// Follow a reference: the caret goes to the start of the block labelled
+    /// `label` (into an environment's body), and Alt+← comes back here.
+    /// `false` if no block has that label.
+    pub fn follow_ref(&mut self, label: &str) -> bool {
+        self.finish_word();
+        let Some(target) = self.doc.labels().into_iter().find(|(l, _)| *l == label) else {
+            return false;
+        };
+        let block = target.1;
+        let caret = match &block.kind {
+            Block::Env { body, .. } => self.doc.start_of(&body[0]),
+            _ => self.doc.start_of(block),
+        };
+        self.back.push(self.caret.clone());
+        self.jump(caret);
+        true
+    }
+
+    /// Alt+←: back to where the caret was before the last reference
+    /// followed.
+    pub fn go_back(&mut self) -> bool {
+        self.finish_word();
+        while let Some(caret) = self.back.pop() {
+            if self.doc.block(caret.block).is_some() {
+                let caret = self.doc.fix_cursor(&caret);
+                return self.jump(caret);
+            }
+        }
+        false
     }
 
     /// The block whose label pill shows (as "+ label" when it has none):
