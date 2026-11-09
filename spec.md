@@ -340,6 +340,7 @@ functions and packages.
   Typst (`\` then space) or with Shift+Enter. `~` is a non-breaking space, `--` an en
   dash, `---` an em dash, stored as the Unicode chars (`\~` and `\-` type the literal
   chars). Not done: soft hyphen `-?`, `...`, smart quotes (Typst already sets them).
+  Inline code is outlined like calls while the caret is in it (user request).
 
 ### M14 — Nested blocks: theorem environments and lists
 

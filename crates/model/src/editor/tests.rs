@@ -1255,13 +1255,14 @@ fn call_focus_is_the_innermost_call() {
     let mut e = Editor::default();
     e.insert_text("a *b _c $x");
     let p = |v: &[Step]| Some(v.to_vec());
-    assert_eq!(
-        e.call_focus(),
-        p(&[Step::Index(1), Step::Body, Step::Index(1)])
-    );
+    use Step::{Body, Index};
+    assert_eq!(e.call_focus(), p(&[Index(1), Body, Index(1), Body]));
     e.insert_text("$");
     e.escape();
-    assert_eq!(e.call_focus(), p(&[Step::Index(1)]));
+    assert_eq!(e.call_focus(), p(&[Index(1), Body]));
+    e.insert_text(" `y");
+    assert_eq!(e.call_focus(), p(&[Index(1), Body, Index(3)]));
+    e.escape();
     e.escape();
     assert_eq!(e.call_focus(), None);
 }

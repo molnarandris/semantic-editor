@@ -909,12 +909,17 @@ impl Editor {
         Some((self.doc.env_around(parent)?, true))
     }
 
-    /// The path of the innermost inline call (bold, italic, `#name[…]`)
-    /// holding the caret, in the caret's block, to outline it.
+    /// The innermost inline the caret is inside of, to outline it: inline
+    /// code, or a call (bold, italic, `#name[…]`). The path prefix that
+    /// every caret position inside it has (a call's ends with `Body`).
     pub fn call_focus(&self) -> Option<Vec<Step>> {
+        if let Some(pos) = self.raw_pos() {
+            return Some(pos.at(pos.inline, 0).path);
+        }
         let block = self.doc.block(self.caret.block)?;
         let at = self.doc.inline_at(block, &self.caret.path)?;
-        let (_, path) = self.call_around(&self.caret.path[..at.prefix])?;
+        let (_, mut path) = self.call_around(&self.caret.path[..at.prefix])?;
+        path.push(Step::Body);
         Some(path)
     }
 

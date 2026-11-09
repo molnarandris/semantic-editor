@@ -683,3 +683,7 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
   (stored as the chars, written as is). A `\` before `* _ ] ` ~ -` types that char
   literally. Typing normalises other whitespace to a space but keeps U+00A0.
 - Not yet: showing non-breaking spaces (they look like spaces); `-?`, `...`.
+- Follow-up (user request): inline code is outlined like calls and environments
+  while the caret is in it; `Editor::call_focus` now gives the path prefix of the
+  positions inside the innermost call (ending with `Body`) or inline code, which
+  `caret::call_outline` matches.

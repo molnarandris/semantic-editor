@@ -544,15 +544,14 @@ pub fn formula_marks(doc: &Document, caret: &CursorPath, stops: &[Stop]) -> Vec<
     out
 }
 
-/// The outline of the inline call at `call` (a path) in `block`: one box
-/// per line its text spans, from the stops inside it (top, bottom and the
+/// The outline of an inline call or inline code in `block`, given the path
+/// prefix of the positions inside it (see `Editor::call_focus`): one box per
+/// line its text spans, from the stops inside it (top, bottom and the
 /// extent of each line).
-pub fn call_outline(stops: &[Stop], block: model::NodeId, call: &[Step]) -> Vec<Rect> {
-    let mut body = call.to_vec();
-    body.push(Step::Body);
+pub fn call_outline(stops: &[Stop], block: model::NodeId, body: &[Step]) -> Vec<Rect> {
     let inside: Vec<Stop> = stops
         .iter()
-        .filter(|s| s.cursor.block == block && s.cursor.path.starts_with(&body))
+        .filter(|s| s.cursor.block == block && s.cursor.path.starts_with(body))
         .cloned()
         .collect();
     lines(&inside)
@@ -1142,7 +1141,7 @@ mod tests {
         let block = e.doc().blocks[0].clone();
         let l = layout_of(&block, 300.0);
         let s = stops(&block, Some(&l));
-        let call = [Step::Index(1)];
+        let call = [Step::Index(1), Step::Body];
         let boxes = call_outline(&s, block.id, &call);
         assert_eq!(boxes.len(), 1);
         let bold = l.box_of(block.kind.inlines().unwrap()[1].id).unwrap();
@@ -1158,6 +1157,16 @@ mod tests {
         let l = layout_of(&block, 120.0);
         let s = stops(&block, Some(&l));
         assert!(call_outline(&s, block.id, &call).len() > 1);
+        // Inline code: its positions are the code's own.
+        let mut e = model::Editor::new(Document::new());
+        e.insert_text("a `code` c");
+        let block = e.doc().blocks[0].clone();
+        let l = layout_of(&block, 300.0);
+        let s = stops(&block, Some(&l));
+        let boxes = call_outline(&s, block.id, &[Step::Index(1)]);
+        let code = l.box_of(block.kind.inlines().unwrap()[1].id).unwrap();
+        assert_eq!(boxes.len(), 1);
+        assert!((boxes[0].x - code.x).abs() < 0.5 && (boxes[0].right() - code.right()).abs() < 0.5);
     }
 
     #[test]
