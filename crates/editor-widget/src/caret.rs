@@ -14,6 +14,8 @@ use typst_bridge::{BlockLayout, Rect};
 
 /// Advance used for chars that produced no glyph, in pt (≈ a space at 11 pt).
 const SPACE_PT: f64 = 3.7;
+/// Width of a footnote's marker (a superscript number), in pt.
+const FOOTNOTE_MARK_PT: f64 = 4.5;
 /// How far an environment's outline lies outside its box, in pt.
 pub(crate) const OUTLINE_PAD_PT: f64 = 3.0;
 /// The caret just before/after an environment sits this far outside its box
@@ -363,10 +365,25 @@ fn list_stops(
     for (i, inline) in inlines.iter().enumerate() {
         let path = at(i);
         match &inline.kind {
-            Inline::Call { body, .. } => {
+            Inline::Call { name, body, .. } => {
                 let mut p = path.clone();
                 p.push(Step::Body);
                 inner[i] = list_stops(block, &p, body, l);
+                // A footnote's text is under the paragraph: just after it is
+                // after its marker, on the line it is called from.
+                let mark = per
+                    .get(i.wrapping_sub(1))
+                    .and_then(|v| v.last().cloned().flatten())
+                    .filter(|_| name == "footnote");
+                if let (Some(mark), Some(slot)) =
+                    (mark, per.get_mut(i + 1).and_then(|v| v.first_mut()))
+                {
+                    slot.get_or_insert(Stop {
+                        cursor: cursor(block, at(i + 1), 0),
+                        x: mark.x + FOOTNOTE_MARK_PT,
+                        ..mark
+                    });
+                }
                 // Just before and after it: where its text starts and ends.
                 let (first, last) = match (inner[i].first(), inner[i].last()) {
                     (Some(f), Some(e)) => (f.clone(), e.clone()),
@@ -1214,6 +1231,7 @@ mod tests {
     #[test]
     fn stops_in_inline_calls() {
         for keys in [
+            "Word#footnote[A note.] more.",
             "a `code` c",
             "`x y` and `` and `a`",
             "a\\ b\\ ",
@@ -1231,18 +1249,37 @@ mod tests {
             let s = stops(&block, Some(&l));
             let got: Vec<_> = s.iter().map(|s| s.cursor.clone()).collect();
             assert_eq!(got, e.doc().positions(&block), "{keys}");
-            // Left to right on a line; a line break starts a new line.
+            // Left to right along each line (a line break or a footnote's
+            // text below starts another one).
             let xs: Vec<_> = s
                 .iter()
                 .filter(|s| s.depth == 0)
                 .map(|s| (s.x, s.line))
                 .collect();
-            assert!(
-                xs.windows(2)
-                    .all(|w| w[0].0 <= w[1].0 + 0.01 || w[1].1 > w[0].1 + 2.0),
-                "{keys}: {xs:?}"
-            );
+            for line in lines(&s) {
+                let on: Vec<f64> = line.iter().map(|&i| s[i].x).collect();
+                let ordered = line.windows(2).all(|w| w[0] < w[1]);
+                assert!(
+                    ordered && on.windows(2).all(|w| w[0] <= w[1] + 0.01),
+                    "{keys}: {xs:?}"
+                );
+            }
         }
+        // After a footnote at the end of a paragraph: right after its marker,
+        // on its line (not after the footnote's text below).
+        let mut e = model::Editor::new(Document::new());
+        e.insert_text("End.#footnote[A note.]");
+        let block = e.doc().blocks[0].clone();
+        let s = stops(&block, Some(&layout_of(&block, 300.0)));
+        let end = s
+            .iter()
+            .find(|s| s.cursor.path == [Step::Index(0)] && s.cursor.offset == 4);
+        let after = s.iter().find(|s| s.cursor.path == [Step::Index(2)]);
+        let (end, after) = (end.unwrap(), after.unwrap());
+        assert!(
+            (after.line - end.line).abs() < 0.5 && after.x > end.x,
+            "{end:?} {after:?}"
+        );
         // Every char of inline code has its own place (monospace: even steps).
         let mut e = model::Editor::new(Document::new());
         e.insert_text("a `code` c");

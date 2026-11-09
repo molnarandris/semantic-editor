@@ -445,6 +445,11 @@ Titles decided 2026-11-08: optional, never added by default; positional
   `caption:` argument, `#figure(caption: [Cap])[…]`. A new figure starts with an empty
   caption; Backspace in an empty caption removes it. Figures are labelled and
   referenced like the other targets.
+- M16b decisions (2026-11-09): footnotes stay the inline call `#footnote[…]`
+  (M13a). Their counter joins the chain, and a block with a footnote becomes
+  counter-sensitive, so numbers run through the document. In the editor a footnote's
+  text shows under its own paragraph (where Typst puts it on the block's page,
+  measured), edited in place; the export puts it at the foot of the page as usual.
 
 ### M17 — Import `.typ` files
 

@@ -27,12 +27,13 @@ pub type CounterState = Vec<(String, Vec<i64>)>;
 const END_LABEL: &str = "sem-end";
 
 /// The counters to carry from block to block from the start: headings,
-/// equations, and every `counter("…")` that `code` (header and code blocks)
-/// names.
+/// equations, footnotes, and every `counter("…")` that `code` (header and
+/// code blocks) names.
 pub fn tracked_counters(code: &str) -> Vec<String> {
     let mut tracked = vec![
         "counter(heading)".to_string(),
         "counter(math.equation)".to_string(),
+        "counter(footnote)".to_string(),
     ];
     let mut rest = code;
     while let Some(start) = rest.find("counter(\"") {
@@ -263,6 +264,7 @@ mod tests {
             [
                 "counter(heading)",
                 "counter(math.equation)",
+                "counter(footnote)",
                 "counter(\"thm\")"
             ]
         );

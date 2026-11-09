@@ -802,3 +802,19 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
   `#figure[]`, counter `figure.where(kind: image)`).
 - The sample's chain diagram is now a captioned, labelled figure, referenced in the
   last paragraph.
+
+## M16b — Footnotes numbered through the document (2026-11-09)
+
+- Footnotes are the inline call `#footnote[…]` (M13a; typed right after a word,
+  `word#footnote[`, since commit 49cb67e). `counter(footnote)` joins the tracked
+  counters, and a paragraph holding a footnote (in other calls too, `has_footnote`)
+  is counter-sensitive, so it starts from the previous block's count
+  (`footnotes_are_numbered_through_the_chain`).
+- Measured: in a block's page (height auto) Typst puts the footnote under the
+  paragraph, after a separator line; the editor shows it there, its text mapped to
+  the call's body, so it is edited in place. The export puts it at the foot of the
+  page as usual.
+- Caret: the position just after a footnote is right after its marker on the line
+  it is called from (`FOOTNOTE_MARK_PT` past the text before it), not after the
+  note's text below.
+- The sample has a footnote in the markup paragraph.

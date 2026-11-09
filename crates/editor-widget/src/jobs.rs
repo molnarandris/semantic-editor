@@ -107,8 +107,18 @@ pub fn counter_sensitive(block: &BlockNode) -> bool {
             true
         }
         Block::RawTypst(source) => !is_code(source),
-        Block::Paragraph(_) | Block::Diagram(_) | Block::Caption(_) => false,
+        // Footnotes are numbered through the document.
+        Block::Paragraph(inlines) => has_footnote(inlines),
+        Block::Diagram(_) | Block::Caption(_) => false,
     }
+}
+
+/// Whether inlines hold a footnote (in other calls too).
+fn has_footnote(inlines: &[InlineNode]) -> bool {
+    inlines.iter().any(|i| match &i.kind {
+        Inline::Call { name, body, .. } => name == "footnote" || has_footnote(body),
+        _ => false,
+    })
 }
 
 /// Jobs for the blocks that differ from `submitted` (the last submitted
@@ -259,6 +269,7 @@ mod tests {
         vec![
             ("counter(heading)".into(), heading.to_vec()),
             ("counter(math.equation)".into(), equation.to_vec()),
+            ("counter(footnote)".into(), vec![0]),
         ]
     }
 
@@ -611,6 +622,72 @@ mod tests {
         assert_eq!(submit(&d.blocks, "", &mut views), [0, 1]);
         views[0].end = Some(state(1));
         assert_eq!(submit(&d.blocks, "", &mut views), [2]);
+    }
+
+    /// With the compiler: footnotes are numbered through the document (a
+    /// paragraph with one is counter-sensitive; one without is not).
+    #[test]
+    fn footnotes_are_numbered_through_the_chain() {
+        let mut e = Editor::new(Document::new());
+        e.insert_text("One#footnote[First.] a.");
+        e.enter();
+        e.insert_text("No note.");
+        e.enter();
+        e.insert_text("Two *b#footnote[Second.]*.");
+        let d = e.doc().clone();
+        assert_eq!(
+            d.blocks.iter().map(counter_sensitive).collect::<Vec<_>>(),
+            [true, false, true]
+        );
+        let (tx, rx) = mpsc::channel();
+        let worker = Worker::spawn(None, move |r| tx.send(r).unwrap());
+        let mut views: Vec<View> = vec![];
+        for _ in 0..10 {
+            views.resize_with(d.blocks.len(), View::default);
+            let jobs = stale_blocks(&d.blocks, "", false, &submitted(&views));
+            if jobs.is_empty() {
+                break;
+            }
+            for job in &jobs {
+                views[job.index] = View {
+                    around: job.around.clone(),
+                    snippet: job.snippet.clone(),
+                    map: job.map.clone(),
+                    ..Default::default()
+                };
+                worker.submit(CompileJob {
+                    block: model::NodeId(job.index as u64),
+                    generation: 1,
+                    around: job.around.clone(),
+                    snippet: job.snippet.clone(),
+                    map: job.map.clone(),
+                    width_pt: 300.0,
+                    pixel_per_pt: 1.0,
+                    persist: false,
+                    transient: false,
+                });
+            }
+            for _ in &jobs {
+                let r = rx.recv_timeout(Duration::from_secs(120)).unwrap();
+                let i = r.block.0 as usize;
+                let rendered = r.outcome.unwrap_or_else(|e| panic!("block {i}: {e:?}"));
+                views[i].end = rendered.end_state;
+            }
+        }
+        let footnotes = |v: &View| {
+            let end = v.end.as_ref()?;
+            end.iter()
+                .find(|(c, _)| c == "counter(footnote)")
+                .map(|(_, n)| n.clone())
+        };
+        assert_eq!(footnotes(&views[0]), Some(vec![1]));
+        assert_eq!(footnotes(&views[2]), Some(vec![2]), "numbered on");
+        assert!(
+            views[2]
+                .around
+                .prefix
+                .contains("counter(footnote).update((1,))")
+        );
     }
 
     /// With the real worker: submitting until nothing is stale ends with

@@ -120,6 +120,8 @@ mod tests {
             "/ Bond dimension: the size",
             "#align(center)[",
             "@sec:mps, @eq:mps, @eq:abs, @fig:chain and @thm:fundamental.",
+            "Footnotes#footnote[Numbered through the document; in the editor under their \
+             paragraph.] are calls too.",
         ] {
             assert!(tail.contains(part), "missing {part:?}");
         }

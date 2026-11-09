@@ -406,7 +406,8 @@ fn typed_section(doc: Document) -> Document {
     e.insert_text("#link(\"https://typst.app\")[link]; code is `cargo test`. ");
     e.insert_text("Dashes join ranges, pages 3--7, or set off a pause --- like this. ");
     e.insert_text("A non-breaking space keeps Fig.~1 together.\\ ");
-    e.insert_text("A line break starts this line.");
+    e.insert_text("A line break starts this line. Footnotes#footnote[Numbered through ");
+    e.insert_text("the document; in the editor under their paragraph.] are calls too.");
     e.enter();
 
     // Calls and atoms in formulas, and an inline diagram.
