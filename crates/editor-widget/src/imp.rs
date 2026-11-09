@@ -306,6 +306,7 @@ impl WidgetImpl for SemEditor {
             (self.content_height() - 2.0 * TOP_MARGIN_PX + 2.0 * pad) as f32,
         );
         snapshot.append_color(&gdk::RGBA::WHITE, &paper);
+        self.snapshot_ref_marks(snapshot, x0, scroll);
         if obj.has_focus() {
             self.snapshot_env_outline(snapshot, x0, scroll);
             self.snapshot_call_outline(snapshot, x0, scroll);
@@ -466,16 +467,21 @@ impl SemEditor {
         let click = gtk::GestureClick::new();
         click.set_button(gdk::BUTTON_PRIMARY);
         let weak = obj.downgrade();
-        click.connect_pressed(move |_, n_press, x, y| {
+        click.connect_pressed(move |gesture, n_press, x, y| {
             if let Some(obj) = weak.upgrade() {
                 obj.grab_focus();
                 let imp = obj.imp();
+                let ctrl = gesture
+                    .current_event_state()
+                    .contains(gdk::ModifierType::CONTROL_MASK);
                 if let Some(label) = imp.completion_at(x, y) {
                     imp.choose_completion(&label);
-                } else if let Some(label) = imp.ref_at(x, y)
+                } else if ctrl
+                    && let Some(label) = imp.ref_at(x, y)
                     && imp.editor.borrow_mut().follow_ref(&label)
                 {
-                    // A reference: to its target (Alt+← comes back).
+                    // Ctrl+click on a reference: to its target (Alt+←
+                    // comes back).
                     imp.goal_x.set(None);
                     imp.after_command(true);
                 } else if let Some(env) = imp.heading_at(x, y)
@@ -877,6 +883,41 @@ impl SemEditor {
             snapshot.append_layout(d, &gdk::RGBA::new(0.4, 0.42, 0.48, 1.0));
             snapshot.restore();
             rows.push((row, label.clone()));
+        }
+    }
+
+    /// A light green background behind every reference in view, so links
+    /// stand out whatever the header's styling (editor only, not in Typst).
+    fn snapshot_ref_marks(&self, snapshot: &gtk::Snapshot, x0: f64, scroll: f64) {
+        let zoom = self.zoom.get();
+        let height = self.obj().height() as f64;
+        let green = gdk::RGBA::new(0.20, 0.65, 0.33, 0.16);
+        let ed = self.editor.borrow();
+        let views = self.views.borrow();
+        let tops = self.block_tops();
+        for ((block, view), &top) in ed.doc().blocks.iter().zip(views.iter()).zip(&tops) {
+            let y0 = top - scroll;
+            if y0 > height || y0 + view.height_pt() * zoom < 0.0 {
+                continue;
+            }
+            let Some(layout) = view.layout.as_ref() else {
+                continue;
+            };
+            for id in block.ref_ids() {
+                let Some(r) = layout.box_of(id) else {
+                    continue;
+                };
+                let rect = graphene::Rect::new(
+                    (x0 + r.x * zoom - 1.5) as f32,
+                    (y0 + r.y * zoom - 1.0) as f32,
+                    (r.w * zoom + 3.0) as f32,
+                    (r.h * zoom + 2.0) as f32,
+                );
+                let rounded = gsk::RoundedRect::from_rect(rect, 2.5);
+                snapshot.push_rounded_clip(&rounded);
+                snapshot.append_color(&green, &rect);
+                snapshot.pop();
+            }
         }
     }
 

@@ -423,7 +423,9 @@ Titles decided 2026-11-08: optional, never added by default; positional
   counter set), so the header's supplements, numbering and show rules apply. A
   reference to a missing, unnumbered or duplicate label shows `@label` in red
   instead of failing. Steps: model and typing; rendering; the completion popover;
-  click to follow, Alt+← back.
+  click to follow, Alt+← back. Changed after testing (2026-11-09): Ctrl+click follows
+  (a plain click is too easy to trigger); references get a light green background in
+  the editor so they stand out with any styling.
 
 - Labels on figures and theorems too (all targets exist by now); citations (`@key`)
   with the bibliography.

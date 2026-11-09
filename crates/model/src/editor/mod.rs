@@ -883,6 +883,9 @@ impl Editor {
             (None, None) if self.ref_before().is_some() => {
                 "reference: type its label · ↑/↓ and Enter → choose · space → done"
             }
+            (None, None) if self.next_to_ref() => {
+                "reference · Ctrl+click → go to its target, Alt+← → back · Backspace → select it"
+            }
             (None, None) if self.label_pos().is_some() => {
                 "label (letters, digits, - _ . :) · Enter, space or Esc → leave"
             }
@@ -948,6 +951,19 @@ impl Editor {
         let (_, mut path) = self.call_around(&self.caret.path[..at.prefix])?;
         path.push(Step::Body);
         Some(path)
+    }
+
+    /// Whether the caret is in text right before or after a reference.
+    fn next_to_ref(&self) -> bool {
+        let Some(pos) = self.text_pos() else {
+            return false;
+        };
+        let is_ref = |k: Option<usize>| {
+            k.and_then(|k| pos.inlines.get(k))
+                .is_some_and(|i| matches!(i.kind, Inline::Ref(_)))
+        };
+        (pos.offset == 0 && is_ref(pos.inline.checked_sub(1)))
+            || (pos.offset == pos.len && is_ref(Some(pos.inline + 1)))
     }
 
     /// Follow a reference: the caret goes to the start of the block labelled

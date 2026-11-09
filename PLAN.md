@@ -773,5 +773,10 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
   The arrow keys still pass over a reference as an atom.
 - The sample's last paragraph has references to a heading, two formulas and the
   theorem (its test checks that they point to labels of the document).
+- Follow-up (user testing): references are followed with Ctrl+click (a plain click
+  placing the caret was more useful; the status bar says so next to a reference),
+  and every reference gets a light green background drawn by the widget behind its
+  box (`snapshot_ref_marks`, `BlockNode::ref_ids`), so links stand out whatever the
+  header's styling.
 - Not yet: a reference still being typed when the file is saved keeps a trailing
   `.`/`:` (the next key would have moved it); citations (M16).

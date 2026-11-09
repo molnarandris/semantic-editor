@@ -355,6 +355,28 @@ impl BlockNode {
         }
     }
 
+    /// The references in this block (nested blocks and inline calls too).
+    pub fn ref_ids(&self) -> Vec<NodeId> {
+        fn inlines(v: &[InlineNode], out: &mut Vec<NodeId>) {
+            for inline in v {
+                match &inline.kind {
+                    Inline::Ref(_) => out.push(inline.id),
+                    Inline::Call { body, .. } => inlines(body, out),
+                    _ => {}
+                }
+            }
+        }
+        let mut out = vec![];
+        let mut all = vec![];
+        all_blocks(std::slice::from_ref(self), &mut all);
+        for block in all {
+            if let Some(v) = block.kind.text_inlines() {
+                inlines(v, &mut out);
+            }
+        }
+        out
+    }
+
     /// Whether `id` is this block or inside it.
     pub fn contains(&self, id: NodeId) -> bool {
         self.id == id
