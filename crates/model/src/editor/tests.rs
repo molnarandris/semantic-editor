@@ -644,7 +644,7 @@ fn inline_diagrams() {
     e.insert_text("x");
     assert!(e.insert_block(NewBlock::Diagram));
     e.insert_text("y");
-    assert_eq!(display_of(&e, 0), "x #code y");
+    assert_eq!(display_of(&e, 0), "x #diagram y");
     assert_eq!(e.doc().blocks.len(), 1, "no block was added");
     let Block::DisplayMath(row) = &e.doc().blocks[0].kind else {
         unreachable!()
@@ -754,6 +754,7 @@ fn show(row: &crate::tree::MathRow) -> String {
             MathKind::Sym(s) | MathKind::Ident(s) | MathKind::Num(s) => s.clone(),
             MathKind::Slot => "□".into(),
             MathKind::Code(_) => "#code".into(),
+            MathKind::Diagram(_) => "#diagram".into(),
             MathKind::Frac { num, den } => format!("frac({}, {})", show(num), show(den)),
             MathKind::Scripts { base, sup, sub } => format!(
                 "{}{}{}",

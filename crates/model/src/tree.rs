@@ -119,6 +119,10 @@ pub enum MathKind {
     /// An atom for the caret; its source is edited in the source dialog,
     /// like a diagram block's.
     Code(String),
+    /// An inline CeTZ drawing: like a diagram block, only the drawing code
+    /// (the body of `cetz.canvas({ import cetz.draw: * … })`), set in a box
+    /// in the formula.
+    Diagram(String),
 }
 
 impl Block {
@@ -330,6 +334,15 @@ impl MathNode {
         }
     }
 
+    /// The source of a code atom or inline diagram, edited in the source
+    /// dialog.
+    pub fn source(&self) -> Option<&str> {
+        match &self.kind {
+            MathKind::Code(s) | MathKind::Diagram(s) => Some(s),
+            _ => None,
+        }
+    }
+
     /// True for nodes with child rows (fractions, scripts).
     pub fn is_structure(&self) -> bool {
         matches!(self.kind, MathKind::Frac { .. } | MathKind::Scripts { .. })
@@ -344,6 +357,7 @@ impl MathNode {
             MathKind::Scripts { .. } => "scripts",
             MathKind::Slot => "slot",
             MathKind::Code(_) => "code",
+            MathKind::Diagram(_) => "diagram",
         }
     }
 }
@@ -709,13 +723,10 @@ impl Document {
             .find_map(|r| r.find_node(id))
     }
 
-    /// The source of code atom `id` (`MathKind::Code`).
+    /// The source of code atom or inline diagram `id`.
     pub fn code_source(&self, id: NodeId) -> Option<&str> {
         let (row, i) = self.find_node(id)?;
-        match &row.nodes[i].kind {
-            MathKind::Code(s) => Some(s),
-            _ => None,
-        }
+        row.nodes[i].source()
     }
 
     /// Whether `id` is a list item.
@@ -788,6 +799,10 @@ impl Document {
 
     pub fn code(&mut self, source: &str) -> MathNode {
         self.node(MathKind::Code(source.into()))
+    }
+
+    pub fn inline_diagram(&mut self, source: &str) -> MathNode {
+        self.node(MathKind::Diagram(source.into()))
     }
 
     pub fn frac(&mut self, num: Vec<MathNode>, den: Vec<MathNode>) -> MathNode {

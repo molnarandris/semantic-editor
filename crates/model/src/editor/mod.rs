@@ -57,11 +57,8 @@ line((0, 0), (1, 0), mark: (end: \">\"))
 content((1.4, 0), $x$)";
 
 /// The code a new inline diagram (in a formula) starts with.
-pub const INLINE_DIAGRAM_TEMPLATE: &str = "box(baseline: 30%, cetz.canvas(length: 1em, {
-  import cetz.draw: *
-  circle((0, 0), radius: 0.5)
-  line((-0.5, 0), (0.5, 0))
-}))";
+pub const INLINE_DIAGRAM_TEMPLATE: &str = "circle((0, 0), radius: 0.5)
+line((-0.5, 0), (0.5, 0))";
 
 /// A selected subtree, shown highlighted; Backspace/Delete remove it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -544,10 +541,10 @@ impl Editor {
         })
     }
 
-    /// The code atom (Typst code in a formula) to edit: the selected one,
+    /// The code atom or inline diagram to edit: the selected one,
     /// else the one just before the caret, else the one just after it.
     fn code_atom(&self) -> Option<NodeId> {
-        let code = |n: &MathNode| matches!(n.kind, MathKind::Code(_)).then_some(n.id);
+        let code = |n: &MathNode| n.source().map(|_| n.id);
         if let Some(Selected::Nodes {
             block, path, start, ..
         }) = &self.selected

@@ -11,7 +11,7 @@ use gtk::{gdk, glib, graphene, gsk};
 use model::{Block, CursorPath, Document, Editor, NodeId};
 use typst_bridge::{
     Around, BLOCK_PAD_PT, BlockLayout, CompileJob, CompileResult, CounterState, HEADER_SPECIMEN,
-    Raster, SpanMap, Worker,
+    Raster, SpanMap, Worker, serialize_block, serialize_math_node,
 };
 
 use crate::caret::{self, Stop};
@@ -1101,16 +1101,35 @@ impl SemEditor {
         let mut preview = self.preview.borrow_mut();
         let Some(target) = preview.target else { return };
         let (around, snippet, map) = match target {
-            PreviewTarget::Block(block) => {
-                // A nested block or a code atom: its top-level block's render.
-                let Some(block) = self.editor.borrow().doc().top_block(block) else {
+            PreviewTarget::Block(id) => {
+                let ed = self.editor.borrow();
+                let doc = ed.doc();
+                let Some(top) = doc.top_block(id) else {
                     return;
                 };
                 let views = self.views.borrow();
-                let Some(view) = views.iter().find(|v| v.id == block) else {
+                let Some(view) = views.iter().find(|v| v.id == top) else {
                     return;
                 };
-                (view.around.clone(), view.snippet.clone(), view.map.clone())
+                if top == id {
+                    (view.around.clone(), view.snippet.clone(), view.map.clone())
+                } else {
+                    // A block nested in an environment or list item, or a
+                    // diagram in a formula: only it, with the definitions
+                    // in force where it is.
+                    let snippet = match doc.block(id) {
+                        Some(block) => serialize_block(block).0,
+                        None => match doc.find_node(id) {
+                            Some((row, k)) => serialize_math_node(&row.nodes[k]),
+                            None => return,
+                        },
+                    };
+                    let around = Around {
+                        header: view.around.header.clone(),
+                        ..Around::default()
+                    };
+                    (around, snippet, SpanMap::default())
+                }
             }
             PreviewTarget::Header => {
                 let around = Around {

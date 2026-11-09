@@ -453,7 +453,7 @@ impl Writer {
     /// only next to brackets and punctuation, where no identifier can form.
     fn space_between(&self, a: &MathNode, b: &MathNode, a_paired: bool, b_paired: bool) -> bool {
         // After code, a `;` or `,` would be read as part of it.
-        if self.style == Style::Edit || matches!(a.kind, MathKind::Code(_)) {
+        if self.style == Style::Edit || a.source().is_some() {
             return true;
         }
         let sym = |n: &MathNode, set: &[&str]| matches!(&n.kind, MathKind::Sym(s) if set.contains(&s.as_str()));
@@ -465,6 +465,22 @@ impl Writer {
             && sym(b, &["("])
             && matches!(&a.kind, MathKind::Ident(s) if s.chars().count() == 1);
         !(opens || closes || punct || applied)
+    }
+
+    /// An inline diagram's code: its drawing in a canvas sized like the
+    /// text, in a box raised to sit on the line.
+    fn inline_diagram(&mut self, src: &str) {
+        self.out
+            .push_str("box(baseline: 30%, cetz.canvas(length: 1em, {");
+        self.nl();
+        self.out.push_str("  import cetz.draw: *");
+        for line in src.lines() {
+            self.nl();
+            self.out.push_str("  ");
+            self.out.push_str(line);
+        }
+        self.nl();
+        self.out.push_str("}))");
     }
 
     /// A row as a fraction part or script: bare if it is one atom (readable
@@ -498,6 +514,15 @@ impl Writer {
             MathKind::Code(src) => {
                 w.out.push('#');
                 w.out.push_str(src);
+            }
+            MathKind::Diagram(src) if w.style == Style::Edit => {
+                w.out.push_str("#sem-code($#");
+                w.inline_diagram(src);
+                w.out.push_str("$)");
+            }
+            MathKind::Diagram(src) => {
+                w.out.push('#');
+                w.inline_diagram(src);
             }
             MathKind::Frac { num, den } => {
                 w.group(num);
@@ -710,6 +735,29 @@ pub fn serialize_block_numbered(block: &BlockNode, number: Option<usize>) -> (St
     serialize_with(block, Style::Edit, number)
 }
 
+/// A standalone snippet showing only math node `node` (an inline diagram
+/// or code atom being edited), for the source dialog's preview.
+pub fn serialize_math_node(node: &MathNode) -> String {
+    let mut w = Writer {
+        out: String::new(),
+        map: SpanMap::default(),
+        style: Style::Readable,
+        args: 0,
+        indent: String::new(),
+        number: None,
+    };
+    if matches!(node.kind, MathKind::Diagram(_))
+        || matches!(&node.kind, MathKind::Code(s) if s.contains("cetz"))
+    {
+        w.out.push_str(CETZ_IMPORT);
+        w.out.push('\n');
+    }
+    w.out.push('$');
+    w.math(node);
+    w.out.push('$');
+    w.out
+}
+
 /// Whether a block draws with CeTZ: a diagram (unless `diagrams` is
 /// false), or code in a formula that mentions it (an inline diagram), here
 /// or in a container's title or body.
@@ -717,6 +765,7 @@ fn uses_cetz(block: &BlockNode, diagrams: bool) -> bool {
     fn in_row(row: &MathRow) -> bool {
         row.nodes.iter().any(|n| match &n.kind {
             MathKind::Code(src) => src.contains("cetz"),
+            MathKind::Diagram(_) => true,
             _ => n.children().into_iter().any(|(_, r)| in_row(r)),
         })
     }
@@ -1153,23 +1202,25 @@ mod tests {
         }
     }
 
-    /// Code in a formula: `#code` in the file, boxed in the editor's renders
-    /// so it gets a layout box (CeTZ shapes carry CeTZ's spans), without
-    /// moving what follows. CeTZ is imported where an inline diagram needs it.
+    /// An inline diagram: its drawing in a box and canvas in the file, boxed
+    /// again in the editor's renders so it gets a layout box (CeTZ shapes
+    /// carry CeTZ's spans), without moving what follows. CeTZ is imported
+    /// where it is needed; the preview shows the diagram alone.
     #[test]
-    fn code_in_formulas() {
+    fn inline_diagrams() {
         let mut d = Document::empty();
         let (a, b) = (d.ident("a"), d.ident("b"));
-        let code = d.code(model::INLINE_DIAGRAM_TEMPLATE);
+        let code = d.inline_diagram(model::INLINE_DIAGRAM_TEMPLATE);
         let (aid, cid, bid) = (a.id, code.id, b.id);
         let semi = d.sym(";");
         let m = d.math(vec![a, code, semi, b]);
         let p = d.paragraph(vec![m]);
         let (readable, _) = serialize_block_styled(&p, Style::Readable);
-        assert!(readable.starts_with("$a #box(baseline"), "{readable}");
-        assert!(
-            readable.ends_with("})) ; b$"),
-            "space kept before ; {readable}"
+        assert_eq!(
+            readable,
+            "$a #box(baseline: 30%, cetz.canvas(length: 1em, {\n  import cetz.draw: *\n  \
+             circle((0, 0), radius: 0.5)\n  line((-0.5, 0), (0.5, 0))\n})) ; b$",
+            "space kept before ;"
         );
         let (src, map) = serialize_block(&p);
         assert!(src.starts_with(CETZ_IMPORT), "{src}");
@@ -1186,6 +1237,14 @@ mod tests {
             ra.right() <= rc.x && rc.right() <= rb.x && rc.w > 10.0,
             "{ra:?} {rc:?} {rb:?}"
         );
+
+        // The preview shows the diagram alone.
+        let alone = serialize_math_node(&p.rows()[0].nodes[1]);
+        assert!(
+            alone.starts_with(CETZ_IMPORT) && !alone.contains("$a"),
+            "{alone}"
+        );
+        compile(&mut world, &alone).unwrap();
 
         d.blocks = vec![p];
         let whole = serialize_document(&d);

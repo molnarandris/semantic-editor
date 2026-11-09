@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 /// 3: environments (`Env` blocks), with an optional `title` (absent when
 /// empty, so older version-3 files load unchanged). 4: list items (`Item`).
 /// 5: block calls with source arguments (`args` on `Env`, absent when empty).
-/// 6: code in formulas (`MathKind::Code`).
+/// 6: code and diagrams in formulas (`MathKind::Code`, `MathKind::Diagram`).
 pub const FORMAT_VERSION: u32 = 6;
 
 #[derive(Serialize)]

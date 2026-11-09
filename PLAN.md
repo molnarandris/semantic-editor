@@ -534,6 +534,13 @@ Done before M11–M13, at the user's request (2026-11-08). Implementation notes:
   `cetz` in a formula (a diagram block still imports it itself); the exported file
   imports it once if any block, at any depth, has a diagram or such code (it used to
   check top-level diagram blocks only).
+- Follow-up (user request): the dialog for an inline diagram is the diagram editor.
+  `MathKind::Diagram(String)` holds only the drawing code, like a diagram block; the
+  serializer adds `box(baseline: 30%, cetz.canvas(length: 1em, { import cetz.draw: *
+  … }))`. Insert Diagram makes one (`MathKind::Code` stays for other code in
+  formulas). The preview renders only the edited item (`serialize_math_node`), also
+  for a block nested in an environment or list item (`serialize_block`), with the
+  header and code blocks in force; a top-level block still previews its own render.
 - In text: type `$` then Insert Diagram, which gives `$#box(…)$`, laid out like the
   box in text. A separate text inline kind was not added: a third inline kind would
   touch every place that relies on text and formulas alternating.

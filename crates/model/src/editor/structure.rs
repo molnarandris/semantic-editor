@@ -280,7 +280,7 @@ impl Editor {
         if kind == NewBlock::Diagram
             && let Some(p) = self.row_pos()
         {
-            let node = self.doc.code(INLINE_DIAGRAM_TEMPLATE);
+            let node = self.doc.inline_diagram(INLINE_DIAGRAM_TEMPLATE);
             let op = row_insert(p.row, p.offset, node);
             return self.commit(vec![op], p.at(p.offset + 1), Last::Other);
         }
@@ -323,11 +323,16 @@ impl Editor {
         }
         // A code atom: replaced by one with the new source, same id; the
         // caret stays.
-        if let Some((row, k)) = self.doc.find_node(block).map(|(r, k)| (r.id, k)) {
-            let node = MathNode {
-                id: block,
-                kind: MathKind::Code(source.into()),
+        if let Some((row, k, diagram)) = self
+            .doc
+            .find_node(block)
+            .map(|(r, k)| (r.id, k, matches!(r.nodes[k].kind, MathKind::Diagram(_))))
+        {
+            let kind = match diagram {
+                true => MathKind::Diagram(source.into()),
+                false => MathKind::Code(source.into()),
             };
+            let node = MathNode { id: block, kind };
             let after = self.caret.clone();
             return self.commit(vec![row_replace(row, k, node)], after, Last::Source(block));
         }
