@@ -7,7 +7,7 @@
 //! position at the left edge of each node and after the last one, and the
 //! middle of an empty slot; positions in a row span the row's height.
 
-use model::{Block, BlockNode, CursorPath, Inline, MathKind, MathRow, Step};
+use model::{Block, BlockNode, CursorPath, Inline, MathKind, MathNode, MathRow, Step};
 use typst_bridge::{BlockLayout, Rect};
 
 /// Advance used for chars that produced no glyph, in pt (≈ a space at 11 pt).
@@ -120,15 +120,23 @@ fn row_stops(
         return;
     }
     // Lines of a multi-line formula (split at `\\`): each stop takes the
-    // height of its line, and its baseline is moved down with the line.
+    // height of its line, and its baseline is moved down with the line. An
+    // empty line is the placeholder written with the break before it.
+    let breaks: Vec<&MathNode> = row
+        .nodes
+        .iter()
+        .filter(|n| n.kind == MathKind::Linebreak)
+        .collect();
     let lines: Vec<Rect> = row
         .nodes
         .split(|n| n.kind == MathKind::Linebreak)
-        .map(|nodes| {
+        .enumerate()
+        .map(|(i, nodes)| {
             nodes
                 .iter()
                 .filter_map(|n| l.box_of(n.id))
                 .reduce(|a, b| a.union(&b))
+                .or_else(|| i.checked_sub(1).and_then(|b| l.box_of(breaks[b].id)))
                 .unwrap_or(rb)
         })
         .collect();
@@ -150,16 +158,26 @@ fn row_stops(
     let mut i = 0;
     let mut right = rb.x;
     for (k, node) in row.nodes.iter().enumerate() {
-        let r = l.box_of(node.id);
+        let brk = node.kind == MathKind::Linebreak;
+        // A break's box is the placeholder of the empty line after it.
+        let r = l.box_of(node.id).filter(|_| !brk);
         let x = r.map_or(right, |r| r.x);
         out.push(if lines.len() > 1 {
             at_line(path.clone(), k, x, i)
         } else {
             at(path.clone(), k, x)
         });
-        if node.kind == MathKind::Linebreak {
+        if brk {
             i += 1;
-            right = lines[i].x;
+            let empty = row
+                .nodes
+                .get(k + 1)
+                .is_none_or(|n| n.kind == MathKind::Linebreak);
+            right = if empty {
+                lines[i].x + lines[i].w / 2.0
+            } else {
+                lines[i].x
+            };
         }
         if let Some(r) = r {
             right = r.right();
@@ -570,6 +588,28 @@ mod tests {
         assert!(
             (first[2].x - second[1].x).abs() < 0.5,
             "{first:?} {second:?}"
+        );
+    }
+
+    /// A break at the end of a formula opens an empty line, which shows a
+    /// placeholder; the caret after the break sits in it, below the first
+    /// line.
+    #[test]
+    fn caret_on_an_empty_new_line() {
+        let mut d = Document::empty();
+        let a = d.ident("a");
+        let br = d.node(MathKind::Linebreak);
+        let block = d.display(vec![a, br]);
+        let l = layout_of(&block, 300.0);
+        let s = stops(&block, Some(&l));
+        assert_eq!(s.len(), 3);
+        let slot = l.box_of(block.rows()[0].nodes[1].id).unwrap();
+        assert!(s[1].line == s[0].line, "{s:?}");
+        assert!(s[2].line > s[0].line + 5.0, "{s:?}");
+        assert!(s[2].top >= s[0].bottom - 1.0, "{s:?}");
+        assert!(
+            (s[2].x - (slot.x + slot.w / 2.0)).abs() < 0.01,
+            "{s:?} {slot:?}"
         );
     }
 

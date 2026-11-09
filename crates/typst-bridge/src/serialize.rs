@@ -440,6 +440,20 @@ impl Writer {
                     w.out.push(' ');
                 }
                 match (&node.kind, paired[i]) {
+                    // A line left empty after a break holds a placeholder,
+                    // so it shows and the caret has a place on it.
+                    (MathKind::Linebreak, _)
+                        if w.style == Style::Edit
+                            && row
+                                .nodes
+                                .get(i + 1)
+                                .is_none_or(|n| n.kind == MathKind::Linebreak) =>
+                    {
+                        w.node(node.id, |w| {
+                            w.out.push_str("\\ ");
+                            w.out.push_str(SLOT);
+                        });
+                    }
                     // Literal, so Typst scales the pair to its content.
                     (MathKind::Sym(d), true) => w.node(node.id, |w| w.out.push_str(d)),
                     _ => w.math(node),

@@ -601,6 +601,10 @@ M12 is split: M12a the generic call node, M12b the atoms (primes, text in math, 
   line's height and a baseline moved down with the line, and the first stop after a
   break starts at the line's left. So ↑/↓ move between the lines and `&` columns line
   up (test `stops_in_multi_line_formulas`).
+- Fix after testing: a break that leaves its line empty (at the end, or before
+  another break) is written `\ #sem-slot()` in the editor, inside the break's span,
+  so the new line shows a placeholder and the caret after the break sits in it,
+  centred like in any empty slot (test `caret_on_an_empty_new_line`).
 - Not yet: editing inside a text after leaving it (Backspace from its end only);
   Shift+Enter for a line break.
 
