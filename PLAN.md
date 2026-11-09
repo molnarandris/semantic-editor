@@ -429,7 +429,7 @@ Done before M11–M13, at the user's request (2026-11-08). Implementation notes:
     (`symbols::is_large_op`); they used to start an empty base. Other operators
     still get an empty base, and `/` still does not take a large operator.
 - Not yet (M14b): lists, environments by Typst function detection (any `#identifier`
-  is accepted; an unknown one shows a compile error).
+  is accepted; an unknown one shows a compile error). Both done in M14b.
 
 ## M14b — Environment titles, lists, block-level calls
 
@@ -454,9 +454,8 @@ Done before M11–M13, at the user's request (2026-11-08). Implementation notes:
     edits its title, adding an empty one if needed: the heading is the stretch of the
     first inside line between the outline and the first position inside
     (`caret::heading_at`). The sample's `proof` takes a title too, so clicking "Proof."
-    does not give a compile error. Until function detection (later in M14b), clicking
-    the heading of a function without a title parameter shows a compile error until
-    the empty title goes.
+    does not give a compile error. With function detection (below) a function known
+    to take no title gets none; the click then just places the caret.
 - Lists (2026-11-08). Model as in Typst: no list node, a list item is a container
   block, `Block::Item { kind: Bullet | Numbered | Term, term, body }`; consecutive
   items make a list, an item in an item's body is nested. So nothing has to split or
@@ -484,5 +483,24 @@ Done before M11–M13, at the user's request (2026-11-08). Implementation notes:
   - Fix (2026-11-09): Shift+Tab takes the kind of the item it moves out of, so a
     numbered sub-item of a bullet list becomes a bullet (term items neither gain nor
     lose their kind).
+- Block calls and function detection (2026-11-09). `Block::Env` gained `args`: the
+  call's other arguments as Typst source, verbatim, written before the title and body
+  (`#align(center)[…]`). File format 5.
+  - Detection (`typst_bridge::call_shape`, `calls.rs`): parsing only, no compile, so it
+    runs on the keystroke. The top-level `#let`s of the header and the raw blocks (in
+    document order, the last wins) give a function's parameters: a body if it has a
+    positional parameter or a sink, a title if two positional or a sink. Else Typst's
+    global scope: a built-in function takes a body if it has a positional parameter,
+    never a title; any other value takes nothing. A name bound to something not written
+    as a function (`#let thm = thmbox(…)`), imported from a package or undefined is
+    unknown, and is treated as before (body and title allowed). The model gets it as
+    `Editor::set_call_resolver` (`CallShape { body, title }`), like the symbol resolver.
+  - Typing: `#name ` or `#name[` makes the call; `#name(` a title only if the function
+    may take one, else the `(` is typed and `#name(args) ` (balanced parentheses) makes
+    a call with those arguments. A name known to take no content (`#pagebreak `) stays
+    text. The status bar says which of these applies. `edit_title` refuses a function
+    known to take no title.
+  - Not yet: editing the arguments of an existing call (unwrap with Backspace at the
+    start of its body and retype); functions from packages are unknown.
 
 Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing.

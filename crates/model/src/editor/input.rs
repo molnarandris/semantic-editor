@@ -118,18 +118,27 @@ impl Editor {
             let place = pos.place;
             return self.make_item(place, kind);
         }
-        // `#name ` as the whole paragraph makes it an environment `#name[…]`
-        // with the caret in its body; `#name(` one with a title, caret in it.
-        if (s == " " || s == "(")
+        // `#name ` (or `#name[`) as the whole paragraph makes it a block
+        // call `#name[…]` with the caret in its body; `#name(` one with a
+        // title, caret in it, unless the function takes no title: then the
+        // `(` starts its other arguments, `#align(center) `. Nothing for a
+        // name known to take no content.
+        if (s == " " || s == "(" || s == "[")
             && pos.inlines.len() == 1
             && pos.offset == pos.len
             && matches!(pos.block.kind, Block::Paragraph(_))
-            && let Some(name) = env_name(&chars)
+            && let Some((name, args)) = call_head(&chars)
+            && let shape = self.call_shape(&name)
+            && shape.is_none_or(|c| c.body)
+            && (s != "(" || args.is_none() && shape.is_none_or(|c| c.title))
         {
             let place = pos.place;
             let body = self.doc.paragraph(vec![]);
             let mut after = self.doc.start_of(&body);
             let mut env = self.doc.env(&name, vec![body]);
+            if let (Some(a), Block::Env { args, .. }) = (args, &mut env.kind) {
+                *args = a;
+            }
             if s == "(" {
                 let text = self.doc.text("");
                 if let Block::Env { title, .. } = &mut env.kind {
@@ -493,6 +502,32 @@ impl Editor {
         }
         self.commit(ops, after, Last::Other)
     }
+}
+
+/// `(name, args)` if `chars` is `#name` or `#name(args)` with a Typst
+/// identifier and balanced parentheses: `#align(center)` gives
+/// `("align", Some("center"))`.
+pub(super) fn call_head(chars: &[char]) -> Option<(String, Option<String>)> {
+    let Some(open) = chars.iter().position(|&c| c == '(') else {
+        return Some((env_name(chars)?, None));
+    };
+    let name = env_name(&chars[..open])?;
+    let (&')', inner) = chars[open + 1..].split_last()? else {
+        return None;
+    };
+    let mut depth = 0;
+    for &c in inner {
+        depth += match c {
+            '(' => 1,
+            ')' => -1,
+            _ => 0,
+        };
+        if depth < 0 {
+            return None;
+        }
+    }
+    let args: String = inner.iter().collect();
+    (depth == 0).then(|| (name, Some(args.trim().to_string())))
 }
 
 /// `name` if `chars` is `#name` with a Typst identifier (`lemma`,

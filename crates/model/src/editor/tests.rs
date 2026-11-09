@@ -37,8 +37,17 @@ fn block_text(b: &BlockNode) -> String {
         Block::Paragraph(v) | Block::Heading { inlines: v, .. } => inline_text(v),
         Block::DisplayMath(_) => "$$".into(),
         Block::RawTypst(s) | Block::Diagram(s) => s.clone(),
-        Block::Env { name, title, body } => {
+        Block::Env {
+            name,
+            args,
+            title,
+            body,
+        } => {
             let inner: Vec<String> = body.iter().map(block_text).collect();
+            let name = match args.is_empty() {
+                true => name.clone(),
+                false => format!("{name}{{{args}}}"),
+            };
             let title = match title.is_empty() {
                 true => String::new(),
                 false => format!("({})", inline_text(title)),
@@ -407,6 +416,56 @@ fn environment_titles() {
     e.backspace();
     assert_eq!(texts(&e), ["#lemma[Text.]"]);
     e.doc().check_invariants().unwrap();
+}
+
+/// What the fake bridge knows: `lemma` takes a title, `proof` and `align`
+/// only a body, `pagebreak` nothing.
+fn fake_calls(_: &[&str], name: &str) -> Option<CallShape> {
+    let (body, title) = match name {
+        "lemma" => (true, true),
+        "proof" | "align" => (true, false),
+        "pagebreak" => (false, false),
+        _ => return None,
+    };
+    Some(CallShape { body, title })
+}
+
+/// Block calls by what the function takes: `(` gives a title only to a
+/// function that takes one, else starts source arguments; a function that
+/// takes no content stays text; an unknown one may take a title.
+#[test]
+fn block_calls_by_function() {
+    let fresh = || {
+        let mut e = Editor::new(Document::new());
+        e.set_call_resolver(fake_calls);
+        e
+    };
+    let mut e = fresh();
+    e.insert_text("#lemma(Key) Text");
+    assert_eq!(texts(&e), ["#lemma(Key)[Text]"]);
+    let mut e = fresh();
+    e.insert_text("#unknown(Key) Text");
+    assert_eq!(texts(&e), ["#unknown(Key)[Text]"]);
+
+    let mut e = fresh();
+    e.insert_text("#align(center + horizon) Text");
+    assert_eq!(texts(&e), ["#align{center + horizon}[Text]"]);
+    let mut e = fresh();
+    e.insert_text("#proof[Text");
+    assert_eq!(texts(&e), ["#proof[Text]"]);
+    e.doc().check_invariants().unwrap();
+    // No title for proof: a click on its heading does nothing.
+    let env = e.doc().blocks[0].id;
+    assert!(!e.edit_title(env));
+    assert_eq!(texts(&e), ["#proof[Text]"]);
+
+    let mut e = fresh();
+    e.insert_text("#pagebreak x");
+    assert_eq!(texts(&e), ["#pagebreak x"]);
+    // Unbalanced arguments stay text.
+    let mut e = fresh();
+    e.insert_text("#align(a)) x");
+    assert_eq!(texts(&e), ["#align(a)) x"]);
 }
 
 /// Lists: `- ` makes an item, Enter the next one, Tab/Shift+Tab nest and

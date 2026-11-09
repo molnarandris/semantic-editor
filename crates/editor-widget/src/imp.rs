@@ -235,9 +235,10 @@ impl ObjectImpl for SemEditor {
         });
         let _ = self.worker.set(worker);
 
-        self.editor
-            .borrow_mut()
-            .set_symbol_resolver(typst_bridge::resolve_symbol);
+        let mut editor = self.editor.borrow_mut();
+        editor.set_symbol_resolver(typst_bridge::resolve_symbol);
+        editor.set_call_resolver(typst_bridge::call_shape);
+        drop(editor);
         obj.connect_scale_factor_notify(|obj| obj.queue_allocate());
         self.setup_input();
     }
@@ -371,6 +372,7 @@ impl SemEditor {
     pub(crate) fn set_document(&self, doc: Document) {
         let mut editor = Editor::new(doc);
         editor.set_symbol_resolver(typst_bridge::resolve_symbol);
+        editor.set_call_resolver(typst_bridge::call_shape);
         *self.editor.borrow_mut() = editor;
         self.views.borrow_mut().clear();
         self.sync_views();
@@ -441,9 +443,11 @@ impl SemEditor {
             if let Some(obj) = weak.upgrade() {
                 obj.grab_focus();
                 let imp = obj.imp();
-                if let Some(env) = imp.heading_at(x, y) {
-                    // An environment's heading: edit (or add) its title.
-                    imp.editor.borrow_mut().edit_title(env);
+                if let Some(env) = imp.heading_at(x, y)
+                    && imp.editor.borrow_mut().edit_title(env)
+                {
+                    // An environment's heading: edit (or add) its title
+                    // (not for a function that takes none).
                     imp.goal_x.set(None);
                     imp.after_command(true);
                 } else if let Some(cursor) = imp.locate(x, y) {

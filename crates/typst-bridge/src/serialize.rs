@@ -256,9 +256,19 @@ impl Writer {
                 w.nl();
                 w.out.push_str("}))");
             }
-            Block::Env { name, title, body } => {
+            Block::Env {
+                name,
+                args,
+                title,
+                body,
+            } => {
                 w.out.push('#');
                 w.out.push_str(name);
+                if !args.is_empty() {
+                    w.out.push('(');
+                    w.out.push_str(args);
+                    w.out.push(')');
+                }
                 // The title is the first content argument, as in ctheorems
                 // and theorion: `#lemma[Title][…]`. An empty one (being
                 // typed) shows only in the editor.
@@ -1039,6 +1049,23 @@ mod tests {
         let item = d.item(ListKind::Numbered, vec![one]);
         assert_eq!(serialize_block_numbered(&item, Some(3)).0, "3. third");
         assert_eq!(serialize_block_styled(&item, Style::Readable).0, "+ third");
+    }
+
+    /// A block call's source arguments come before its title and body,
+    /// verbatim, and compile.
+    #[test]
+    fn block_call_arguments() {
+        let mut d = Document::empty();
+        let t = d.text("Centred");
+        let body = d.paragraph(vec![t]);
+        let mut call = d.env("align", vec![body]);
+        if let Block::Env { args, .. } = &mut call.kind {
+            *args = "center + horizon".into();
+        }
+        let (src, _) = serialize_block(&call);
+        assert_eq!(src, "#align(center + horizon)[\nCentred\n]");
+        let mut world = BridgeWorld::new();
+        compile(&mut world, &src).unwrap();
     }
 
     #[test]

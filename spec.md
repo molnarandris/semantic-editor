@@ -346,7 +346,11 @@ Titles decided 2026-11-08: optional, never added by default; positional
 - Lists: bullet, numbered and term lists with nesting. Done 2026-11-08 (see PLAN.md):
   items are containers as in Typst (no list node); typed with `- `, `+ `, `/ `; Enter,
   Backspace and Tab/Shift+Tab as in word processors.
-- Block-level calls with block bodies (`#claude-block[…]`, `#align(center)[…]`).
+- Block-level calls with block bodies (`#claude-block[…]`, `#align(center)[…]`). Done
+  2026-11-09 (see PLAN.md), with function detection by parsing the header's and code
+  blocks' `#let`s (not compiling): `(` starts a title only for functions taking one,
+  else source arguments. Wishlist: edit an existing call's arguments; know package
+  functions (would need compiling the header).
 
 ### M15 — Labels and references
 

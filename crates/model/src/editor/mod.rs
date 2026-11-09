@@ -89,10 +89,26 @@ pub struct Editor {
     /// Typst's symbol names with modifiers (`times.o` → ⊗), provided by the
     /// GUI from the Typst bridge. Without it, a small built-in table is used.
     resolver: Option<SymbolResolver>,
+    /// What the functions called as blocks take, provided by the GUI from
+    /// the Typst bridge. Without it, every name may take a title.
+    calls: Option<CallResolver>,
 }
 
 /// Looks up a symbol name with `.modifiers`; `None` if it is not a symbol.
 pub type SymbolResolver = fn(&str) -> Option<String>;
+
+/// What a function called as a block (`#name[…]`) takes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CallShape {
+    /// A content argument: the body.
+    pub body: bool,
+    /// Another content argument before it: a title, `#name[Title][…]`.
+    pub title: bool,
+}
+
+/// The shape of function `name` given the Typst sources defining things
+/// (the header, then the raw blocks in document order); `None` if unknown.
+pub type CallResolver = fn(&[&str], &str) -> Option<CallShape>;
 
 /// Position of a text caret inside a paragraph or heading.
 struct TextPos<'a> {
@@ -222,11 +238,27 @@ impl Editor {
             word: None,
             groups: HashSet::new(),
             resolver: None,
+            calls: None,
         }
     }
 
     pub fn set_symbol_resolver(&mut self, resolver: SymbolResolver) {
         self.resolver = Some(resolver);
+    }
+
+    pub fn set_call_resolver(&mut self, resolver: CallResolver) {
+        self.calls = Some(resolver);
+    }
+
+    /// What function `name` takes as a block call, if known.
+    pub(super) fn call_shape(&self, name: &str) -> Option<CallShape> {
+        let resolve = self.calls?;
+        let mut sources = vec![self.doc.header.as_str()];
+        sources.extend(self.doc.blocks.iter().filter_map(|b| match &b.kind {
+            Block::RawTypst(s) => Some(s.as_str()),
+            _ => None,
+        }));
+        resolve(&sources, name)
     }
 
     /// The symbol for a word (`\\`-commands first try the TeX table).
@@ -425,12 +457,15 @@ impl Editor {
 
     /// Put the caret in the title of environment `env` (at its end), adding
     /// an empty title if it has none; an empty title goes again when the
-    /// caret leaves it.
+    /// caret leaves it. Not for a function known to take no title.
     pub fn edit_title(&mut self, env: NodeId) -> bool {
         self.finish_word();
-        let Some(Block::Env { title, .. }) = self.doc.block(env).map(|b| &b.kind) else {
+        let Some(Block::Env { name, title, .. }) = self.doc.block(env).map(|b| &b.kind) else {
             return false;
         };
+        if title.is_empty() && self.call_shape(name).is_some_and(|c| !c.title) {
+            return false;
+        }
         if let Some(last) = title.last() {
             let end = text_of(last).chars().count();
             return self.jump(cursor(env, vec![Step::Index(title.len() - 1)], end));
@@ -639,9 +674,7 @@ impl Editor {
             }
             (None, Some(p)) if p.nested() => "Tab → next slot · Esc → leave structure",
             (None, Some(_)) => "/ fraction · ^ _ scripts · Esc or $ → leave formula",
-            (None, None) if self.typing_env_name() => {
-                "space → environment (e.g. #lemma, #proof) · ( → with a title"
-            }
+            (None, None) if let Some(hint) = self.call_hint() => hint,
             (None, _) if self.term_item().is_some() => "term · : or Enter → on to the description",
             (None, None) if self.item_of(self.caret.block).is_some() => {
                 "list item · Enter → next item (on an empty one: out) · Tab / Shift+Tab → indent / outdent"
@@ -691,14 +724,24 @@ impl Editor {
         matches!(self.selected, Some(Selected::Unwrap { .. }))
     }
 
-    /// Whether the caret's paragraph is `#name` so far, with the caret at
-    /// its end (space would make it an environment).
-    fn typing_env_name(&self) -> bool {
-        self.text_pos().is_some_and(|pos| {
-            pos.inlines.len() == 1
-                && pos.offset == pos.len
-                && matches!(pos.block.kind, Block::Paragraph(_))
-                && input::env_name(&pos.chars()).is_some()
+    /// The hint while the caret's paragraph is `#name` or `#name(args)` so
+    /// far, with the caret at its end (space would make a block call).
+    fn call_hint(&self) -> Option<&'static str> {
+        let pos = self.text_pos()?;
+        if pos.inlines.len() != 1
+            || pos.offset != pos.len
+            || !matches!(pos.block.kind, Block::Paragraph(_))
+        {
+            return None;
+        }
+        let (name, args) = input::call_head(&pos.chars())?;
+        Some(match (self.call_shape(&name), args) {
+            (Some(c), _) if !c.body => "this function takes no content",
+            (_, Some(_)) => "space → block call with these arguments",
+            (Some(c), None) if !c.title => {
+                "space → block call · ( → its arguments, e.g. #align(center)"
+            }
+            (_, None) => "space → environment (e.g. #lemma, #proof) · ( → with a title",
         })
     }
 

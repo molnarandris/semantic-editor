@@ -35,9 +35,13 @@ pub enum Block {
     /// a code block) adds the label, number and formatting; the body is
     /// edited in place. The body is never empty. The optional title
     /// (`#lemma[Title][…]`, as in ctheorems and theorion) is empty when there
-    /// is none; otherwise it alternates like a paragraph's inlines.
+    /// is none; otherwise it alternates like a paragraph's inlines. `args`
+    /// are the call's other arguments as Typst source, kept verbatim
+    /// (`center` in `#align(center)[…]`); empty if none.
     Env {
         name: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        args: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         title: Vec<InlineNode>,
         body: Vec<BlockNode>,
@@ -810,6 +814,7 @@ impl Document {
             id: self.fresh_id(),
             kind: Block::Env {
                 name: name.into(),
+                args: String::new(),
                 title: vec![],
                 body,
             },
