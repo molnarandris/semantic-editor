@@ -48,6 +48,17 @@ pub fn labels_in_source(source: &str) -> Vec<String> {
     out
 }
 
+/// The labels named as values in Typst `source` (`#restate(<lem:a>)`):
+/// functions may look up what they label with `query`.
+pub fn label_values_in_source(source: &str) -> Vec<String> {
+    let mut out = vec![];
+    walk(&parse(source), &mut out, &mut |node, parent| {
+        let label = node.cast::<ast::Label>()?;
+        (parent != SyntaxKind::Markup).then(|| label.get().to_string())
+    });
+    out
+}
+
 /// What `pick` finds (given each node and its parent's kind) in `root` and
 /// below, each once, in source order.
 fn walk(

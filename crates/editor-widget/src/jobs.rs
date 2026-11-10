@@ -23,9 +23,9 @@ use std::collections::HashMap;
 use model::{Block, BlockNode, Inline, InlineNode, ListKind};
 use typst_bridge::bib::{hidden_bibliography, hidden_cites};
 use typst_bridge::{
-    Around, CounterState, LabelTarget, SpanMap, chain_code, code_display, initial_state, is_code,
-    label_report, labels_in_source, missing_ref, ref_stub, refs_in_source,
-    serialize_block_numbered, stand_in, tracked_counters,
+    Around, CounterState, LabelTarget, SpanMap, Style, chain_code, code_display, initial_state,
+    is_code, label_report, label_values_in_source, labels_in_source, missing_ref, ref_stub,
+    refs_in_source, serialize_block_numbered, serialize_block_styled, stand_in, tracked_counters,
 };
 
 /// What was last submitted for a block, and how its counters ended.
@@ -36,6 +36,9 @@ pub struct Submitted<'a> {
     /// Counter-sensitive blocks: the counters at the end of the submitted
     /// render, once it arrived.
     pub end: Option<&'a CounterState>,
+    /// Counter-sensitive blocks: the counters at the start of the
+    /// submitted render.
+    pub start: Option<&'a CounterState>,
     /// What the labels the block defines point to, as its last render
     /// reported.
     pub targets: &'a [LabelTarget],
@@ -210,6 +213,40 @@ fn code_of(block: &BlockNode) -> Option<&str> {
     }
 }
 
+/// The blocks (index, counters at their start) labelled by the labels
+/// that the raw Typst `block` names as values: each label defined once, by
+/// another block that has been rendered.
+fn copied_blocks<'a>(
+    block: &BlockNode,
+    index: usize,
+    table: &HashMap<&str, (usize, &str, usize)>,
+    submitted: &[Submitted<'a>],
+) -> Vec<(usize, &'a CounterState)> {
+    let Block::RawTypst(source) = &block.kind else {
+        return vec![];
+    };
+    let mut out: Vec<(usize, &CounterState)> = vec![];
+    for label in label_values_in_source(source) {
+        if let Some(&(d, _, 1)) = table.get(label.as_str())
+            && d != index
+            && !out.iter().any(|(e, _)| *e == d)
+            && let Some(start) = submitted.get(d).and_then(|s| s.start)
+        {
+            out.push((d, start));
+        }
+    }
+    out
+}
+
+/// Typst code putting a hidden copy of `block` (as exported, label
+/// included) where its counters are as at its `start`, so `query` finds
+/// it, numbered as in the document. Placed, it takes no space.
+fn hidden_copy(block: &BlockNode, start: &CounterState) -> String {
+    let (counters, _) = chain_code(start);
+    let (source, _) = serialize_block_styled(block, Style::Readable);
+    format!("{counters}#place(hide[\n{source}\n])\n")
+}
+
 /// Whether a block may read or change counters.
 pub fn counter_sensitive(block: &BlockNode) -> bool {
     match &block.kind {
@@ -329,6 +366,16 @@ pub fn stale_blocks(
         } else {
             None
         };
+        // Blocks labelled by labels named in raw Typst (`#restate(<lem:x>)`,
+        // whose function looks them up with `query`): a hidden copy of each
+        // first, its counters as at its own start (from its last render);
+        // the block's own prefix then sets them back.
+        let copied = copied_blocks(block, index, &table, submitted);
+        let copies: String = copied
+            .iter()
+            .map(|&(d, start)| hidden_copy(&blocks[d], start))
+            .collect();
+        around.prefix.insert_str(0, &copies);
         // Labelled blocks (all counter-sensitive) report their targets.
         let own: Vec<String> = defined[index].iter().map(|(l, _)| l.clone()).collect();
         if sensitive {
@@ -338,7 +385,21 @@ pub fn stale_blocks(
         // everything else), else a red `@label`.
         let mut refs = vec![];
         refs_in(block, &mut refs);
-        let cited = &cites[index];
+        let mut cited = cites[index].clone();
+        // The copies' references and citations are made here too, except
+        // to labels the copies define.
+        let mut copy_labels = vec![];
+        for &(d, _) in &copied {
+            refs_in(&blocks[d], &mut refs);
+            for key in &cites[d] {
+                if !cited.contains(key) {
+                    cited.push(key.clone());
+                }
+            }
+            copy_labels.extend(defined[d].iter().map(|(l, _)| l.clone()));
+        }
+        refs.retain(|l| !copy_labels.contains(l));
+        let cited = &cited;
         for label in refs
             .iter()
             .filter(|l| !own.contains(l) && !cited.contains(l))
@@ -407,6 +468,7 @@ mod tests {
         snippet: String,
         map: SpanMap,
         end: Option<CounterState>,
+        start: Option<CounterState>,
         targets: Vec<LabelTarget>,
     }
 
@@ -418,6 +480,7 @@ mod tests {
                 snippet: &v.snippet,
                 map: &v.map,
                 end: v.end.as_ref(),
+                start: v.start.as_ref(),
                 targets: &v.targets,
             })
             .collect()
@@ -442,6 +505,7 @@ mod tests {
                 snippet: job.snippet.clone(),
                 map: job.map.clone(),
                 end: None,
+                start: job.start.clone(),
                 ..Default::default()
             };
         }
@@ -722,6 +786,7 @@ mod tests {
                     snippet: job.snippet.clone(),
                     map: job.map.clone(),
                     end: None,
+                    start: job.start.clone(),
                     targets: std::mem::take(&mut views[job.index].targets),
                 };
                 worker.submit(CompileJob {
@@ -1025,6 +1090,85 @@ mod tests {
         settle(&mut again);
         assert_eq!(worker.compiles(), compiles);
         assert_eq!(again[5].end, views[5].end);
+    }
+
+    /// A raw block naming a label (`#restate(<lem:a>)`, whose function
+    /// looks the lemma up with `query`) compiles with a hidden copy of the
+    /// lemma before it, numbered as in the document: the restate sees the
+    /// lemma's number and the equation count at the lemma (user report:
+    /// "array is empty"). `check` records what it saw.
+    #[test]
+    fn restated_blocks_find_what_they_name() {
+        let header = r#"#set math.equation(numbering: "(1)")
+#let check = counter("check")
+#let lemma(body) = figure(kind: "lemma", supplement: [Lemma], numbering: "1", body)
+#let restate(lbl) = context {
+  let f = query(lbl).first()
+  let eq = counter(math.equation)
+  let start = eq.get().first()
+  check.update((f.counter.at(lbl).first(), start - eq.at(f.location()).first()))
+  f.body
+  eq.update(start)
+}"#;
+        let mut d = Document::empty();
+        let display = |d: &mut Document, s: &str| {
+            let x = d.ident(s);
+            d.display(vec![x])
+        };
+        let mut blocks = vec![display(&mut d, "x")];
+        let inner = display(&mut d, "y");
+        let mut lemma = d.env("lemma", vec![inner]);
+        lemma.label = "lem:a".into();
+        blocks.push(lemma);
+        blocks.push(display(&mut d, "z"));
+        blocks.push(display(&mut d, "w"));
+        blocks.push(d.raw("#restate(<lem:a>)"));
+        d.blocks = blocks;
+
+        let (tx, rx) = mpsc::channel();
+        let worker = Worker::spawn(None, move |r| tx.send(r).unwrap());
+        let mut views: Vec<View> = vec![];
+        for _ in 0..10 {
+            views.resize_with(d.blocks.len(), View::default);
+            let jobs = stale_blocks(&d.blocks, header, false, &submitted(&views));
+            if jobs.is_empty() {
+                break;
+            }
+            for job in &jobs {
+                views[job.index] = View {
+                    around: job.around.clone(),
+                    snippet: job.snippet.clone(),
+                    map: job.map.clone(),
+                    start: job.start.clone(),
+                    ..Default::default()
+                };
+                worker.submit(CompileJob {
+                    block: model::NodeId(job.index as u64),
+                    generation: 1,
+                    around: job.around.clone(),
+                    snippet: job.snippet.clone(),
+                    map: job.map.clone(),
+                    width_pt: 300.0,
+                    pixel_per_pt: 1.0,
+                    persist: false,
+                    transient: false,
+                });
+            }
+            for _ in &jobs {
+                let r = rx.recv_timeout(Duration::from_secs(120)).unwrap();
+                let i = r.block.0 as usize;
+                let rendered = r.outcome.unwrap_or_else(|e| panic!("block {i}: {e:?}"));
+                views[i].end = rendered.end_state;
+                views[i].targets = rendered.targets;
+            }
+        }
+        let end = views[4].end.as_ref().expect("the restate compiled");
+        let check = end.iter().find(|(c, _)| c == "counter(\"check\")");
+        // Lemma 1; equations: x (1), in the lemma y (2), z (3), w (4).
+        assert_eq!(check.map(|(_, v)| v.clone()), Some(vec![1, 3]));
+        let eq = end.iter().find(|(c, _)| c == "counter(math.equation)");
+        assert_eq!(eq.map(|(_, v)| v.clone()), Some(vec![4]), "set back");
+        assert!(views[4].around.prefix.contains("#place(hide["));
     }
 
     /// The milestone's acceptance check: editing prose next to 20 diagrams

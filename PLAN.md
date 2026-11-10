@@ -1004,3 +1004,20 @@ reported targets, so only those are still listed. On the paper: no problems left
   first; Backspace right after a held space forgets it.
 - Code atoms (`#…`) are boxes too, but their spacing is left as before.
 - Check: paper import 46 → 30 raw blocks, 55 pages render identical.
+
+## Restated blocks (2026-11-10)
+
+- User report: `#restate(<lem:main_mps>)` showed "array is empty" in the editor. Every
+  block compiles on its own, and the user's `restate` starts with
+  `query(lbl).first()`, so the lemma must be in that compile.
+- `jobs::stale_blocks`: for labels a raw block names as values
+  (`label_values_in_source`: labels outside markup), each defined once by another
+  rendered block, the prefix starts with that block's counters at its start (its
+  last render's `start`, kept in `Submitted`), then `#place(hide[…])` around its
+  readable source; the block's own counter prefix follows and sets them back, so
+  its end state is unaffected. `restate` then gets the lemma's number and the
+  equation count at it (its offset for the restated equation numbers). The copy's
+  references and citations are handled as the block's own, except labels it defines.
+- Before the lemma has rendered once, no copy (the error shows until it has).
+- Test: `restated_blocks_find_what_they_name` (fails with "array is empty" without
+  the copy). On the user's paper all three restates compile.

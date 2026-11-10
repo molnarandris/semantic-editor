@@ -1519,6 +1519,7 @@ impl SemEditor {
                     snippet: &v.snippet,
                     map: &v.map,
                     end: v.end.as_ref(),
+                    start: v.start.as_ref(),
                     targets: &v.targets,
                 })
                 .collect();

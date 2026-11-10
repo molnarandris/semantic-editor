@@ -508,6 +508,12 @@ Titles decided 2026-11-08: optional, never added by default; positional
   to a bar or text is kept (typed before the next atom, it is held for it), and
   Backspace/Delete take such a space away first. Older `.sem` files get the
   spaces their export wrote.
+  Restating (2026-11-10, user report "array is empty"): a raw block naming a label
+  as a value (`#restate(<lem:x>, mark: true)`, a function that finds the lemma with
+  `query`) compiles in the editor with a hidden copy of the labelled block before
+  it, its counters as at the lemma (from the lemma's last render), then its own
+  counter prefix. The preview is the function's real output: the lemma's number,
+  its equation numbers, "restated" if asked. The copy's references get stand-ins.
   Wishlist: explicit item numbers, wide lists, numbered references to raw environments (custom figure
   kinds).
 
