@@ -682,6 +682,9 @@ impl Importer<'_> {
                     // Parentheses that only group (a fraction part, script
                     // or radicand): Typst does not show them.
                     SyntaxKind::Space | SyntaxKind::LeftParen | SyntaxKind::RightParen => {}
+                    // Spaces next to text show; the export writes a space
+                    // around text, except before an opening bracket.
+                    SyntaxKind::Str if !text_spacing_kept(&children, i) => return None,
                     // Spaces around a bar show (measured): the tree's bar is
                     // written `bar.v`, which renders like `a | b`. A bar
                     // touching its neighbours (`|x|`) cannot be written back
@@ -966,6 +969,27 @@ fn labelled(nodes: &[LinkedNode], k: usize) -> bool {
     }
 }
 
+/// Whether the export writes the spacing around the text `children[i]` of a
+/// formula as the source has it: a space (or the edge) before it, and after
+/// it a space or the edge, or no space before an opening bracket
+/// (`"Ker"(A)`).
+fn text_spacing_kept(children: &[&SyntaxNode], i: usize) -> bool {
+    let space = |n: &&SyntaxNode| n.kind() == SyntaxKind::Space;
+    let opening = |n: &&SyntaxNode| {
+        n.kind() == SyntaxKind::MathDelimited
+            && n.children()
+                .next()
+                .is_some_and(|o| matches!(o.leaf_text().as_str(), "(" | "[" | "{"))
+    };
+    let before = i == 0 || children.get(i - 1).is_some_and(space);
+    let after = match children.get(i + 1) {
+        None => true,
+        Some(n) if space(n) => !children.get(i + 2).is_some_and(opening),
+        Some(n) => opening(n),
+    };
+    before && after
+}
+
 /// A bar in a formula, `|`.
 fn is_bar(node: &SyntaxNode) -> bool {
     node.kind() == SyntaxKind::MathText && node.leaf_text() == "|"
@@ -1104,6 +1128,7 @@ $ f(x) &= cases(1 "if" x > 0, 0) \
             "$ {x | x > 0} + abs(y) $",
             "$ a <= b != c -> d $",
             "$ x \" text\" y $",
+            "$ \"Ker\"(A) + \"Rep\" x $",
             "$ dif x + dots.h + arrow.r.long $",
             "$ #h(1em) x $",
         ] {
@@ -1159,6 +1184,7 @@ $ f(x) &= cases(1 "if" x > 0, 0) \
         for src in [
             "$ mat(1, 2; 3, 4) $",
             "$ |x^2| $",
+            "$ \"Rep\" (A) $",
             "Text #h(1em) more",
             "#lorem(5)",
             "Text // comment",

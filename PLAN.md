@@ -922,3 +922,8 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
 - An escaped bracket in a formula (`\{h, overline(h)\}`) does not pair up and
   stretch in Typst, the tree's brackets do: it is imported as the named symbol in
   code (`#sym.brace.l`).
+- Spaces next to text in a formula show (measured, `"Rep"(A)` vs `"Rep" (A)`).
+  The export now writes text before an opening bracket tight (`"Ker"(A)`, the usual
+  operator form), in the editor too; a formula whose text has other spacing than
+  the export writes (a space before a bracket, text touching the atom before it)
+  stays raw.

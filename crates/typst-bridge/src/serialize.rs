@@ -708,6 +708,15 @@ impl Writer {
         if matches!(b.kind, MathKind::Primes(_)) {
             return matches!(a.kind, MathKind::Frac { .. }) || a.source().is_some();
         }
+        // Spaces next to text in a formula show (measured): text applied to
+        // brackets, `"Ker"(A)`, is written tight. (An empty text is written
+        // as code in the editor, which a bracket would continue.)
+        if matches!(&a.kind, MathKind::Text(s) if !s.is_empty())
+            && b_paired
+            && matches!(&b.kind, MathKind::Sym(s) if matches!(s.as_str(), "(" | "[" | "{"))
+        {
+            return false;
+        }
         // After code, a `;` or `,` would be read as part of it; after `\`
         // they would be escaped.
         if self.style == Style::Edit || a.source().is_some() || a.kind == MathKind::Linebreak {
