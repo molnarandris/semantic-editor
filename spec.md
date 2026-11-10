@@ -497,8 +497,12 @@ Titles decided 2026-11-08: optional, never added by default; positional
   up to it. Formulas whose text (`"Rep"`) is spaced otherwise than the export
   writes it (tight before a bracket, spaced elsewhere) stay raw, since spaces next
   to text show. A block call on lines of its own ends its paragraph (as in Typst).
+  References inside raw blocks (`@thm:x` in a raw figure's caption) get the same
+  stand-in or red `@label` as references in the tree, so the block's preview
+  compiles on its own (user report: a red dot instead of the figure). Labels
+  attached to raw blocks are not reported yet: references to them show red.
   Wishlist: bars as Typst writes them (a tight bar in the tree), explicit item
-  numbers, wide lists.
+  numbers, wide lists, numbered references to labelled raw blocks.
 
 ### M18 — Title fields
 

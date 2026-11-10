@@ -24,7 +24,8 @@ use model::{Block, BlockNode, Inline, InlineNode, ListKind};
 use typst_bridge::bib::{hidden_bibliography, hidden_cites};
 use typst_bridge::{
     Around, CounterState, LabelTarget, SpanMap, chain_code, code_display, initial_state, is_code,
-    label_report, missing_ref, ref_stub, serialize_block_numbered, tracked_counters,
+    label_report, missing_ref, ref_stub, refs_in_source, serialize_block_numbered,
+    tracked_counters,
 };
 
 /// What was last submitted for a block, and how its counters ended.
@@ -72,7 +73,8 @@ fn labels_in(block: &BlockNode, out: &mut Vec<(String, String)>) {
     }
 }
 
-/// The labels referenced in a block (nested blocks and inline calls too).
+/// The labels referenced in a block (nested blocks, inline calls and raw
+/// Typst too).
 fn refs_in(block: &BlockNode, out: &mut Vec<String>) {
     fn inlines(v: &[InlineNode], out: &mut Vec<String>) {
         for inline in v {
@@ -87,6 +89,13 @@ fn refs_in(block: &BlockNode, out: &mut Vec<String>) {
     }
     if let Some(v) = block.kind.text_inlines() {
         inlines(v, out);
+    }
+    if let Block::RawTypst(source) = &block.kind {
+        for label in refs_in_source(source) {
+            if !out.contains(&label) {
+                out.push(label);
+            }
+        }
     }
     for child in block.kind.body().into_iter().flatten() {
         refs_in(child, out);
@@ -563,7 +572,7 @@ mod tests {
 
     /// With the compiler: references render once their targets reported,
     /// also to a later block; a missing label shows red instead of failing.
-    /// Every render compiles, the stand-ins resolve the references.
+    /// Also references in raw Typst. Every render compiles, the stand-ins resolve the references.
     #[test]
     fn references_resolve_through_reports() {
         let mut d = Document::empty();
@@ -584,7 +593,8 @@ mod tests {
         let (body, cap) = (d.paragraph(vec![body]), d.caption(vec![cap]));
         let mut figure = d.env("figure", vec![body, cap]);
         figure.label = "fig".into();
-        d.blocks = vec![para, first, second, figure];
+        let raw = d.raw("#figure([Raw], caption: [See @sec:b, @nowhere.])");
+        d.blocks = vec![para, first, second, figure, raw];
         let header = "#set heading(numbering: \"1.1\")\n";
         let (tx, rx) = mpsc::channel();
         let worker = Worker::spawn(None, move |r| tx.send(r).unwrap());
@@ -635,6 +645,11 @@ mod tests {
             views[0].around.suffix
         );
         assert!(views[0].around.prefix.contains("\"@nowhere\""), "red");
+        assert!(
+            views[4].around.suffix.contains("<sec:b>"),
+            "raw: a stand-in"
+        );
+        assert!(views[4].around.prefix.contains("\"@nowhere\""), "raw: red");
     }
 
     fn job_start(jobs: &[Job], index: usize) -> Option<CounterState> {

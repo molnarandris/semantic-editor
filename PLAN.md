@@ -932,3 +932,7 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
   With these, the user's 55-page paper imports and exports to identical pages;
   58 of 964 blocks stay raw (figures drawn by a function, statements produced by a
   function, `lr(size: …)` and other named arguments in math).
+- A raw block's preview failed when its source referenced a label in another block
+  (a raw figure whose caption cites a theorem: a red dot instead of the figure).
+  References in raw Typst are now found (`refs_in_source`) and get a stand-in for
+  the target, or the red `@label`, like references in the tree.

@@ -3,7 +3,7 @@
 //! them, so on the page they show as a slim marker (or, on request, as a code
 //! listing) instead of their (empty) output.
 
-use typst::syntax::{SyntaxKind, SyntaxNode, parse};
+use typst::syntax::{SyntaxKind, SyntaxNode, ast, parse};
 
 use crate::serialize::quoted;
 
@@ -26,6 +26,24 @@ pub fn is_code(source: &str) -> bool {
         }
     }
     any
+}
+
+/// The labels that `@label` references in Typst `source` point to.
+pub fn refs_in_source(source: &str) -> Vec<String> {
+    fn walk(node: &SyntaxNode, out: &mut Vec<String>) {
+        if let Some(r) = node.cast::<ast::Ref>() {
+            let label = r.target().to_string();
+            if !out.contains(&label) {
+                out.push(label);
+            }
+        }
+        for child in node.children() {
+            walk(child, out);
+        }
+    }
+    let mut out = vec![];
+    walk(&parse(source), &mut out);
+    out
 }
 
 /// Typst code that shows a code block on the page: a marker naming what it
