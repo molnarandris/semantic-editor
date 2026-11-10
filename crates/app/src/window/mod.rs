@@ -255,7 +255,11 @@ impl Window {
         self.editor.set_document(doc);
     }
 
+    /// Unsaved changes; an imported `.typ` counts until it is saved as `.sem`.
     fn is_dirty(&self) -> bool {
+        if self.imported.borrow().is_some() {
+            return true;
+        }
         let doc = self.editor.document();
         let saved = self.saved.borrow();
         doc.header != saved.0 || doc.blocks != saved.1

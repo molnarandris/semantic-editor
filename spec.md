@@ -488,7 +488,8 @@ Titles decided 2026-11-08: optional, never added by default; positional
   formula, heading or list item holding it), never split. A call standing alone
   becomes an environment when its body holds blocks, starts on a new line or has a
   title; otherwise it is a paragraph holding the call (`#highlight[…]`), which
-  reads back the same. The opened document is untitled and saved as `.sem`.
+  reads back the same. The opened document is untitled and saved as `.sem`; it
+  counts as unsaved until then, so closing it asks to save (user request).
   Known limits: formulas with bars touching their neighbours (`|x|`, a different
   rendering from the tree's `bar.v`) stay raw; enumeration items with explicit
   numbers stay raw; a list written with blank lines between its items (Typst's

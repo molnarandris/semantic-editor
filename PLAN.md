@@ -850,7 +850,9 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
 - `typst_bridge::import_typ` (`deserialize.rs`), the counterpart of the serializer:
   Typst's parser, no compile. "Open" accepts `.typ` files too; the document opens
   untitled ("Paper.typ (imported)") and is saved as a new `.sem` named after it.
-  The `.typ` file is never written (one-way, as decided).
+  The `.typ` file is never written (one-way, as decided). An imported document
+  counts as unsaved until it is saved as `.sem`, so closing it asks first (user
+  request, 2026-11-10).
 - Header: everything before the first content (`#set`, `#show`, `#let`, `#import`,
   comments). The editor's own preamble at the start of an exported file is dropped,
   and its CeTZ import too when the document has diagrams (the export adds it).

@@ -113,6 +113,7 @@ impl Window {
             Ok(()) => {
                 *self.saved.borrow_mut() = saved;
                 *self.file.borrow_mut() = Some(file);
+                *self.imported.borrow_mut() = None;
                 self.update_title();
                 true
             }
