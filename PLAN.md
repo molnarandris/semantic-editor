@@ -1046,3 +1046,22 @@ reported targets, so only those are still listed. On the paper: no problems left
   (a document-level `show footnote: none` works only on unhidden content). Options:
   drop footnotes from the copy's source (preview then shows none), or find how Typst
   collects notes from hidden content.
+
+## Greedy lines while typing (2026-11-10)
+
+- User report: typing in the middle of a paragraph was disorienting, the caret and
+  the text around it jumping as Typst re-typeset the paragraph. The paper sets
+  `par(justify: true)`, so Typst breaks lines "optimized" (Knuth–Plass), which may
+  re-decide every break of the paragraph at each keystroke.
+- Word processors and LyX break lines greedily on screen; the editor now does that
+  for the top-level block being typed in (`jobs::GREEDY_LINES`,
+  `#set par(linebreaks: "simple")` in its prefix, paragraphs/environments/items/
+  captions). It starts at the first edit in the block (not on entering it, so moving
+  the caret reflows nothing: `track_editing` compares the caret's block with its
+  state at the last render request) and ends when the caret leaves it, which renders
+  it again with the document's own breaking. Export unaffected.
+- Measured: greedy breaking leaves the lines above an edit unchanged (test
+  `greedy_lines_above_an_edit_stay`). On a sample, optimized breaking did not move
+  the top quarter either over 34 keystrokes, so the jumps were probably words
+  bouncing between the current and the next line. The user found it "helps quite a
+  bit". Not addressed: justification re-spreading the current line (sideways shifts).

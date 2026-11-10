@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use std::collections::HashMap;
 
-use model::{Block, BlockNode, Inline, InlineNode, ListKind};
+use model::{Block, BlockNode, Inline, InlineNode, ListKind, NodeId};
 use typst_bridge::bib::{
     bibliography_call, hidden_bibliography, hidden_cites, raw_bibliography_call,
 };
@@ -287,11 +287,30 @@ fn has_footnote(inlines: &[InlineNode]) -> bool {
 /// ones per block, same order). Sensitive blocks wait for the end state of
 /// the previous sensitive block. `show_code` shows code blocks' source
 /// instead of a marker.
+#[cfg(test)]
 pub fn stale_blocks(
     blocks: &[BlockNode],
     header: &str,
     show_code: bool,
     submitted: &[Submitted],
+) -> Vec<Job> {
+    stale_blocks_editing(blocks, header, show_code, submitted, None)
+}
+
+/// Typst code making a paragraph break its lines greedily, as word
+/// processors do: an edit then only moves the text from its line on.
+/// Typst's optimized breaking (the default for justified text) may move
+/// every line of the paragraph at each keystroke, the caret with them.
+pub const GREEDY_LINES: &str = "#set par(linebreaks: \"simple\")\n";
+
+/// [`stale_blocks`], with `editing` the top-level block being typed in: its
+/// lines are broken greedily ([`GREEDY_LINES`]) until the caret leaves it.
+pub fn stale_blocks_editing(
+    blocks: &[BlockNode],
+    header: &str,
+    show_code: bool,
+    submitted: &[Submitted],
+    editing: Option<NodeId>,
 ) -> Vec<Job> {
     let code: Vec<Option<&str>> = blocks.iter().map(code_of).collect();
     let all_code: String = code
@@ -384,6 +403,15 @@ pub fn stale_blocks(
         } else {
             None
         };
+        // The block being typed in: greedy lines, so they stay put.
+        if editing == Some(block.id)
+            && matches!(
+                block.kind,
+                Block::Paragraph(_) | Block::Env { .. } | Block::Item { .. } | Block::Caption(_)
+            )
+        {
+            around.prefix.push_str(GREEDY_LINES);
+        }
         // Blocks labelled by labels named in raw Typst (`#restate(<lem:x>)`,
         // whose function looks them up with `query`): a hidden copy of each
         // first, its counters as at its own start (from its last render);
@@ -1158,6 +1186,71 @@ mod tests {
             jobs[0].around.prefix.contains("\"@lem:a\""),
             "red, compiles"
         );
+    }
+
+    /// The block being typed in breaks its lines greedily, the others as
+    /// the document says; when typing ends there, it renders again.
+    #[test]
+    fn the_edited_block_breaks_lines_greedily() {
+        let mut e = Editor::new(Document::new());
+        e.insert_text("First.");
+        e.enter();
+        e.insert_text("Second.");
+        let d = e.doc().clone();
+        let (first, second) = (d.blocks[0].id, d.blocks[1].id);
+        let jobs = stale_blocks_editing(&d.blocks, "", false, &[], Some(second));
+        let around = |i: usize| &jobs.iter().find(|j| j.index == i).unwrap().around;
+        assert!(!around(0).prefix.contains(GREEDY_LINES));
+        assert!(around(1).prefix.contains(GREEDY_LINES));
+        let mut views = vec![];
+        views.resize_with(2, View::default);
+        for job in &jobs {
+            views[job.index].around = job.around.clone();
+            views[job.index].snippet = job.snippet.clone();
+            views[job.index].map = job.map.clone();
+        }
+        let again = stale_blocks_editing(&d.blocks, "", false, &submitted(&views), Some(first));
+        let indices: Vec<usize> = again.iter().map(|j| j.index).collect();
+        assert_eq!(indices, [0, 1], "both change how they break");
+    }
+
+    /// Measured: in justified text, Typst's default (optimized) breaking
+    /// can move lines above an edit; greedy breaking never does. Words
+    /// typed into the last line leave the lines above it as they were.
+    #[test]
+    fn greedy_lines_above_an_edit_stay() {
+        let words = "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do \
+                     eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim \
+                     ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut \
+                     aliquip ex ea commodo consequat. Duis aute irure dolor in";
+        let render = |rule: &str, text: &str| {
+            let src = format!(
+                "#set page(width: 12cm, height: auto, margin: 0pt)\n\
+                 #set par(justify: true)\n{rule}{text}"
+            );
+            let mut world = typst_bridge::BridgeWorld::new();
+            let doc = typst_bridge::compile(&mut world, &src).unwrap();
+            typst_bridge::render_page(&doc.pages()[0], 2.0)
+        };
+        // The top half of the paragraph, well above its last line.
+        let top = |original: &typst_bridge::Raster, r: &typst_bridge::Raster| {
+            let rows = original.height as usize / 2;
+            r.data[..rows * r.width as usize * 4].to_vec()
+        };
+        let mut moved_optimized = false;
+        for extra in [
+            "x",
+            " longer",
+            " a much longer word",
+            " nisi ut aliquip ex ea",
+        ] {
+            let edited = format!("{words}{extra}");
+            let (a, b) = (render(GREEDY_LINES, words), render(GREEDY_LINES, &edited));
+            assert!(top(&a, &a) == top(&a, &b), "greedy moved lines, {extra:?}");
+            let (c, d) = (render("", words), render("", &edited));
+            moved_optimized |= top(&c, &c) != top(&c, &d);
+        }
+        println!("optimized moved lines above the edit: {moved_optimized}");
     }
 
     /// A raw block naming a label (`#restate(<lem:a>)`, whose function

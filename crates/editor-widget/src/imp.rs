@@ -8,7 +8,7 @@ use gtk::glib::subclass::Signal;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
 use gtk::{gdk, glib, graphene, gsk};
-use model::{Block, CursorPath, Document, Editor, NodeId};
+use model::{Block, BlockNode, CursorPath, Document, Editor, NodeId};
 use typst_bridge::{
     Around, BLOCK_PAD_PT, BlockLayout, CompileJob, CompileResult, CounterState, HEADER_SPECIMEN,
     LabelTarget, Raster, SpanMap, Worker, serialize_block, serialize_math_node,
@@ -130,6 +130,12 @@ pub struct SemEditor {
     zoom: Cell<f64>,
     /// Show code blocks' source instead of a marker.
     show_code: Cell<bool>,
+    /// The top-level block holding the caret, as it was when renders were
+    /// last requested: an edit in it shows as a change.
+    caret_block: RefCell<Option<BlockNode>>,
+    /// The top-level block being typed in (edited, caret still in it): its
+    /// lines are broken greedily so they do not jump (`jobs::GREEDY_LINES`).
+    editing: Cell<Option<NodeId>>,
     /// Zoom when a pinch gesture began.
     pinch_start: Cell<f64>,
 
@@ -1496,6 +1502,22 @@ impl SemEditor {
         }
     }
 
+    /// Which top-level block is being typed in: the caret's, once it has
+    /// changed while the caret was in it, until the caret leaves it. (Not
+    /// on merely entering it, so reading with the caret reflows nothing.)
+    fn track_editing(&self, ed: &Editor) {
+        let doc = ed.doc();
+        let top = doc.top_index(ed.caret().block).map(|i| &doc.blocks[i]);
+        let mut last = self.caret_block.borrow_mut();
+        let edited = matches!((top, last.as_ref()), (Some(b), Some(l)) if b.id == l.id && b != l);
+        let editing = match top {
+            Some(b) if edited || self.editing.get() == Some(b.id) => Some(b.id),
+            _ => None,
+        };
+        self.editing.set(editing);
+        *last = top.cloned();
+    }
+
     /// Submit compile jobs for blocks whose source changed, or for all
     /// blocks if `force` (render settings changed).
     fn submit_blocks(&self, force: bool) {
@@ -1503,6 +1525,7 @@ impl SemEditor {
             return; // Not allocated yet; size_allocate will submit.
         }
         let ed = self.editor.borrow();
+        self.track_editing(&ed);
         let mut views = self.views.borrow_mut();
         if force {
             // Forget what was submitted: every block is stale, also those
@@ -1523,11 +1546,12 @@ impl SemEditor {
                     targets: &v.targets,
                 })
                 .collect();
-            jobs::stale_blocks(
+            jobs::stale_blocks_editing(
                 &ed.doc().blocks,
                 &ed.doc().header,
                 self.show_code.get(),
                 &submitted,
+                self.editing.get(),
             )
         };
         for job in jobs {
