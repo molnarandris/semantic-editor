@@ -104,7 +104,9 @@ fn refs_in(block: &BlockNode, out: &mut Vec<String>) {
     if let Some(v) = block.kind.text_inlines() {
         inlines(v, out);
     }
-    if let Block::RawTypst(source) = &block.kind {
+    // In raw Typst, and in a block call's source arguments
+    // (`#proof(title: [Proof of @lem:x])`).
+    if let Block::RawTypst(source) | Block::Env { args: source, .. } = &block.kind {
         for label in refs_in_source(source) {
             if !out.contains(&label) {
                 out.push(label);
@@ -1090,6 +1092,34 @@ mod tests {
         settle(&mut again);
         assert_eq!(worker.compiles(), compiles);
         assert_eq!(again[5].end, views[5].end);
+    }
+
+    /// A reference in a block call's arguments is seen like one in its
+    /// text (the user's paper: `#proof(title: [Proof of @lem:main_mps])`
+    /// failed with "label does not exist").
+    #[test]
+    fn references_in_call_arguments() {
+        let mut d = Document::empty();
+        let t = d.text("Body.");
+        let p = d.paragraph(vec![t]);
+        let mut proof = d.env("proof", vec![p]);
+        if let Block::Env { args, .. } = &mut proof.kind {
+            *args = "title: [Proof of @lem:a]".into();
+        }
+        d.blocks = vec![proof];
+        let mut refs = vec![];
+        refs_in(&d.blocks[0], &mut refs);
+        assert_eq!(refs, ["lem:a"]);
+        let jobs = stale_blocks(
+            &d.blocks,
+            "#let proof(title: none, body) = body",
+            false,
+            &[],
+        );
+        assert!(
+            jobs[0].around.prefix.contains("\"@lem:a\""),
+            "red, compiles"
+        );
     }
 
     /// A raw block naming a label (`#restate(<lem:a>)`, whose function

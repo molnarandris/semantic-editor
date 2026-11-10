@@ -1021,3 +1021,7 @@ reported targets, so only those are still listed. On the paper: no problems left
 - Before the lemma has rendered once, no copy (the error shows until it has).
 - Test: `restated_blocks_find_what_they_name` (fails with "array is empty" without
   the copy). On the user's paper all three restates compile.
+- Found on the way, own commit: references in a block call's source arguments
+  (`#proof(title: [Proof of @lem:x])`) were not seen, so they got no stand-in and
+  the block failed ("label does not exist"). `refs_in` now reads `Env.args` too.
+  With both, every block of the user's paper compiles in the editor.
