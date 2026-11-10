@@ -913,3 +913,9 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
 - A `#set` rule inside a paragraph (after its `#`) no longer splits the paragraph
   there (the `#` was left behind and the export did not compile); the paragraph
   stays raw as a whole, the rule applying to its rest as in Typst.
+- A block call on lines of its own right under a line of text (`#theorem[…]` with
+  no blank line before it) ends the paragraph, as it does in Typst: the theorem is
+  an environment and the text before it a paragraph (they were raw together). A
+  labelled call the tree cannot hold (`#lemma(statement()) <lem:a>`) is a raw block
+  of its own, so the text before it stays editable. User report: theorems came in as
+  raw Typst.

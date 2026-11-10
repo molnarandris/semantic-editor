@@ -330,6 +330,30 @@ impl Importer<'_> {
                     out.push(b);
                     last_end = n.range().end;
                 }
+                // A block call on lines of its own (`#theorem[…]` right under
+                // a line of text) ends the paragraph, as it does in Typst.
+                SyntaxKind::Hash if on_own_lines(&run, nodes, i) => {
+                    let call = &nodes[i + 1];
+                    match self.block_call(call) {
+                        Some(b) => {
+                            self.flush(&mut run, &mut out, &mut last_end);
+                            out.push(b);
+                            last_end = call.range().end;
+                            i += 1;
+                        }
+                        // One the tree cannot hold (`#lemma(statement())`)
+                        // is a block too when it is labelled: raw on its own,
+                        // the text before it stays editable.
+                        None if labelled(nodes, i + 1) => {
+                            self.flush(&mut run, &mut out, &mut last_end);
+                            let b = self.raw(n.range().start, call.range().end);
+                            out.push(b);
+                            last_end = call.range().end;
+                            i += 1;
+                        }
+                        None => run.push(n.clone()),
+                    }
+                }
                 _ => run.push(n.clone()),
             }
             i += 1;
@@ -881,6 +905,53 @@ impl Importer<'_> {
     }
 }
 
+/// Whether `nodes[i]` is the `#` of a call that stands on lines of its own
+/// in the paragraph collected in `run`: a line break (or nothing) before it,
+/// and after it a line break, a paragraph break or the end, possibly after
+/// a label.
+fn on_own_lines(run: &[LinkedNode], nodes: &[LinkedNode], i: usize) -> bool {
+    let breaks = |n: &LinkedNode| {
+        n.kind() == SyntaxKind::Parbreak
+            || n.kind() == SyntaxKind::Space && n.leaf_text().contains('\n')
+    };
+    let before = run.iter().all(|r| is_blank(r)) || run.last().is_some_and(breaks);
+    if !before
+        || nodes
+            .get(i + 1)
+            .is_none_or(|c| c.kind() != SyntaxKind::FuncCall)
+    {
+        return false;
+    }
+    let mut rest = nodes[i + 2..].iter().peekable();
+    // A label after it, `] <thm:main>`.
+    if rest
+        .peek()
+        .is_some_and(|n| n.kind() == SyntaxKind::Space && !breaks(n))
+        && nodes
+            .get(i + 3)
+            .is_some_and(|n| n.kind() == SyntaxKind::Label)
+    {
+        rest.next();
+    }
+    if rest.peek().is_some_and(|n| n.kind() == SyntaxKind::Label) {
+        rest.next();
+    }
+    rest.next().is_none_or(breaks)
+}
+
+/// Whether a label follows `nodes[k]` (after a space on the same line).
+fn labelled(nodes: &[LinkedNode], k: usize) -> bool {
+    match (nodes.get(k + 1), nodes.get(k + 2)) {
+        (Some(l), _) if l.kind() == SyntaxKind::Label => true,
+        (Some(s), Some(l)) => {
+            s.kind() == SyntaxKind::Space
+                && !s.leaf_text().contains('\n')
+                && l.kind() == SyntaxKind::Label
+        }
+        _ => false,
+    }
+}
+
 /// A bar in a formula, `|`.
 fn is_bar(node: &SyntaxNode) -> bool {
     node.kind() == SyntaxKind::MathText && node.leaf_text() == "|"
@@ -1045,6 +1116,27 @@ $ f(x) &= cases(1 "if" x > 0, 0) \
         assert_eq!(kind("#lemma[One.\n\nTwo.]"), "environment");
         assert_eq!(kind("+ one\n+ two"), "list item");
         assert_eq!(kind("3. three"), "raw typst");
+
+        // On lines of its own under a line of text: the paragraph ends, the
+        // environment keeps its label.
+        let doc = renders_the_same(&format!(
+            "{header}We prove\n#lemma[Title][\n  Body.\n] <lem:a>\nwhere more text follows.\n\n\
+             Text and\n#highlight[an inline call]\non its own line."
+        ));
+        let kinds: Vec<&str> = doc.blocks.iter().map(|b| b.label()).collect();
+        assert_eq!(
+            kinds,
+            ["paragraph", "environment", "paragraph", "paragraph"]
+        );
+        assert_eq!(doc.blocks[1].label, "lem:a");
+
+        // A labelled call with no body: raw on its own, label included.
+        let doc = renders_the_same(&format!(
+            "{header}#let stmt() = [Statement.]\n\nAs follows:\n  #lemma(stmt()) <lem:b>\n"
+        ));
+        let kinds: Vec<&str> = doc.blocks.iter().map(|b| b.label()).collect();
+        assert_eq!(kinds, ["paragraph", "raw typst"]);
+        assert!(matches!(&doc.blocks[1].kind, Block::RawTypst(s) if s == "#lemma(stmt()) <lem:b>"));
     }
 
     #[test]
