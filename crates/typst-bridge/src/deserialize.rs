@@ -217,6 +217,19 @@ fn call_parts<'a>(
     Some((callee.leaf_text().to_string(), inner, contents))
 }
 
+/// An argument written without a name (not a paren, comma or trivia).
+fn is_positional(kind: SyntaxKind) -> bool {
+    !(kind.is_trivia()
+        || matches!(
+            kind,
+            SyntaxKind::LeftParen
+                | SyntaxKind::RightParen
+                | SyntaxKind::Comma
+                | SyntaxKind::Named
+                | SyntaxKind::Spread
+        ))
+}
+
 /// Block-level markup: what ends a paragraph.
 fn is_block_level(node: &LinkedNode) -> bool {
     match node.kind() {
@@ -502,6 +515,9 @@ impl Importer<'_> {
             return Some(self.doc.bibliography_block(&src));
         }
         let (name, mut args, contents) = call_parts(self.src, call)?;
+        if name == "figure" && contents.is_empty() {
+            return self.code_figure(call);
+        }
         if contents.is_empty() || contents.len() > 2 {
             return None;
         }
@@ -541,13 +557,42 @@ impl Importer<'_> {
         Some(block)
     }
 
-    /// A figure's `caption: […]` argument, taken out of its arguments: the
-    /// other arguments' source and the caption's inlines (if it has one).
+    /// A figure whose body is its first argument, `#figure(dia(…), caption:
+    /// […])`: content in brackets becomes its blocks, code a raw Typst block.
+    fn code_figure(&mut self, call: &LinkedNode) -> Option<BlockNode> {
+        let args = call.children().next_back()?;
+        let value = args.children().find(|c| is_positional(c.kind()))?;
+        let mut body = if value.kind() == SyntaxKind::ContentBlock {
+            self.blocks(&content_markup(&value))
+        } else {
+            vec![self.doc.raw(&format!("#{}", value.full_text()))]
+        };
+        let (rest, caption) = self.caption_arg(call)?;
+        if let Some(caption) = caption {
+            body.push(self.doc.caption(caption));
+        }
+        let mut block = self.doc.env("figure", body);
+        if let model::Block::Env { args, .. } = &mut block.kind {
+            *args = rest;
+        }
+        Some(block)
+    }
+
+    /// A figure's `caption: […]` argument, taken out of its arguments (with
+    /// its body, the first positional one, if written in the parentheses):
+    /// the other arguments' source and the caption's inlines (if it has one).
     fn caption_arg(&mut self, call: &LinkedNode) -> Option<(String, Option<Vec<InlineNode>>)> {
         let args = call.children().next_back()?;
         let mut rest = vec![];
         let mut caption = None;
+        let body = args
+            .children()
+            .find(|c| is_positional(c.kind()))
+            .map(|c| c.range());
         for child in args.children() {
+            if Some(child.range()) == body {
+                continue;
+            }
             match child.kind() {
                 SyntaxKind::Named => {
                     let named = child.cast::<ast::Named>()?;
@@ -1112,6 +1157,23 @@ $ f(x) &= cases(1 "if" x > 0, 0) \
             .expect("a figure");
         let body = figure.kind.body().unwrap();
         assert!(matches!(body.last().unwrap().kind, Block::Caption(_)));
+    }
+
+    #[test]
+    fn a_figure_with_code_for_its_body_is_a_figure() {
+        let source = "#figure(\n  rect(width: 2cm),\n  caption: [A box.],\n) <fig:box>\n\n#figure({\n  let w = 1cm\n  rect(width: w)\n}, caption: [Code.]) <fig:code>\n\nSee @fig:box and @fig:code.\n";
+        let doc = renders_the_same(source);
+        for (block, label) in doc.blocks.iter().zip(["fig:box", "fig:code"]) {
+            assert!(
+                matches!(&block.kind, Block::Env { name, args, .. } if name == "figure" && args.is_empty()),
+                "{:?}",
+                block.kind
+            );
+            assert_eq!(block.label, label);
+            let body = block.kind.body().unwrap();
+            assert!(matches!(body[0].kind, Block::RawTypst(_)));
+            assert!(matches!(body[1].kind, Block::Caption(_)));
+        }
     }
 
     #[test]

@@ -497,6 +497,8 @@ Titles decided 2026-11-08: optional, never added by default; positional
   up to it. Formulas whose text (`"Rep"`) is spaced otherwise than the export
   writes it (tight before a bracket, spaced elsewhere) stay raw, since spaces next
   to text show. A block call on lines of its own ends its paragraph (as in Typst).
+  A figure whose body is its first argument (`#figure(dia(…), caption: […])`) is
+  a figure holding that code as a raw Typst block, so references to it are numbered.
   References inside raw blocks (`@thm:x` in a raw figure's caption) get the same
   stand-in or red `@label` as references in the tree, so the block's preview
   compiles on its own (user report: a red dot instead of the figure). Labels

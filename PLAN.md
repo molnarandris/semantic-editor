@@ -954,3 +954,15 @@ User request: an option to look for problems. Done:
 - On the user's paper: two references remain, to labels made with `label("…")`
   in code; the rest were false alarms now fixed (a label passed to `restate`,
   citations to the bibliography written in the document).
+
+### Figures whose body is code
+
+User report: references to the paper's figures said "points to raw Typst". Its
+figures write the body as the first argument, `#figure(dia(…), caption: […])` or
+`#figure({ … }, caption: […])`, so the importer (which only took
+`#figure(…)[body]`) kept them raw. `code_figure` (deserialize.rs) now makes them
+figures: a body in brackets becomes blocks, code becomes a raw Typst block
+`#dia(…)` / `#{ … }` inside the figure, with the caption and label as usual. The
+export writes `#figure(caption: […])[…]`, which renders the same (test
+`a_figure_with_code_for_its_body_is_a_figure`). On the paper all four figures
+import as figures and their references are numbered.
