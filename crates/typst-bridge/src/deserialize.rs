@@ -784,9 +784,23 @@ impl Importer<'_> {
                 let node = self.sym(n.leaf_text());
                 out.push(node);
             }
+            // An escaped bracket (`\{`) does not pair up and stretch; the
+            // tree's brackets do, so it is kept as the named symbol.
             SyntaxKind::Escape => {
                 let c = n.cast::<ast::Escape>()?.get();
-                let node = self.sym(&c.to_string());
+                let name = match c {
+                    '(' => Some("paren.l"),
+                    ')' => Some("paren.r"),
+                    '[' => Some("bracket.l"),
+                    ']' => Some("bracket.r"),
+                    '{' => Some("brace.l"),
+                    '}' => Some("brace.r"),
+                    _ => None,
+                };
+                let node = match name {
+                    Some(name) => self.doc.code(&format!("sym.{name}")),
+                    None => self.sym(&c.to_string()),
+                };
                 out.push(node);
             }
             SyntaxKind::Str => {
@@ -1086,6 +1100,7 @@ $ f(x) &= cases(1 "if" x > 0, 0) \
             "$ cal(A) hat(x) overline(a b) $",
             "$ phi(x) + sin x + lim_(n -> oo) a_n $",
             "$ [0, 1) $",
+            "$ \\{h, overline(h)\\} $",
             "$ {x | x > 0} + abs(y) $",
             "$ a <= b != c -> d $",
             "$ x \" text\" y $",

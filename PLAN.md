@@ -919,3 +919,6 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
   labelled call the tree cannot hold (`#lemma(statement()) <lem:a>`) is a raw block
   of its own, so the text before it stays editable. User report: theorems came in as
   raw Typst.
+- An escaped bracket in a formula (`\{h, overline(h)\}`) does not pair up and
+  stretch in Typst, the tree's brackets do: it is imported as the named symbol in
+  code (`#sym.brace.l`).
