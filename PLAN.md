@@ -117,6 +117,9 @@ Implementation notes (done):
   few ms. Until the new render arrives the caret uses the previous layout.
 - Spaces Typst would collapse (doubled, leading a paragraph) are never stored: typing
   skips them, and deletes and joins remove the extra one. The caret blinks without a timeout.
+  A space typed right before an existing one is held (2026-11-10, user report): it goes
+  in with the text or formula typed next at the caret, so `foo| bar` + ` text` gives
+  `foo text bar`; any caret move drops it.
 - Not yet: selection, typing inside math (formulas are passed over as one step), editing
   raw Typst blocks in the canvas, preedit display for input methods.
 

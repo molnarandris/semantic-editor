@@ -194,6 +194,9 @@ impl Editor {
         }
         let mut space_before = pos.offset == 0 && pos.inline == 0 && !pos.nested()
             || pos.offset > 0 && collapses(chars[pos.offset - 1]);
+        let space_at_caret = space_before;
+        let space_after = chars.get(pos.offset).is_some_and(|&c| collapses(c));
+        let (id, offset) = (pos.inlines[pos.inline].id, pos.offset);
         let mut out = String::new();
         for c in s.chars() {
             let c = if c.is_whitespace() && c != NBSP {
@@ -207,23 +210,30 @@ impl Editor {
             space_before = c == ' ';
             out.push(c);
         }
-        if chars.get(pos.offset).is_some_and(|&c| collapses(c)) && out.ends_with(' ') {
+        // A space held before an existing one goes in with this text.
+        let held = self.held_space.take().as_ref() == Some(&self.caret);
+        if held && !space_at_caret && !out.is_empty() && !out.starts_with(' ') {
+            out.insert(0, ' ');
+        }
+        if space_after && out.ends_with(' ') {
             out.pop();
+            if out.is_empty() {
+                self.held_space = Some(self.caret.clone());
+            }
         }
         let s = out;
         if s.is_empty() {
             return false;
         }
-        let id = pos.inlines[pos.inline].id;
         let n = s.chars().count();
         let space = s.ends_with(char::is_whitespace);
         let after = CursorPath {
-            offset: pos.offset + n,
+            offset: offset + n,
             ..self.caret.clone()
         };
         let op = Op::Insert {
             seq: Seq::Text(id),
-            index: pos.offset,
+            index: offset,
             items: Items::Text(s),
         };
         self.commit(vec![op], after, Last::Typing { space })
@@ -255,6 +265,14 @@ impl Editor {
                 seq: Seq::Text(text_id),
                 index: c - strip,
                 count: strip + len - c,
+            });
+        }
+        // A space held before the existing one goes before the node.
+        if self.held_space.take().as_ref() == Some(&self.caret) && strip == 0 {
+            ops.push(Op::Insert {
+                seq: Seq::Text(text_id),
+                index: c,
+                items: Items::Text(" ".into()),
             });
         }
         let rest = self.doc.text(&tail);
@@ -870,7 +888,9 @@ impl Editor {
     }
 
     /// End the identifier being typed: a known name becomes its symbol.
+    /// (Called before every caret move, so it drops a held space too.)
     pub(super) fn finish_word(&mut self) -> bool {
+        self.held_space = None;
         if self.ref_before().is_some() {
             return self.finish_ref();
         }

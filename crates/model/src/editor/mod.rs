@@ -106,6 +106,10 @@ pub struct Editor {
     selected: Option<Selected>,
     /// Caret position right after an identifier that is still being typed.
     word: Option<CursorPath>,
+    /// Caret position where a space was typed before an existing space: it
+    /// is not stored (Typst would collapse it) but goes in with the text
+    /// typed next there, so `foo| bar` + ` x` gives `foo x bar`.
+    held_space: Option<CursorPath>,
     /// Rows opened with a `(` that was swallowed; `)` leaves them.
     groups: HashSet<NodeId>,
     /// Typst's symbol names with modifiers (`times.o` → ⊗), provided by the
@@ -302,6 +306,7 @@ impl Editor {
             last: Last::Other,
             selected: None,
             word: None,
+            held_space: None,
             groups: HashSet::new(),
             resolver: None,
             calls: None,
@@ -387,6 +392,7 @@ impl Editor {
         self.last = Last::Other;
         self.selected = None;
         self.word = None;
+        self.held_space = None;
         self.groups.clear();
     }
 

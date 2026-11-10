@@ -119,9 +119,27 @@ fn extra_spaces_are_not_inserted() {
     assert!(!e.insert_text(" "), "second space ignored");
     e.insert_text("x  \t y");
     assert_eq!(texts(&e)[1], "ef x y");
-    // Before an existing space, a typed space is dropped too.
+    // Before an existing space, a typed space is not stored, but goes in
+    // with the text typed next: a new word between two.
     caret_at(&mut e, 1, 0, 2);
     assert!(!e.insert_text(" "));
+    assert_eq!(texts(&e)[1], "ef x y");
+    e.insert_text("new");
+    assert_eq!(texts(&e)[1], "ef new x y");
+    assert_eq!(e.caret().offset, 6);
+    // Moving away drops it, even when coming back.
+    caret_at(&mut e, 1, 0, 6);
+    e.insert_text(" ");
+    e.move_left();
+    e.move_right();
+    e.insert_text("Q");
+    assert_eq!(texts(&e)[1], "ef newQ x y");
+    e.undo();
+    // A formula typed there gets the space too.
+    caret_at(&mut e, 1, 0, 2);
+    e.insert_text(" ");
+    e.insert_text("$");
+    assert_eq!(texts(&e)[1], "ef $ new x y");
     // No space at the start of a paragraph.
     caret_at(&mut e, 1, 0, 0);
     assert!(!e.insert_text(" "));
