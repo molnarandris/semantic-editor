@@ -323,7 +323,8 @@ impl Importer<'_> {
                     i += len;
                     continue;
                 }
-                _ if is_block_level(n) => {
+                // A rule in a paragraph (after its `#`) stays in it.
+                _ if is_block_level(n) && !is_definition(n.kind()) => {
                     self.flush(&mut run, &mut out, &mut last_end);
                     let b = self.block(n);
                     out.push(b);
@@ -1054,6 +1055,7 @@ $ f(x) &= cases(1 "if" x > 0, 0) \
             "Text #h(1em) more",
             "#lorem(5)",
             "Text // comment",
+            "#v(1em)\n#set text(red)\nText",
         ] {
             let doc = renders_the_same(src);
             assert!(matches!(doc.blocks[0].kind, Block::RawTypst(_)), "{src}");

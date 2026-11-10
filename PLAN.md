@@ -910,3 +910,6 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
   the differing pages (saving them as PNGs), `--against FILE` compares two sources.
   Files go to `target/import-check/` (the SDK sandbox sees only the project), which is
   ignored by git; the paper itself is never committed.
+- A `#set` rule inside a paragraph (after its `#`) no longer splits the paragraph
+  there (the `#` was left behind and the export did not compile); the paragraph
+  stays raw as a whole, the rule applying to its rest as in Typst.
