@@ -902,3 +902,11 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
   first blocks) opens as a title block again; other `set document` rules stay in the
   header.
 - The sample starts with a title block.
+
+## M17 follow-ups: the user's paper (2026-11-10)
+
+- `examples/import_report.rs`: imports a `.typ` file and lists the blocks that came
+  out raw; `--compare` renders the original and the export of the import and names
+  the differing pages (saving them as PNGs), `--against FILE` compares two sources.
+  Files go to `target/import-check/` (the SDK sandbox sees only the project), which is
+  ignored by git; the paper itself is never committed.
