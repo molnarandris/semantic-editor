@@ -927,3 +927,8 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
   operator form), in the editor too; a formula whose text has other spacing than
   the export writes (a space before a bracket, text touching the atom before it)
   stays raw.
+- A list starts on the line after the block before it in the export, as in bodies:
+  a blank line between a paragraph and its list adds space in Typst (measured).
+  With these, the user's 55-page paper imports and exports to identical pages;
+  58 of 964 blocks stay raw (figures drawn by a function, statements produced by a
+  function, `lr(size: …)` and other named arguments in math).

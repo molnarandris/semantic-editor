@@ -1155,8 +1155,10 @@ pub fn serialize_document_mapped(doc: &Document) -> (String, SpanMap) {
     let mut map = SpanMap::default();
     let item = |b: &BlockNode| matches!(b.kind, Block::Item { .. });
     for (i, block) in doc.blocks.iter().enumerate() {
-        // Consecutive items stay one tight list.
-        if i == 0 || !(item(block) && item(&doc.blocks[i - 1])) {
+        // Consecutive items stay one tight list, and a list starts on the
+        // line after the block before it: a blank line there adds space
+        // (measured), as in bodies (`Writer::blocks`).
+        if i == 0 || !item(block) {
             out.push('\n');
         }
 
