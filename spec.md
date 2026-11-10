@@ -493,7 +493,10 @@ Titles decided 2026-11-08: optional, never added by default; positional
   Known limits: formulas with bars touching their neighbours (`|x|`, a different
   rendering from the tree's `bar.v`) stay raw; enumeration items with explicit
   numbers stay raw; a list written with blank lines between its items (Typst's
-  wide list) becomes tight.
+  wide list) becomes tight, and one after a blank line under its paragraph moves
+  up to it. Formulas whose text (`"Rep"`) is spaced otherwise than the export
+  writes it (tight before a bracket, spaced elsewhere) stay raw, since spaces next
+  to text show. A block call on lines of its own ends its paragraph (as in Typst).
   Wishlist: bars as Typst writes them (a tight bar in the tree), explicit item
   numbers, wide lists.
 
