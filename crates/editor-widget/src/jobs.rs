@@ -24,8 +24,8 @@ use model::{Block, BlockNode, Inline, InlineNode, ListKind};
 use typst_bridge::bib::{hidden_bibliography, hidden_cites};
 use typst_bridge::{
     Around, CounterState, LabelTarget, SpanMap, chain_code, code_display, initial_state, is_code,
-    label_report, missing_ref, ref_stub, refs_in_source, serialize_block_numbered,
-    tracked_counters,
+    label_report, labels_in_source, missing_ref, ref_stub, refs_in_source,
+    serialize_block_numbered, tracked_counters,
 };
 
 /// What was last submitted for a block, and how its counters ended.
@@ -100,6 +100,83 @@ fn refs_in(block: &BlockNode, out: &mut Vec<String>) {
     for child in block.kind.body().into_iter().flatten() {
         refs_in(child, out);
     }
+}
+
+/// The labels attached in a block (nested blocks and raw Typst too).
+fn all_labels_in(block: &BlockNode, out: &mut Vec<String>) {
+    if !block.label.is_empty() {
+        out.push(block.label.clone());
+    }
+    if let Block::RawTypst(source) = &block.kind {
+        out.extend(labels_in_source(source));
+    }
+    for child in block.kind.body().into_iter().flatten() {
+        all_labels_in(child, out);
+    }
+}
+
+/// Problems with labels and references, per top-level block (by index):
+/// references to labels that do not exist or only on raw Typst (shown red
+/// in the editor), and labels defined more than once. Citations are fine:
+/// keys of the bibliography block, or of BibTeX entries in the header or
+/// raw Typst (a bibliography made from text in the document).
+pub fn label_problems(header: &str, blocks: &[BlockNode]) -> Vec<(usize, String)> {
+    let mut sources = vec![header];
+    let mut keys = vec![];
+    for block in blocks {
+        match &block.kind {
+            Block::Bibliography(source) => keys.extend(model::bib_keys(source)),
+            Block::RawTypst(source) => sources.push(source),
+            _ => {}
+        }
+    }
+    let entries: Vec<&str> = sources
+        .iter()
+        .flat_map(|s| s.lines())
+        .filter(|l| l.trim_start().starts_with('@'))
+        .collect();
+    keys.extend(model::bib_keys(&entries.join("\n")));
+    let mut numbered = vec![];
+    for block in blocks {
+        labels_in(block, &mut numbered);
+    }
+    let attached: Vec<Vec<String>> = blocks
+        .iter()
+        .map(|b| {
+            let mut v = vec![];
+            all_labels_in(b, &mut v);
+            v
+        })
+        .collect();
+    let count = |label: &str| attached.iter().flatten().filter(|l| *l == label).count();
+    let mut problems = vec![];
+    for (index, block) in blocks.iter().enumerate() {
+        for label in &attached[index] {
+            let n = count(label);
+            if n > 1 && attached[..index].iter().flatten().all(|l| l != label) {
+                problems.push((index, format!("<{label}> is defined {n} times")));
+            }
+        }
+        let mut refs = vec![];
+        refs_in(block, &mut refs);
+        for label in refs {
+            if numbered.iter().any(|(l, _)| *l == label) {
+                continue;
+            }
+            if count(&label) > 0 {
+                problems.push((
+                    index,
+                    format!("@{label} points to raw Typst and shows no number"),
+                ));
+            } else if !keys.contains(&label) {
+                problems.push((
+                    index,
+                    format!("@{label}: no such label or bibliography entry"),
+                ));
+            }
+        }
+    }
+    problems
 }
 
 /// The source of a code block.
@@ -650,6 +727,40 @@ mod tests {
             "raw: a stand-in"
         );
         assert!(views[4].around.prefix.contains("\"@nowhere\""), "raw: red");
+    }
+
+    /// Missing labels, labels only on raw Typst, labels defined twice.
+    #[test]
+    fn label_problems_are_found() {
+        let mut d = Document::empty();
+        let (r1, r2, r3) = (
+            d.reference("sec:b"),
+            d.reference("gone"),
+            d.reference("fig:raw"),
+        );
+        let para = d.paragraph(vec![r1, r2, r3]);
+        let (a, b) = (d.text("A"), d.text("B"));
+        let mut first = d.heading(1, vec![a]);
+        first.label = "sec:b".into();
+        let mut second = d.heading(1, vec![b]);
+        second.label = "sec:b".into();
+        let raw = d.raw("#figure([F], caption: [See @nowhere.]) <fig:raw>");
+        d.blocks = vec![para, first, second, raw];
+        assert_eq!(
+            label_problems("", &d.blocks),
+            [
+                (0, "@gone: no such label or bibliography entry".to_string()),
+                (
+                    0,
+                    "@fig:raw points to raw Typst and shows no number".to_string()
+                ),
+                (1, "<sec:b> is defined 2 times".to_string()),
+                (
+                    3,
+                    "@nowhere: no such label or bibliography entry".to_string()
+                ),
+            ]
+        );
     }
 
     fn job_start(jobs: &[Job], index: usize) -> Option<CounterState> {

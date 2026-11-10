@@ -936,3 +936,21 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
   (a raw figure whose caption cites a theorem: a red dot instead of the figure).
   References in raw Typst are now found (`refs_in_source`) and get a stand-in for
   the target, or the red `@label`, like references in the tree.
+
+## Problems: Next Problem (2026-11-10)
+
+User request: an option to look for problems. Done:
+- `label_problems` (jobs.rs) finds references to missing labels, references to
+  labels on raw Typst (shown red), and labels defined twice, per top-level block.
+  Labels and references in raw Typst come from its syntax (`labels_in_source`:
+  only labels in markup; `refs_in_source`); BibTeX keys in the header or raw
+  blocks count as citations.
+- The widget adds blocks whose compile failed, one entry per block in document
+  order; `go_to_problem` moves the caret there (wrapping) and returns "k of n" and
+  the message.
+- The app: actions next-problem (F8) and previous-problem (Shift+F8), menu entry
+  "Next Problem"; a toast names the problem and replaces the previous one (markup
+  off, labels have `<…>`).
+- On the user's paper: two references remain, to labels made with `label("…")`
+  in code; the rest were false alarms now fixed (a label passed to `restate`,
+  citations to the bibliography written in the document).

@@ -38,6 +38,8 @@ pub struct Window {
     saved: RefCell<(String, Vec<BlockNode>)>,
     /// The open source editor dialog, if any.
     block_editor: RefCell<Option<Rc<BlockEditor>>>,
+    /// The toast of the last problem gone to, replaced by the next one.
+    problem_toast: RefCell<Option<adw::Toast>>,
 }
 
 fn spawn(future: impl Future<Output = ()> + 'static) {
@@ -105,6 +107,7 @@ impl Window {
             imported: RefCell::new(None),
             saved: RefCell::default(),
             block_editor: RefCell::new(None),
+            problem_toast: RefCell::new(None),
         });
         this.add_actions();
         this.connect_signals();
@@ -172,7 +175,7 @@ impl Window {
 
     fn add_actions(self: &Rc<Self>) {
         type Handler = fn(Rc<Window>);
-        let actions: [(&str, Handler); 15] = [
+        let actions: [(&str, Handler); 17] = [
             ("insert-env", |w| {
                 w.editor.start_env();
                 w.editor.grab_focus();
@@ -206,6 +209,8 @@ impl Window {
                     }
                 })
             }),
+            ("next-problem", |w| w.go_to_problem(true)),
+            ("previous-problem", |w| w.go_to_problem(false)),
             ("zoom-in", |w| w.editor.zoom_by(1.0)),
             ("zoom-out", |w| w.editor.zoom_by(-1.0)),
             ("zoom-reset", |w| {
@@ -294,6 +299,24 @@ impl Window {
             .set_title(Some(&format!("{shown} — Semantic Editor")));
     }
 
+    /// Move to the next (or previous) problem and say what it is.
+    fn go_to_problem(&self, forward: bool) {
+        let message = match self.editor.go_to_problem(forward) {
+            Some((k, n, problem)) => format!("Problem {k} of {n}: {problem}"),
+            None => "No problems found".to_string(),
+        };
+        if let Some(old) = self.problem_toast.take() {
+            old.dismiss();
+        }
+        let toast = adw::Toast::builder()
+            .title(&message)
+            .use_markup(false)
+            .build();
+        self.toasts.add_toast(toast.clone());
+        *self.problem_toast.borrow_mut() = Some(toast);
+        self.editor.grab_focus();
+    }
+
     fn toast(&self, message: &str) {
         self.toasts.add_toast(adw::Toast::new(message));
     }
@@ -321,6 +344,7 @@ fn main_menu() -> gio::Menu {
     zoom.append(Some("Zoom _Out"), Some("win.zoom-out"));
     zoom.append(Some("_Reset Zoom"), Some("win.zoom-reset"));
     zoom.append(Some("Show _Code"), Some("win.show-code"));
+    zoom.append(Some("Next _Problem"), Some("win.next-problem"));
     menu.append_section(None, &zoom);
     let insert = gio::Menu::new();
     insert.append(Some("Document _Header…"), Some("win.edit-header"));

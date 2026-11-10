@@ -523,6 +523,17 @@ Titles decided 2026-11-08: optional, never added by default; positional
   Title…" adds it). Restyling: `show title` rules in the header. Wishlist: keywords
   and abstract; a date on the page; author affiliations.
 
+### Problems (user request, 2026-11-10)
+
+- **Next Problem** (F8, Shift+F8 back; in the menu): moves the caret to the next
+  block with a problem, wrapping around, and names it in a toast ("Problem 2 of 5:
+  …"). Problems: a block that failed to compile (the red dot; the first line of
+  Typst's error), a reference to a label that does not exist, a reference to a label
+  on raw Typst (shown red, without its number), a label defined twice. Citations to
+  BibTeX entries written in the document (a raw bibliography) are fine. Known limit:
+  labels made in code (`label("…")`) are not seen, so references to them are
+  reported. Wishlist: a list of all problems to pick from.
+
 
 ### Later
 

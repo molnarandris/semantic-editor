@@ -85,6 +85,37 @@ impl SemEditor {
         self.imp().editor.borrow().hint()
     }
 
+    /// Move the caret to the next block (or with `forward` false, the
+    /// previous one) that has a problem, wrapping around: a failed compile,
+    /// a reference to a missing label, a label defined twice. Returns the
+    /// problem's place (from 1), their number and its message; `None` if
+    /// there are none.
+    pub fn go_to_problem(&self, forward: bool) -> Option<(usize, usize, String)> {
+        let imp = self.imp();
+        let problems = imp.problems();
+        let index_of = |id: NodeId| {
+            let ed = imp.editor.borrow();
+            let doc = ed.doc();
+            let top = doc.top_block(id).unwrap_or(id);
+            doc.blocks.iter().position(|b| b.id == top)
+        };
+        let here = index_of(self.caret().block).unwrap_or(0);
+        let at: Vec<usize> = problems
+            .iter()
+            .map(|(id, _)| index_of(*id).unwrap_or(0))
+            .collect();
+        let pick = if forward {
+            at.iter().position(|&i| i > here).or(Some(0))
+        } else {
+            at.iter()
+                .rposition(|&i| i < here)
+                .or(at.len().checked_sub(1))
+        };
+        let k = pick.filter(|&k| k < problems.len())?;
+        imp.go_to_block(problems[k].0);
+        Some((k + 1, problems.len(), problems[k].1.clone()))
+    }
+
     /// Select the structure a breadcrumb entry stands for.
     pub fn select_crumb(&self, crumb: &Crumb) {
         self.imp().select_crumb(crumb.path_len);

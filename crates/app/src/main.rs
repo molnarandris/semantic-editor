@@ -69,6 +69,8 @@ fn setup_actions(app: &adw::Application) {
         ("win.export-pdf", &["<Control>e"]),
         ("win.export-typ", &["<Control><Shift>e"]),
         ("win.insert-diagram", &["<Control><Shift>d"]),
+        ("win.next-problem", &["F8"]),
+        ("win.previous-problem", &["<Shift>F8"]),
         ("window.close", &["<Control>w"]),
     ] {
         app.set_accels_for_action(action, accels);

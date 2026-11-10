@@ -625,6 +625,53 @@ impl SemEditor {
         }
     }
 
+    /// Problems in document order, one entry per top-level block: blocks
+    /// that failed to compile (first line of the error), then problems
+    /// with labels and references.
+    pub(crate) fn problems(&self) -> Vec<(NodeId, String)> {
+        let ed = self.editor.borrow();
+        let blocks = &ed.doc().blocks;
+        let views = self.views.borrow();
+        let mut found: Vec<(usize, String)> = views
+            .iter()
+            .filter_map(|v| {
+                let error = v.error.as_ref()?;
+                let i = blocks.iter().position(|b| b.id == v.id)?;
+                Some((i, error.lines().next().unwrap_or("").to_string()))
+            })
+            .collect();
+        found.extend(jobs::label_problems(&ed.doc().header, blocks));
+        // Stable: per block, compile errors first; one entry per block.
+        found.sort_by_key(|(i, _)| *i);
+        let mut merged: Vec<(usize, String)> = vec![];
+        for (i, message) in found {
+            match merged.last_mut() {
+                Some((last, all)) if *last == i => {
+                    all.push_str("; ");
+                    all.push_str(&message);
+                }
+                _ => merged.push((i, message)),
+            }
+        }
+        merged
+            .into_iter()
+            .filter_map(|(i, message)| Some((blocks.get(i)?.id, message)))
+            .collect()
+    }
+
+    /// Put the caret at the start of top-level block `id` and show it.
+    pub(crate) fn go_to_block(&self, id: NodeId) {
+        {
+            let mut ed = self.editor.borrow_mut();
+            let Some(block) = ed.doc().blocks.iter().find(|b| b.id == id) else {
+                return;
+            };
+            let caret = ed.doc().start_of(block);
+            ed.set_caret(caret);
+        }
+        self.after_command(true);
+    }
+
     /// Select the structure of breadcrumb entry `path_len`.
     pub(crate) fn select_crumb(&self, path_len: usize) {
         let changed = self.editor.borrow_mut().select_crumb(path_len);

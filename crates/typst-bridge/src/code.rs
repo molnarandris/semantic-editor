@@ -30,20 +30,39 @@ pub fn is_code(source: &str) -> bool {
 
 /// The labels that `@label` references in Typst `source` point to.
 pub fn refs_in_source(source: &str) -> Vec<String> {
-    fn walk(node: &SyntaxNode, out: &mut Vec<String>) {
-        if let Some(r) = node.cast::<ast::Ref>() {
-            let label = r.target().to_string();
-            if !out.contains(&label) {
-                out.push(label);
-            }
-        }
-        for child in node.children() {
-            walk(child, out);
-        }
-    }
     let mut out = vec![];
-    walk(&parse(source), &mut out);
+    walk(&parse(source), &mut out, &mut |node, _| {
+        node.cast::<ast::Ref>().map(|r| r.target().to_string())
+    });
     out
+}
+
+/// The labels (`<label>`) attached in Typst `source`: in markup, since a
+/// label in code is a value (`restate(<a>)`).
+pub fn labels_in_source(source: &str) -> Vec<String> {
+    let mut out = vec![];
+    walk(&parse(source), &mut out, &mut |node, parent| {
+        let label = node.cast::<ast::Label>()?;
+        (parent == SyntaxKind::Markup).then(|| label.get().to_string())
+    });
+    out
+}
+
+/// What `pick` finds (given each node and its parent's kind) in `root` and
+/// below, each once, in source order.
+fn walk(
+    root: &SyntaxNode,
+    out: &mut Vec<String>,
+    pick: &mut impl FnMut(&SyntaxNode, SyntaxKind) -> Option<String>,
+) {
+    for child in root.children() {
+        if let Some(found) = pick(child, root.kind())
+            && !out.contains(&found)
+        {
+            out.push(found);
+        }
+        walk(child, out, pick);
+    }
 }
 
 /// Typst code that shows a code block on the page: a marker naming what it
@@ -144,6 +163,14 @@ mod tests {
         assert!(!is_code("#counter(heading).update(0)"));
         // `let` inside a code block is local to it.
         assert!(!is_code("#{ let a = 1 }"));
+    }
+
+    #[test]
+    fn references_and_labels_in_source() {
+        let source = "#figure([A], caption: [See @thm:a, @b and @thm:a.]) <fig:x>";
+        assert_eq!(refs_in_source(source), ["thm:a", "b"]);
+        assert_eq!(labels_in_source(source), ["fig:x"]);
+        assert!(labels_in_source("#restate(\"lemma\", <lem:a>, [A])").is_empty());
     }
 
     #[test]

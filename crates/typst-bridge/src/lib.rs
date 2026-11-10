@@ -15,7 +15,7 @@ pub mod worker;
 pub mod world;
 
 pub use calls::{call_shape, math_call_shape};
-pub use code::{code_display, is_code, refs_in_source};
+pub use code::{code_display, is_code, labels_in_source, refs_in_source};
 pub use compile::{
     Around, BLOCK_PAD_PT, Raster, block_document, compile, compile_pdf, render_page,
 };
