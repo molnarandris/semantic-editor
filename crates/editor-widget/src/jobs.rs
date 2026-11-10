@@ -21,7 +21,9 @@ use std::sync::Arc;
 use std::collections::HashMap;
 
 use model::{Block, BlockNode, Inline, InlineNode, ListKind};
-use typst_bridge::bib::{hidden_bibliography, hidden_cites};
+use typst_bridge::bib::{
+    bibliography_call, hidden_bibliography, hidden_cites, raw_bibliography_call,
+};
 use typst_bridge::{
     Around, CounterState, LabelTarget, SpanMap, Style, chain_code, code_display, initial_state,
     is_code, label_report, label_values_in_source, labels_in_source, missing_ref, ref_stub,
@@ -152,12 +154,7 @@ pub fn label_problems(
             _ => {}
         }
     }
-    let entries: Vec<&str> = sources
-        .iter()
-        .flat_map(|s| s.lines())
-        .filter(|l| l.trim_start().starts_with('@'))
-        .collect();
-    keys.extend(model::bib_keys(&entries.join("\n")));
+    keys.extend(model::embedded_bib_keys(&sources.join("\n")));
     let mut numbered = vec![];
     for block in blocks {
         labels_in(block, &mut numbered);
@@ -249,6 +246,22 @@ fn hidden_copy(block: &BlockNode, start: &CounterState) -> String {
     format!("{counters}#place(hide[\n{source}\n])\n")
 }
 
+/// The bibliography `block` makes, if any: the call (hidden after citing
+/// blocks, so their citations resolve in its style) and its entry keys.
+/// The editor's bibliography block, or raw Typst that is one
+/// `#bibliography(…)` call with its BibTeX embedded (the user's paper:
+/// with a title and a style).
+fn bibliography_of(block: &BlockNode) -> Option<(String, Vec<String>)> {
+    match &block.kind {
+        Block::Bibliography(source) => Some((bibliography_call(source), model::bib_keys(source))),
+        Block::RawTypst(source) => Some((
+            raw_bibliography_call(source)?,
+            model::embedded_bib_keys(source),
+        )),
+        _ => None,
+    }
+}
+
 /// Whether a block may read or change counters.
 pub fn counter_sensitive(block: &BlockNode) -> bool {
     match &block.kind {
@@ -311,11 +324,14 @@ pub fn stale_blocks(
     }
     // Citations: references to keys of the bibliography (not labels), per
     // block in document order.
-    let bibliography = blocks.iter().find_map(|b| match &b.kind {
-        Block::Bibliography(source) => Some(source.as_str()),
-        _ => None,
-    });
-    let keys = bibliography.map(model::bib_keys).unwrap_or_default();
+    let bibliography = blocks
+        .iter()
+        .enumerate()
+        .find_map(|(i, b)| bibliography_of(b).map(|(call, keys)| (i, call, keys)));
+    let keys = bibliography
+        .as_ref()
+        .map(|(_, _, keys)| keys.clone())
+        .unwrap_or_default();
     let cites: Vec<Vec<String>> = blocks
         .iter()
         .map(|b| {
@@ -422,11 +438,11 @@ pub fn stale_blocks(
         // Citations are numbered as in the whole document: the earlier ones
         // hidden before the block, the bibliography hidden after it; the
         // bibliography lists everything the document cites.
-        if let (Some(source), false) = (bibliography, cited.is_empty()) {
+        if let (Some((_, call, _)), false) = (&bibliography, cited.is_empty()) {
             around.prefix.push_str(&hidden_cites(&cited_before));
-            around.suffix.push_str(&hidden_bibliography(source));
+            around.suffix.push_str(&hidden_bibliography(call));
         }
-        if matches!(block.kind, Block::Bibliography(_)) {
+        if bibliography.as_ref().is_some_and(|(i, ..)| *i == index) {
             around.prefix.push_str(&hidden_cites(&all_cited));
         }
         for key in cited {
@@ -938,6 +954,28 @@ mod tests {
         let all = format!("#place(hide[{}{}])", cite("beta"), cite("alpha"));
         assert!(around(2).prefix.contains(&all), "{}", around(2).prefix);
         let mut world = typst_bridge::BridgeWorld::new();
+        for job in &jobs {
+            let (src, _) = typst_bridge::block_document(&job.around, &job.snippet, 300.0);
+            typst_bridge::compile(&mut world, &src)
+                .unwrap_or_else(|e| panic!("block {}: {e:?}\n{src}", job.index));
+        }
+
+        // The same with the bibliography written by hand as raw Typst, with
+        // a title and a style (the user's paper): citations get its call,
+        // and it gets all the citations, so it lists them.
+        d.blocks[2] = d.raw(&format!(
+            "#bibliography(bytes(```\n{bib}\n```.text), title: \"References\", style: \"ieee\")"
+        ));
+        assert_eq!(d.bib_keys(), ["alpha", "beta"]);
+        let jobs = stale_blocks(&d.blocks, "", false, &[]);
+        let around = |i: usize| &jobs.iter().find(|j| j.index == i).unwrap().around;
+        assert!(
+            around(0)
+                .suffix
+                .contains("title: \"References\", style: \"ieee\")))")
+        );
+        assert!(around(1).prefix.contains(&cite("beta")));
+        assert!(around(2).prefix.contains(&all), "{}", around(2).prefix);
         for job in &jobs {
             let (src, _) = typst_bridge::block_document(&job.around, &job.snippet, 300.0);
             typst_bridge::compile(&mut world, &src)

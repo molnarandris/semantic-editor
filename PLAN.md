@@ -1025,3 +1025,17 @@ reported targets, so only those are still listed. On the paper: no problems left
   (`#proof(title: [Proof of @lem:x])`) were not seen, so they got no stand-in and
   the block failed ("label does not exist"). `refs_in` now reads `Env.args` too.
   With both, every block of the user's paper compiles in the editor.
+
+## Hand-written bibliographies (2026-11-10)
+
+- User report: citations showed `@key` and the References section printed nothing.
+  The paper's bibliography is `#bibliography(bytes(```…```.text), title: "References",
+  style: "ieee")`, which the import keeps raw (the tree's bibliography has no
+  arguments), and the editor only set up citations for its own bibliography block.
+- Now a raw block that is one `#bibliography(…)` call (`bib::raw_bibliography_call`,
+  by the parser) is the document's bibliography too: citing blocks get that call
+  hidden after them (so its style numbers them), the block gets all citations hidden
+  before it (so it lists them). Keys of its embedded BibTeX: `embedded_bib_keys`.
+  `Document::bibliography`/`bib_keys` see it as well (citation completion, following
+  a citation). No tree or format change.
+- Checked on the user's paper: `[1]` in the text, the References list in IEEE style.

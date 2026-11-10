@@ -198,6 +198,16 @@ impl InlineNode {
     }
 }
 
+/// The keys of the BibTeX entries embedded in Typst code (lines starting
+/// with `@`, as in `#bibliography(bytes(```…```))`).
+pub fn embedded_bib_keys(code: &str) -> Vec<String> {
+    let entries: Vec<&str> = code
+        .lines()
+        .filter(|l| l.trim_start().starts_with('@'))
+        .collect();
+    bib_keys(&entries.join("\n"))
+}
+
 /// The entry keys of a bibliography source: BibTeX (`@article{key, …`; not
 /// `@string`, `@comment`, `@preamble`) or Hayagriva YAML (top-level `key:`).
 pub fn bib_keys(source: &str) -> Vec<String> {
@@ -1182,17 +1192,23 @@ impl Document {
             .map(|b| b.id)
     }
 
-    /// The bibliography block (the first, if there are several).
+    /// The bibliography block (the first, if there are several): the
+    /// editor's, or raw Typst calling `#bibliography(…)` (written by hand,
+    /// with a title or style).
     pub fn bibliography(&self) -> Option<&BlockNode> {
-        self.blocks
-            .iter()
-            .find(|b| matches!(b.kind, Block::Bibliography(_)))
+        self.blocks.iter().find(|b| match &b.kind {
+            Block::Bibliography(_) => true,
+            Block::RawTypst(s) => s.trim_start().starts_with("#bibliography("),
+            _ => false,
+        })
     }
 
-    /// The citation keys of the bibliography, in its order.
+    /// The citation keys of the bibliography, in its order (of the BibTeX
+    /// entries embedded in a raw one).
     pub fn bib_keys(&self) -> Vec<String> {
         match self.bibliography().map(|b| &b.kind) {
             Some(Block::Bibliography(source)) => bib_keys(source),
+            Some(Block::RawTypst(source)) => embedded_bib_keys(source),
             _ => vec![],
         }
     }

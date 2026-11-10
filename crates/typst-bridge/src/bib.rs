@@ -15,7 +15,34 @@ pub fn bib_bytes(source: &str) -> String {
 
 /// The bibliography block, `#bibliography(bytes(```bib …```.text))`.
 pub fn bibliography_code(source: &str) -> String {
-    format!("#bibliography({})", bib_bytes(source))
+    format!("#{}", bibliography_call(source))
+}
+
+/// The call making a bibliography of an embedded source.
+pub fn bibliography_call(source: &str) -> String {
+    format!("bibliography({})", bib_bytes(source))
+}
+
+/// The call in raw Typst `source` that is just one `#bibliography(…)` (with
+/// a title, a style, …): the document's bibliography written by hand.
+pub fn raw_bibliography_call(source: &str) -> Option<String> {
+    use typst::syntax::{SyntaxKind, ast, parse};
+    let root = parse(source);
+    let nodes: Vec<_> = root
+        .children()
+        .filter(|n| !matches!(n.kind(), SyntaxKind::Space | SyntaxKind::Parbreak))
+        .collect();
+    let [hash, call] = nodes.as_slice() else {
+        return None;
+    };
+    let ast::Expr::FuncCall(f) = call.cast::<ast::Expr>()? else {
+        return None;
+    };
+    let ast::Expr::Ident(name) = f.callee() else {
+        return None;
+    };
+    (hash.kind() == SyntaxKind::Hash && name.as_str() == "bibliography")
+        .then(|| call.full_text().to_string())
 }
 
 /// Typst code before a block: citations of `keys`, hidden and taking no
@@ -32,10 +59,10 @@ pub fn hidden_cites(keys: &[String]) -> String {
     format!("#place(hide[{cites}])\n")
 }
 
-/// Typst code after a citing block: the bibliography, hidden, so its
-/// citations resolve.
-pub fn hidden_bibliography(source: &str) -> String {
-    format!("\n#place(hide(bibliography({})))", bib_bytes(source))
+/// Typst code after a citing block: the bibliography (its `call`, so its
+/// style too), hidden, so its citations resolve.
+pub fn hidden_bibliography(call: &str) -> String {
+    format!("\n#place(hide({call}))")
 }
 
 #[cfg(test)]
@@ -77,6 +104,28 @@ mod tests {
     /// bibliography hidden after it renders its citations as in the whole
     /// document, taking no more space; the bibliography with all citations
     /// hidden before it lists what the document cites.
+    /// A bibliography written by hand as raw Typst (the user's paper:
+    /// `title:` and `style:` arguments) is recognised, and citations
+    /// rendered through its call take its style.
+    #[test]
+    fn raw_bibliography_calls() {
+        let raw = format!(
+            "#bibliography(bytes(```\n{BIB}\n```.text), title: \"References\", style: \"apa\")\n"
+        );
+        let call = raw_bibliography_call(&raw).unwrap();
+        assert!(call.starts_with("bibliography(") && call.ends_with("\"apa\")"));
+        for other in ["#bibliography(\"a.bib\") and text", "#let b = 1", "Text"] {
+            assert_eq!(raw_bibliography_call(other), None, "{other}");
+        }
+        let mut world = BridgeWorld::new();
+        let around = Around {
+            suffix: hidden_bibliography(&call),
+            ..Around::default()
+        };
+        let (text, _) = text_of(&mut world, &around, "See @alpha.");
+        assert!(text.contains("Alpha") && text.contains("2020"), "{text:?}");
+    }
+
     #[test]
     fn citations_through_hidden_ones() {
         let mut world = BridgeWorld::new();
@@ -86,7 +135,7 @@ mod tests {
         // The second paragraph alone, after a citation of beta.
         let around = Around {
             prefix: hidden_cites(&["beta".into()]),
-            suffix: hidden_bibliography(BIB),
+            suffix: hidden_bibliography(&bibliography_call(BIB)),
             ..Around::default()
         };
         let (alone, height) = text_of(&mut world, &around, "Then @alpha and @beta.");
