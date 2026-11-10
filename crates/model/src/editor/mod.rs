@@ -17,6 +17,7 @@ use crate::ops::{Items, Op, Seq};
 use crate::symbols;
 use crate::tree::{
     Block, BlockNode, Document, Inline, InlineNode, ListKind, MathKind, MathNode, NodeId, Place,
+    spaced_gap,
 };
 
 mod delete;
@@ -264,15 +265,6 @@ fn row_delete(row: NodeId, index: usize, count: usize) -> Op {
         seq: Seq::Row(row),
         index,
         count,
-    }
-}
-
-fn row_replace(row: NodeId, index: usize, node: MathNode) -> Op {
-    Op::Replace {
-        seq: Seq::Row(row),
-        index,
-        count: 1,
-        items: Items::Math(vec![node]),
     }
 }
 
@@ -750,8 +742,52 @@ impl Editor {
         self.row_nodes(p.row).get(k).cloned()
     }
 
+    /// Whether a space shows in the gap at `k` of `row` (before its node
+    /// `k`): there is one and it is next to a bar or quoted text.
+    fn gap_space(&self, row: NodeId, k: usize) -> bool {
+        let nodes = self.row_nodes(row);
+        k > 0
+            && nodes
+                .get(k)
+                .is_some_and(|n| n.space && spaced_gap(&nodes[k - 1], n))
+    }
+
+    /// Put (or take away) the space in the gap at `k` of `row`.
+    fn set_gap_space(&self, row: NodeId, k: usize, space: bool) -> Option<Op> {
+        let mut node = self.row_nodes(row).get(k)?.clone();
+        node.space = space;
+        Some(Op::Replace {
+            seq: Seq::Row(row),
+            index: k,
+            count: 1,
+            items: Items::Math(vec![node]),
+        })
+    }
+
+    /// Replace the node at `index` of `row` by a new version of it,
+    /// `node`, which keeps the space before the old one.
+    fn row_replace(&self, row: NodeId, index: usize, mut node: MathNode) -> Op {
+        node.space = self
+            .doc
+            .find_row(row)
+            .and_then(|r| r.nodes.get(index))
+            .is_some_and(|n| n.space);
+        Op::Replace {
+            seq: Seq::Row(row),
+            index,
+            count: 1,
+            items: Items::Math(vec![node]),
+        }
+    }
+
     /// Insert `node` at the caret, caret after it (one typing step).
-    fn type_node(&mut self, p: &RowPos, node: MathNode) -> bool {
+    fn type_node(&mut self, p: &RowPos, mut node: MathNode) -> bool {
+        // A space typed just before goes in front of it where it shows.
+        if self.held_space.take().as_ref() == Some(&self.caret)
+            && let Some(prev) = self.node_before(p)
+        {
+            node.space = spaced_gap(&prev, &node);
+        }
         let op = row_insert(p.row, p.offset, node);
         self.commit(vec![op], p.at(p.offset + 1), Last::Typing { space: false })
     }
@@ -759,7 +795,15 @@ impl Editor {
     /// Replace the node before the caret by `kind`, keeping its id (a word
     /// or number growing, `<` `=` becoming ≤).
     fn retype_node_before(&mut self, p: &RowPos, id: NodeId, kind: MathKind) -> bool {
-        let op = row_replace(p.row, p.offset - 1, MathNode { id, kind });
+        let op = self.row_replace(
+            p.row,
+            p.offset - 1,
+            MathNode {
+                id,
+                kind,
+                space: false,
+            },
+        );
         self.commit(vec![op], p.at(p.offset), Last::Typing { space: false })
     }
 

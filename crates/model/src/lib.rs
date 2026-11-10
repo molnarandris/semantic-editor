@@ -18,6 +18,6 @@ pub use history::History;
 pub use ops::{Items, Op, OpError, Seq};
 pub use selection::{SelRange, Selection};
 pub use tree::{
-    Block, BlockNode, Document, Inline, InlineNode, ListKind, MathKind, MathNode, MathRow, NodeId,
-    Place, TitleFields, bib_keys,
+    BARS, Block, BlockNode, Document, Inline, InlineNode, ListKind, MathKind, MathNode, MathRow,
+    NodeId, Place, TitleFields, bib_keys, spaced_gap,
 };

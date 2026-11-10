@@ -468,9 +468,17 @@ impl Editor {
                 true => MathKind::Diagram(source.into()),
                 false => MathKind::Code(source.into()),
             };
-            let node = MathNode { id: block, kind };
+            let node = MathNode {
+                id: block,
+                kind,
+                space: false,
+            };
             let after = self.caret.clone();
-            return self.commit(vec![row_replace(row, k, node)], after, Last::Source(block));
+            return self.commit(
+                vec![self.row_replace(row, k, node)],
+                after,
+                Last::Source(block),
+            );
         }
         let op = Op::Replace {
             seq: Seq::Text(block),

@@ -16,8 +16,9 @@ use serde::{Deserialize, Serialize};
 /// (`Inline::Raw`). 11: block labels (`label`, absent when empty).
 /// 12: references (`Inline::Ref`). 13: figure captions (`Block::Caption`).
 /// 14: the bibliography (`Block::Bibliography`). 15: the title block
-/// (`Block::Title`).
-pub const FORMAT_VERSION: u32 = 15;
+/// (`Block::Title`). 16: spaces in formulas next to bars and text (`space`
+/// on a math node; older files get the spaces their export wrote).
+pub const FORMAT_VERSION: u32 = 16;
 
 #[derive(Serialize)]
 struct SemFileOut<'a> {
@@ -65,6 +66,9 @@ pub fn from_json(text: &str) -> Result<Document, String> {
     let mut doc = Document::empty();
     doc.header = file.header;
     doc.blocks = file.blocks;
+    if file.version < 16 {
+        doc.space_bars_and_text();
+    }
     doc.regenerate_ids();
     doc.check_invariants()?;
     Ok(doc)
@@ -88,6 +92,34 @@ mod tests {
         assert!(saved.contains(&format!("\"version\": {FORMAT_VERSION}")));
         assert!(saved.contains("\"header\": \"#set heading"));
         assert!(saved.contains(&format!("\"typst\": \"{}\"", typst_bridge::TYPST_VERSION)));
+    }
+
+    /// Files before version 16 get the spaces their export wrote around
+    /// bars and text, so they look as before.
+    #[test]
+    fn old_files_keep_spaced_bars_and_text() {
+        let mut d = Document::empty();
+        let nodes = vec![
+            d.sym("|"),
+            d.ident("x"),
+            d.sym("|"),
+            d.node(model::MathKind::Text("Ker".into())),
+            d.sym("("),
+            d.ident("A"),
+            d.sym(")"),
+        ];
+        d.blocks = vec![d.display(nodes)];
+        let old = to_json(&d).replace(&format!("\"version\": {FORMAT_VERSION}"), "\"version\": 15");
+        let loaded = from_json(&old).unwrap();
+        let spaces: Vec<bool> = loaded.blocks[0].rows()[0]
+            .nodes
+            .iter()
+            .map(|n| n.space)
+            .collect();
+        assert_eq!(spaces, [false, true, true, true, false, false, false]);
+        // A current file is read as it is.
+        let current = from_json(&to_json(&d)).unwrap();
+        assert!(current.blocks[0].rows()[0].nodes.iter().all(|n| !n.space));
     }
 
     #[test]

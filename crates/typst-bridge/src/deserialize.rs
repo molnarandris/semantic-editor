@@ -7,7 +7,9 @@
 //! paragraph or formula holding anything the tree cannot represent stays
 //! raw as a whole.
 
-use model::{Block, BlockNode, Document, InlineNode, ListKind, MathKind, MathNode, TitleFields};
+use model::{
+    Block, BlockNode, Document, InlineNode, ListKind, MathKind, MathNode, TitleFields, spaced_gap,
+};
 use typst::syntax::ast::{self, AstNode, MathTextKind};
 use typst::syntax::{LinkedNode, SyntaxKind, SyntaxNode, parse};
 
@@ -721,30 +723,16 @@ impl Importer<'_> {
         if node.kind() == SyntaxKind::Math {
             let children: Vec<&SyntaxNode> = node.children().collect();
             let mut i = 0;
+            let mut space = false;
             while i < children.len() {
                 let n = children[i];
+                let start = out.len();
                 match n.kind() {
+                    // Kept where it shows, next to a bar or quoted text.
+                    SyntaxKind::Space => space = true,
                     // Parentheses that only group (a fraction part, script
                     // or radicand): Typst does not show them.
-                    SyntaxKind::Space | SyntaxKind::LeftParen | SyntaxKind::RightParen => {}
-                    // Spaces next to text show; the export writes a space
-                    // around text, except before an opening bracket.
-                    SyntaxKind::Str if !text_spacing_kept(&children, i) => return None,
-                    // Spaces around a bar show (measured): the tree's bar is
-                    // written `bar.v`, which renders like `a | b`. A bar
-                    // touching its neighbours (`|x|`) cannot be written back
-                    // the same.
-                    _ if is_bar(n) => {
-                        let spaced = |k: usize| {
-                            children
-                                .get(k)
-                                .is_none_or(|c| c.kind() == SyntaxKind::Space)
-                        };
-                        if !((i == 0 || spaced(i - 1)) && spaced(i + 1)) {
-                            return None;
-                        }
-                        out.push(self.sym("|"));
-                    }
+                    SyntaxKind::LeftParen | SyntaxKind::RightParen => {}
                     SyntaxKind::Hash => {
                         let code = children.get(i + 1)?;
                         let text = code.full_text();
@@ -763,6 +751,12 @@ impl Importer<'_> {
                         }
                     }
                     _ => self.math_expr(n, &mut out)?,
+                }
+                if out.len() > start {
+                    if space && start > 0 && spaced_gap(&out[start - 1], &out[start]) {
+                        out[start].space = true;
+                    }
+                    space = false;
                 }
                 i += 1;
             }
@@ -1014,32 +1008,6 @@ fn labelled(nodes: &[LinkedNode], k: usize) -> bool {
     }
 }
 
-/// Whether the export writes the spacing around the text `children[i]` of a
-/// formula as the source has it: a space (or the edge) before it, and after
-/// it a space or the edge, or no space before an opening bracket
-/// (`"Ker"(A)`).
-fn text_spacing_kept(children: &[&SyntaxNode], i: usize) -> bool {
-    let space = |n: &&SyntaxNode| n.kind() == SyntaxKind::Space;
-    let opening = |n: &&SyntaxNode| {
-        n.kind() == SyntaxKind::MathDelimited
-            && n.children()
-                .next()
-                .is_some_and(|o| matches!(o.leaf_text().as_str(), "(" | "[" | "{"))
-    };
-    let before = i == 0 || children.get(i - 1).is_some_and(space);
-    let after = match children.get(i + 1) {
-        None => true,
-        Some(n) if space(n) => !children.get(i + 2).is_some_and(opening),
-        Some(n) => opening(n),
-    };
-    before && after
-}
-
-/// A bar in a formula, `|`.
-fn is_bar(node: &SyntaxNode) -> bool {
-    node.kind() == SyntaxKind::MathText && node.leaf_text() == "|"
-}
-
 /// Without leading and trailing spaces.
 fn trimmed<'a>(nodes: &[LinkedNode<'a>]) -> Vec<LinkedNode<'a>> {
     trimmed_slice(nodes).to_vec()
@@ -1241,12 +1209,34 @@ $ f(x) &= cases(1 "if" x > 0, 0) \
         assert!(matches!(&doc.blocks[1].kind, Block::RawTypst(s) if s == "#lemma(stmt()) <lem:b>"));
     }
 
+    /// Spaces next to bars and quoted text show: they are kept as written,
+    /// so such formulas import (the user's paper: `z_(|partial v|)`).
+    #[test]
+    fn bars_and_text_keep_their_spaces() {
+        for src in [
+            "$ |x^2| $",
+            "$ \"Rep\" (A) + \"Ker\"(B) $",
+            "$z_(|partial v|-1)$ and $3 |partial v| - 1$",
+            "$deg v = |∂ v|$, ${h | b}$, $p| q$ and $a |b$",
+            "$Delta^(|∂ P_i|-2)(d) dot z_(|x_(i+1)|-1)$",
+            "$|x||y| + |[a]| + |-x| + |=|$",
+            "$x \"if\"y$ and $x\"if\" y$",
+        ] {
+            let doc = renders_the_same(src);
+            assert!(
+                matches!(
+                    doc.blocks[0].kind,
+                    Block::Paragraph(_) | Block::DisplayMath(_)
+                ),
+                "{src}"
+            );
+        }
+    }
+
     #[test]
     fn unknown_parts_stay_raw() {
         for src in [
             "$ mat(1, 2; 3, 4) $",
-            "$ |x^2| $",
-            "$ \"Rep\" (A) $",
             "Text #h(1em) more",
             "#lorem(5)",
             "Text // comment",

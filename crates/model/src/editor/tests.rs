@@ -918,6 +918,66 @@ fn empty_paragraph_before_formula_is_removed() {
     assert_eq!(e.caret().block, e.doc().blocks[1].id);
 }
 
+/// The display formula of block `b`, `␣` marking the spaces kept.
+fn spaced_display(e: &Editor, b: usize) -> String {
+    let Block::DisplayMath(row) = &e.doc().blocks[b].kind else {
+        panic!("not display math");
+    };
+    row.nodes
+        .iter()
+        .map(|n| {
+            let one = crate::tree::MathRow {
+                id: row.id,
+                nodes: vec![n.clone()],
+            };
+            format!("{}{}", if n.space { "␣" } else { "" }, show(&one))
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A space typed in a formula is kept where it shows, next to a bar or
+/// text, as Typst does: `3 |x| - 1` is not `3|x|-1`.
+#[test]
+fn spaces_next_to_bars_and_text() {
+    let mut e = math_calls_editor();
+    e.insert_text("3 |x| - 1");
+    assert_eq!(
+        spaced_display(&e, 0),
+        "3 ␣| x | ␣- 1",
+        "no ⊢ across the space"
+    );
+    // Elsewhere a space is ignored; next to text it is kept.
+    let mut e = math_calls_editor();
+    e.insert_text("a b \"if\" c\"t\"");
+    assert_eq!(spaced_display(&e, 0), "a b ␣\"if\" ␣c \"t\"");
+    // Typed into an existing gap; Backspace takes it away first.
+    let mut e = math_calls_editor();
+    e.insert_text("x|y");
+    assert_eq!(spaced_display(&e, 0), "x | y");
+    e.move_left();
+    e.insert_text(" ");
+    assert_eq!(spaced_display(&e, 0), "x | ␣y");
+    assert!(!e.insert_text(" "), "one space");
+    e.backspace();
+    assert_eq!(spaced_display(&e, 0), "x | y");
+    e.backspace();
+    assert_eq!(spaced_display(&e, 0), "x y", "then the bar");
+    e.undo();
+    assert_eq!(
+        spaced_display(&e, 0),
+        "x | ␣y",
+        "one undo step brings both back"
+    );
+    // Backspace right after typing a space forgets it.
+    let mut e = math_calls_editor();
+    e.insert_text("a ");
+    e.backspace();
+    e.insert_text("|");
+    assert_eq!(spaced_display(&e, 0), "a |");
+    e.doc().check_invariants().unwrap();
+}
+
 /// A compact rendering of a row for assertions.
 fn show(row: &crate::tree::MathRow) -> String {
     row.nodes

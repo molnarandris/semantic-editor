@@ -104,6 +104,10 @@ impl Editor {
     /// selected by the first press and deleted by the second; an empty slot
     /// is removed and its structure unwrapped.
     pub fn backspace(&mut self) -> bool {
+        // A space typed but not placed yet (held): forget it.
+        if self.held_space.take().as_ref() == Some(&self.caret) {
+            return true;
+        }
         if self.selected.is_some() {
             return self.delete_selection();
         }
@@ -273,7 +277,22 @@ impl Editor {
         self.jump(end)
     }
 
+    /// Backspace or Delete in a gap holding a space that shows (next to
+    /// a bar or quoted text): the space goes first.
+    fn delete_gap_space(&mut self, p: &RowPos) -> Option<bool> {
+        if !self.gap_space(p.row, p.offset) {
+            return None;
+        }
+        self.finish_word();
+        let op = self.set_gap_space(p.row, p.offset, false)?;
+        let after = self.caret.clone();
+        Some(self.commit(vec![op], after, Last::Deleting))
+    }
+
     pub(super) fn math_backspace(&mut self, p: RowPos) -> bool {
+        if let Some(done) = self.delete_gap_space(&p) {
+            return done;
+        }
         let nodes = self.row_nodes(p.row).to_vec();
         if p.offset > 0 {
             let k = p.offset - 1;
@@ -302,7 +321,15 @@ impl Editor {
                 _ => None,
             };
             if let Some(kind) = shorter {
-                let op = row_replace(p.row, k, MathNode { id: node.id, kind });
+                let op = self.row_replace(
+                    p.row,
+                    k,
+                    MathNode {
+                        id: node.id,
+                        kind,
+                        space: false,
+                    },
+                );
                 let ok = self.commit(vec![op], p.at(p.offset), Last::Deleting);
                 if in_word {
                     self.word = Some(self.caret.clone());
@@ -390,7 +417,7 @@ impl Editor {
                             child_path(&parent, j, Step::Base),
                             base.nodes.len(),
                         );
-                        (vec![row_replace(prow, j, n)], base_end)
+                        (vec![self.row_replace(prow, j, n)], base_end)
                     } else if base.nodes.is_empty() {
                         (vec![remove], at(j))
                     } else {
@@ -428,7 +455,7 @@ impl Editor {
                         child_path(&parent, j, Step::Arg(i - 1)),
                         args[i - 1].nodes.len(),
                     );
-                    (vec![row_replace(prow, j, n)], prev)
+                    (vec![self.row_replace(prow, j, n)], prev)
                 } else {
                     return self.move_left();
                 }
@@ -504,6 +531,9 @@ impl Editor {
         }
         if let Some(p) = self.row_pos() {
             self.finish_word();
+            if let Some(done) = self.delete_gap_space(&p) {
+                return done;
+            }
             let Some(node) = self.row_nodes(p.row).get(p.offset) else {
                 return false;
             };

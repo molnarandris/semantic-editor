@@ -6,7 +6,7 @@ use std::ops::Range;
 
 use model::{
     Block, BlockNode, Document, Inline, InlineNode, ListKind, MathKind, MathNode, MathRow, NodeId,
-    TitleFields,
+    TitleFields, spaced_gap,
 };
 
 /// Shared definitions and styles. Prepended to every block document and to
@@ -672,8 +672,12 @@ impl Writer {
                 w.out.push_str(SLOT);
             }
             let paired = paired_delimiters(&row.nodes);
+            let n = &row.nodes;
+            let spaced: Vec<bool> = (0..n.len())
+                .map(|i| i > 0 && w.space_between(&n[i - 1], &n[i], paired[i - 1], paired[i]))
+                .collect();
             for (i, node) in row.nodes.iter().enumerate() {
-                if i > 0 && w.space_between(&row.nodes[i - 1], node, paired[i - 1], paired[i]) {
+                if spaced[i] {
                     w.out.push(' ');
                 }
                 match (&node.kind, paired[i]) {
@@ -693,6 +697,20 @@ impl Writer {
                     }
                     // Literal, so Typst scales the pair to its content.
                     (MathKind::Sym(d), true) => w.node(node.id, |w| w.out.push_str(d)),
+                    // A bar is written `|`, escaped where it would form a
+                    // shorthand with what is written tight around it
+                    // (`||`, `[|`, `|]`, `|->`, `|=>`).
+                    (MathKind::Sym(b), _) if b == "|" => {
+                        let next = n
+                            .get(i + 1)
+                            .filter(|_| !spaced.get(i + 1).copied().unwrap_or(true));
+                        let clash = w.out.ends_with(['[', '|'])
+                            || next.is_some_and(|m| match &m.kind {
+                                MathKind::Sym(s) => s.starts_with(['|', ']', '-', '=']),
+                                _ => false,
+                            });
+                        w.node(node.id, |w| w.out.push_str(if clash { "\\|" } else { "|" }));
+                    }
                     _ => w.math(node),
                 }
             }
@@ -708,14 +726,13 @@ impl Writer {
         if matches!(b.kind, MathKind::Primes(_)) {
             return matches!(a.kind, MathKind::Frac { .. }) || a.source().is_some();
         }
-        // Spaces next to text in a formula show (measured): text applied to
-        // brackets, `"Ker"(A)`, is written tight. (An empty text is written
-        // as code in the editor, which a bracket would continue.)
-        if matches!(&a.kind, MathKind::Text(s) if !s.is_empty())
-            && b_paired
-            && matches!(&b.kind, MathKind::Sym(s) if matches!(s.as_str(), "(" | "[" | "{"))
+        // Next to a bar or quoted text a space shows (measured): written
+        // as the tree keeps it. (An empty text is written as code in the
+        // editor, which a bracket would continue.)
+        if spaced_gap(a, b)
+            && !(self.style == Style::Edit && a.kind == MathKind::Text(String::new()))
         {
-            return false;
+            return b.space;
         }
         // After code, a `;` or `,` would be read as part of it; after `\`
         // they would be escaped.
@@ -1003,7 +1020,7 @@ fn sym_source(s: &str) -> String {
         ']' => "bracket.r",
         '{' => "brace.l",
         '}' => "brace.r",
-        '|' => "bar.v",
+        '|' => "\\|",
         '/' => "slash",
         '&' => "amp",
         '"' => "quote.double",
@@ -1241,7 +1258,7 @@ mod tests {
         cases.push((
             "special symbols",
             d.display(syms),
-            "$ comma semi ( ) bar.v slash amp \\# \\$ → \\@ $",
+            "$ comma semi ( )|slash amp \\# \\$ → \\@ $",
         ));
 
         let t = d.text("1. Use *bold* and _x_ #code $5 @ref <l> [a] a~b // c -- d -? e/f - g");
@@ -1601,6 +1618,9 @@ mod tests {
             d.node(MathKind::Linebreak),
             d.sym("="),
         );
+        // Spaces around text show: kept where the tree has them.
+        let (mut text, mut a) = (text, a);
+        (text.space, a.space) = (true, true);
         let block = d.display(vec![
             f, primes, open, x, close, text, a, align, eq, b, br, comma, c,
         ]);

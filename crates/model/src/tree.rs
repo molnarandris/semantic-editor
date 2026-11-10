@@ -299,12 +299,58 @@ pub struct MathRow {
     pub nodes: Vec<MathNode>,
 }
 
+/// An atom of a formula. Typst ignores spaces in math except next to a
+/// bar or quoted text, where a written space shows (measured; Typst's
+/// "spaced" items): `space` keeps one written before this node there.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(transparent)]
+#[serde(from = "MathNodeFile", into = "MathNodeFile")]
 pub struct MathNode {
-    #[serde(skip)]
     pub id: NodeId,
     pub kind: MathKind,
+    /// A space before this node, kept only where it shows (see
+    /// [`spaced_gap`]).
+    pub space: bool,
+}
+
+/// A node in a `.sem` file: just its kind, or `{"space": true, "kind": …}`
+/// when a space comes before it (so files without spaces read as before).
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum MathNodeFile {
+    Spaced { space: bool, kind: MathKind },
+    Plain(MathKind),
+}
+
+impl From<MathNodeFile> for MathNode {
+    fn from(f: MathNodeFile) -> Self {
+        let (kind, space) = match f {
+            MathNodeFile::Spaced { space, kind } => (kind, space),
+            MathNodeFile::Plain(kind) => (kind, false),
+        };
+        MathNode {
+            id: NodeId::default(),
+            kind,
+            space,
+        }
+    }
+}
+
+impl From<MathNode> for MathNodeFile {
+    fn from(n: MathNode) -> Self {
+        match n.space {
+            true => MathNodeFile::Spaced {
+                space: true,
+                kind: n.kind,
+            },
+            false => MathNodeFile::Plain(n.kind),
+        }
+    }
+}
+
+/// Whether Typst shows a space written between `a` and `b`: next to a bar
+/// or quoted text (Typst's spaced items), never after a line break.
+pub fn spaced_gap(a: &MathNode, b: &MathNode) -> bool {
+    a.kind != MathKind::Linebreak && (a.kind.is_spaced() || b.kind.is_spaced())
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -346,6 +392,20 @@ pub enum MathKind {
     /// (the body of `cetz.canvas({ import cetz.draw: * … })`), set in a box
     /// in the formula.
     Diagram(String),
+}
+
+/// Bars Typst classes as fences: spaces written next to them show.
+pub const BARS: [&str; 3] = ["|", "‖", "⦀"];
+
+impl MathKind {
+    /// A bar or quoted text: Typst shows the spaces written next to it.
+    pub fn is_spaced(&self) -> bool {
+        match self {
+            MathKind::Sym(s) => BARS.contains(&s.as_str()),
+            MathKind::Text(_) => true,
+            _ => false,
+        }
+    }
 }
 
 impl Block {
@@ -768,6 +828,35 @@ impl Document {
         let id = NodeId(self.next_id);
         self.next_id += 1;
         id
+    }
+
+    /// Files before format 16 kept no spaces in formulas: their export put
+    /// a space on both sides of bars and text, except text before an
+    /// opening bracket (`"Ker"(A)`). Give them those spaces, so they look
+    /// as before.
+    pub fn space_bars_and_text(&mut self) {
+        fn row(r: &mut MathRow) {
+            for i in 1..r.nodes.len() {
+                let (a, b) = (&r.nodes[i - 1], &r.nodes[i]);
+                let applied = matches!(&a.kind, MathKind::Text(s) if !s.is_empty())
+                    && matches!(&b.kind, MathKind::Sym(s) if matches!(s.as_str(), "(" | "[" | "{"));
+                if spaced_gap(a, b) && !applied {
+                    r.nodes[i].space = true;
+                }
+            }
+            for n in &mut r.nodes {
+                n.children_mut().into_iter().for_each(row);
+            }
+        }
+        fn blocks(list: &mut [BlockNode]) {
+            for b in list {
+                b.rows_mut().into_iter().for_each(row);
+                if let Some(body) = b.kind.body_mut() {
+                    blocks(body);
+                }
+            }
+        }
+        blocks(&mut self.blocks);
     }
 
     /// Assign new ids to every node, e.g. after deserialization, and restore
@@ -1214,6 +1303,7 @@ impl Document {
         MathNode {
             id: self.fresh_id(),
             kind,
+            space: false,
         }
     }
 

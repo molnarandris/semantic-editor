@@ -490,13 +490,9 @@ Titles decided 2026-11-08: optional, never added by default; positional
   title; otherwise it is a paragraph holding the call (`#highlight[…]`), which
   reads back the same. The opened document is untitled and saved as `.sem`; it
   counts as unsaved until then, so closing it asks to save (user request).
-  Known limits: formulas with bars touching their neighbours (`|x|`, a different
-  rendering from the tree's `bar.v`) stay raw; enumeration items with explicit
-  numbers stay raw; a list written with blank lines between its items (Typst's
+  Known limits: enumeration items with explicit numbers stay raw; a list written with blank lines between its items (Typst's
   wide list) becomes tight, and one after a blank line under its paragraph moves
-  up to it. Formulas whose text (`"Rep"`) is spaced otherwise than the export
-  writes it (tight before a bracket, spaced elsewhere) stay raw, since spaces next
-  to text show. A block call on lines of its own ends its paragraph (as in Typst).
+  up to it. A block call on lines of its own ends its paragraph (as in Typst).
   A figure whose body is its first argument (`#figure(dia(…), caption: […])`) is
   a figure holding that code as a raw Typst block, so references to it are numbered.
   References inside raw blocks (`@thm:x` in a raw figure's caption) get the same
@@ -504,8 +500,15 @@ Titles decided 2026-11-08: optional, never added by default; positional
   compiles on its own (user report: a red dot instead of the figure). Labels
   attached to raw blocks are numbered too when they mark a heading, an equation
   or a figure of a built-in kind (image, table, raw); others show red.
-  Wishlist: bars as Typst writes them (a tight bar in the tree), explicit item
-  numbers, wide lists, numbered references to raw environments (custom figure
+  Spaces in formulas (2026-11-10, user decision): Typst shows a space written
+  next to a bar or quoted text and ignores the others, so the tree keeps a space
+  before an atom where it shows, imported and exported as written (`|x|`,
+  `3 |x| - 1`, `"Rep" (A)` all import; the paper's raw blocks went from 46 to 30).
+  Typing in a formula works like writing Typst: `|` is a tight bar, a space next
+  to a bar or text is kept (typed before the next atom, it is held for it), and
+  Backspace/Delete take such a space away first. Older `.sem` files get the
+  spaces their export wrote.
+  Wishlist: explicit item numbers, wide lists, numbered references to raw environments (custom figure
   kinds).
 
 ### M18 — Title fields

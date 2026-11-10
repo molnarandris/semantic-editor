@@ -876,6 +876,7 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
 - Measured: bars in formulas. Spaces around `|` show; the tree's bar is written
   `bar.v`, which renders like `a | b`. A bar touching its neighbours (`|x|`) is a
   different rendering the tree cannot write, so such a formula stays raw (wishlist).
+  Superseded by math spaces (below, 2026-11-10).
   `dif` and other names only in the math module are kept as code `#math.dif`.
 - Tests: importing then exporting renders the same pages (a paper with every
   feature, formulas, raw fallbacks, lone calls); the sample's export opens as the
@@ -981,3 +982,25 @@ turns it into the stand-in: a heading of that depth, a block equation, or a
 figure of kind image/table/raw. Figures of other kinds (theorems made with
 figure) have unknown supplements and stay red. `label_problems` takes the
 reported targets, so only those are still listed. On the paper: no problems left.
+
+## Spaces in formulas (2026-11-10)
+
+- Why: Typst (`typst-library` math `ir/process.rs`, `spacing()`) keeps a written
+  space only next to a "spaced" item: a fence (`|`, `‖`, `⦀`), text (`"if"`) or a
+  box, and not at a group's edges, after a line break, or where a relation or binary
+  operator already puts its own spacing. So `|x|` ≠ `bar.v x bar.v` and
+  `"Rep" (A)` ≠ `"Rep"(A)`; such formulas stayed raw (16 blocks of the user's paper).
+- Tree: `MathNode::space`, a space before the node. Created only where it shows
+  (`spaced_gap`: next to a bar or text, not after a line break); a deletion can make
+  one dormant (kept, not written), as a space in Typst source would be. `.sem`
+  format 16 writes a spaced node as `{"space": true, "kind": …}`, others as before;
+  files before 16 get the spaces their export wrote (`space_bars_and_text`).
+- Import records spaces at shown gaps; export writes them there and nothing else
+  next to bars/text (elsewhere as before). A bar is written `|`, or `\|` where a
+  shorthand would form (`||`, `[|`, `|]`, `|->`, `|=>`); `\|` renders the same.
+- Typing: `|` gives a tight bar; space puts a space into the gap at the caret where
+  it shows, else is held for the next atom typed (`held_space`, as in prose); it
+  also keeps `|` `-` from combining into ⊢. Backspace/Delete take a shown space
+  first; Backspace right after a held space forgets it.
+- Code atoms (`#…`) are boxes too, but their spacing is left as before.
+- Check: paper import 46 → 30 raw blocks, 55 pages render identical.

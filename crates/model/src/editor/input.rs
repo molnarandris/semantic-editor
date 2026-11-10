@@ -641,6 +641,7 @@ impl Editor {
             Some(MathNode {
                 id,
                 kind: MathKind::Ident(name),
+                ..
             }) if self.word.as_ref() == Some(&self.caret) => Some((id, name)),
             _ => None,
         };
@@ -677,8 +678,11 @@ impl Editor {
             self.word = None;
             return self.retype_node_before(&p, id, MathKind::Linebreak);
         }
-        // Finishing a word can remove a lone `\`, so look again.
+        // Finishing a word can remove a lone `\`, so look again. (It also
+        // drops a held space, which is meant for what is typed now.)
+        let held = self.held_space.take();
         changed |= self.finish_word();
+        self.held_space = held;
         let Some(p) = self.row_pos() else {
             return true;
         };
@@ -721,7 +725,25 @@ impl Editor {
                 let node = self.doc.node(MathKind::Align);
                 self.type_node(&p, node) || changed
             }
-            c if c.is_whitespace() || c.is_control() => changed,
+            // A space shows next to a bar or quoted text: into the gap at
+            // the caret, or held for what is typed next.
+            c if c.is_whitespace() => {
+                if self.gap_space(p.row, p.offset) || p.offset == 0 {
+                    return changed;
+                }
+                let next = self.row_nodes(p.row).get(p.offset);
+                let prev = self.node_before(&p);
+                if let (Some(prev), Some(next)) = (prev, next)
+                    && spaced_gap(&prev, next)
+                    && let Some(op) = self.set_gap_space(p.row, p.offset, true)
+                {
+                    let after = self.caret.clone();
+                    return self.commit(vec![op], after, Last::Typing { space: true });
+                }
+                self.held_space = Some(self.caret.clone());
+                changed
+            }
+            c if c.is_control() => changed,
             c if c.is_ascii_digit() || c == '.' => match prev {
                 Some((id, MathKind::Num(n))) if c != '.' || !n.contains('.') => {
                     self.retype_node_before(&p, id, MathKind::Num(format!("{n}{c}")))
@@ -741,8 +763,10 @@ impl Editor {
                 self.type_node(&p, node)
             }
             c => {
-                // Operator pairs combine: `<` `=` → ≤, `-` `>` → →.
-                if let Some((id, MathKind::Sym(s))) = &prev
+                // Operator pairs combine: `<` `=` → ≤, `-` `>` → →. Not
+                // with a space typed between (`| -` stays two).
+                if self.held_space.as_ref() != Some(&self.caret)
+                    && let Some((id, MathKind::Sym(s))) = &prev
                     && let Some(sym) = symbols::pair(s, c)
                 {
                     return self.retype_node_before(&p, *id, MathKind::Sym(sym.into()));
@@ -760,6 +784,7 @@ impl Editor {
             Some(MathNode {
                 id,
                 kind: MathKind::Text(t),
+                ..
             }) if self.word.as_ref() == Some(&self.caret) => Some((id, t)),
             _ => None,
         }
@@ -772,6 +797,7 @@ impl Editor {
             Some(MathNode {
                 id,
                 kind: MathKind::Ident(name),
+                ..
             }) if self.word.as_ref() == Some(&self.caret) => Some((id, name)),
             _ => None,
         }
@@ -804,9 +830,10 @@ impl Editor {
         let node = MathNode {
             id,
             kind: MathKind::Call { name, args },
+            space: false,
         };
         self.word = None;
-        let op = row_replace(p.row, p.offset - 1, node);
+        let op = self.row_replace(p.row, p.offset - 1, node);
         self.commit(vec![op], p.child(p.offset - 1, Step::Arg(0)), Last::Other)
     }
 
@@ -839,7 +866,7 @@ impl Editor {
         if let MathKind::Call { args, .. } = &mut node.kind {
             args.insert(i + 1, row);
         }
-        self.commit(vec![row_replace(prow, j, node)], next, Last::Other)
+        self.commit(vec![self.row_replace(prow, j, node)], next, Last::Other)
     }
 
     /// The innermost call taking more arguments (`cases`) with the caret in
@@ -884,7 +911,7 @@ impl Editor {
         }
         args.insert(i + 1, row);
         let after = cursor(p.block, child_path(&parent, j, Step::Arg(i + 1)), 0);
-        self.commit(vec![row_replace(prow, j, node)], after, Last::Other)
+        self.commit(vec![self.row_replace(prow, j, node)], after, Last::Other)
     }
 
     /// End the identifier being typed: a known name becomes its symbol.
@@ -906,6 +933,7 @@ impl Editor {
         let Some(MathNode {
             id,
             kind: MathKind::Ident(name),
+            space,
         }) = self.node_before(&p)
         else {
             return false;
@@ -925,7 +953,14 @@ impl Editor {
                     Some(sym) => MathKind::Sym(sym),
                     None => MathKind::Ident(head.into()),
                 };
-                let mut nodes = vec![MathNode { id, kind: head }, self.doc.sym(".")];
+                let mut nodes = vec![
+                    MathNode {
+                        id,
+                        kind: head,
+                        space,
+                    },
+                    self.doc.sym("."),
+                ];
                 if !tail.is_empty() {
                     nodes.push(self.doc.ident(tail));
                 }
@@ -1014,7 +1049,7 @@ impl Editor {
                 *(if step == Step::Sup { sup } else { sub }) = Some(row);
             }
             return self.commit(
-                vec![row_replace(p.row, k, node)],
+                vec![self.row_replace(p.row, k, node)],
                 p.child(k, step),
                 Last::Other,
             );
