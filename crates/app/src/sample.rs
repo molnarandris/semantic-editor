@@ -486,5 +486,14 @@ fn typed_section(doc: Document) -> Document {
     e.insert_block(NewBlock::Bibliography);
     let bibliography = e.caret().block;
     e.set_block_source(bibliography, BIBLIOGRAPHY);
+    // The title block goes to the top; its fields are edited in a dialog.
+    e.insert_block(NewBlock::Title);
+    let title = e.caret().block;
+    let fields = model::TitleFields {
+        title: "A Tour of Matrix Product States".into(),
+        authors: vec!["Ada Lovelace".into(), "Alan Turing".into()],
+        date: "2026-11-10".into(),
+    };
+    e.set_block_source(title, &fields.source());
     e.doc().clone()
 }

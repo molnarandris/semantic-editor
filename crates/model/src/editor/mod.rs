@@ -52,7 +52,13 @@ pub enum NewBlock {
     RawTypst,
     /// Always at the top level of the document.
     Bibliography,
+    /// At the start of the document; there is at most one.
+    Title,
 }
+
+/// The fields a new title block starts with (see `TitleFields`): title,
+/// no date, one author.
+pub const TITLE_TEMPLATE: &str = "Title\n\nAuthor";
 
 /// The source a new bibliography starts with (BibTeX).
 pub const BIBLIOGRAPHY_TEMPLATE: &str = "@article{example,

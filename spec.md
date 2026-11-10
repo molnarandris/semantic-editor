@@ -507,6 +507,13 @@ Titles decided 2026-11-08: optional, never added by default; positional
   block (`#title()` plus an author line); the user can restyle or remove it. In the
   editor the title block is a rendered, non-editable block at the top of the page;
   clicking it opens the header dialog at that field.
+- M18 decisions (2026-11-10): the title is a block of its own (`Block::Title`), at
+  the start of the document, holding the fields; its dialog has the fields (not the
+  header dialog, which edits source). It shows Typst's `#title()` and an author
+  line read from the metadata (`context document.author`); the date is metadata
+  only. No title block, no metadata: new documents start without one ("Document
+  Title…" adds it). Restyling: `show title` rules in the header. Wishlist: keywords
+  and abstract; a date on the page; author affiliations.
 
 
 ### Later

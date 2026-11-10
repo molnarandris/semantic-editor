@@ -184,7 +184,9 @@ impl SeqMut<'_> {
 fn text_in(doc: &mut Document, id: NodeId) -> Result<SeqMut<'_>, OpError> {
     if doc.block(id).is_some() {
         return match &mut doc.block_mut(id).expect("found").kind {
-            Block::RawTypst(s) | Block::Diagram(s) | Block::Bibliography(s) => Ok(SeqMut::Text(s)),
+            Block::RawTypst(s) | Block::Diagram(s) | Block::Bibliography(s) | Block::Title(s) => {
+                Ok(SeqMut::Text(s))
+            }
             _ => Err(OpError::KindMismatch),
         };
     }

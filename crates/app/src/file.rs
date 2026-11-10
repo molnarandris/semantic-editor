@@ -15,8 +15,9 @@ use serde::{Deserialize, Serialize};
 /// (`Inline::Call`: bold, italic, `#name[…]`). 10: inline code
 /// (`Inline::Raw`). 11: block labels (`label`, absent when empty).
 /// 12: references (`Inline::Ref`). 13: figure captions (`Block::Caption`).
-/// 14: the bibliography (`Block::Bibliography`).
-pub const FORMAT_VERSION: u32 = 14;
+/// 14: the bibliography (`Block::Bibliography`). 15: the title block
+/// (`Block::Title`).
+pub const FORMAT_VERSION: u32 = 15;
 
 #[derive(Serialize)]
 struct SemFileOut<'a> {

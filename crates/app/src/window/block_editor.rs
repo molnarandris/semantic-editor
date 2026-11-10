@@ -69,6 +69,16 @@ impl Window {
     /// Open the dialog for a raw/diagram block's source or the header.
     pub(super) fn open_block_editor(self: &Rc<Self>, target: PreviewTarget) {
         self.close_block_editor();
+        // A title block has fields, not source.
+        if let PreviewTarget::Block(block) = target
+            && matches!(
+                self.editor.document().block(block).map(|b| &b.kind),
+                Some(Block::Title(_))
+            )
+        {
+            self.open_title_editor(block);
+            return;
+        }
         let Some(source) = self.source_of(target) else {
             return;
         };

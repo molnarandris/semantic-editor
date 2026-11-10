@@ -7,11 +7,11 @@
 //! paragraph or formula holding anything the tree cannot represent stays
 //! raw as a whole.
 
-use model::{BlockNode, Document, InlineNode, ListKind, MathKind, MathNode};
+use model::{Block, BlockNode, Document, InlineNode, ListKind, MathKind, MathNode, TitleFields};
 use typst::syntax::ast::{self, AstNode, MathTextKind};
 use typst::syntax::{LinkedNode, SyntaxKind, SyntaxNode, parse};
 
-use crate::serialize::{CETZ_IMPORT, OPERATORS, PREAMBLE, uses_cetz};
+use crate::serialize::{CETZ_IMPORT, OPERATORS, PREAMBLE, TITLE_AUTHORS, uses_cetz};
 use crate::symbols::math_only;
 use crate::{math_call_shape, resolve_symbol};
 
@@ -41,6 +41,25 @@ pub fn import_typ(source: &str) -> Document {
     doc.normalize();
 
     let mut header = body[..header_end].to_string();
+    // The export's title block: the metadata on the first line, the title
+    // and author line as the first blocks.
+    let first_line = header.split('\n').next().unwrap_or_default();
+    let shown = ["#title()", TITLE_AUTHORS];
+    let raw_title =
+        |b: &BlockNode| matches!(&b.kind, Block::RawTypst(s) if shown.contains(&s.as_str()));
+    let count = doc
+        .blocks
+        .iter()
+        .take(2)
+        .take_while(|b| raw_title(b))
+        .count();
+    if let (Some(fields), true) = (metadata_fields(first_line), count > 0) {
+        header = header[first_line.len()..]
+            .trim_start_matches('\n')
+            .to_string();
+        let title = doc.title_block(&fields.source());
+        doc.blocks.splice(..count, [title]);
+    }
     // The export adds the CeTZ import itself when there are diagrams.
     if doc.blocks.iter().any(|b| uses_cetz(b, true)) {
         header = header
@@ -53,6 +72,66 @@ pub fn import_typ(source: &str) -> Document {
         doc.header = header.trim_end().to_string() + "\n";
     }
     doc
+}
+
+/// The title block's fields from a line `#set document(title: […], author:
+/// (…), date: datetime(…))` as the export writes it; `None` for anything
+/// else.
+fn metadata_fields(line: &str) -> Option<TitleFields> {
+    let root = parse(line);
+    let mut nodes = root.children().filter(|n| !n.kind().is_trivia());
+    let (hash, rule) = (nodes.next()?, nodes.next()?);
+    if hash.kind() != SyntaxKind::Hash || nodes.next().is_some() {
+        return None;
+    }
+    let rule = rule.cast::<ast::SetRule>()?;
+    let ast::Expr::Ident(target) = rule.target() else {
+        return None;
+    };
+    if target.as_str() != "document" || rule.condition().is_some() {
+        return None;
+    }
+    let mut fields = TitleFields::default();
+    for arg in rule.args().items() {
+        let ast::Arg::Named(named) = arg else {
+            return None;
+        };
+        match (named.name().as_str(), named.expr()) {
+            ("title", ast::Expr::ContentBlock(c)) => {
+                let markup = c.body().to_untyped().full_text();
+                fields.title = markup.to_string();
+            }
+            ("author", ast::Expr::Array(a)) => {
+                for item in a.items() {
+                    let ast::ArrayItem::Pos(ast::Expr::Str(s)) = item else {
+                        return None;
+                    };
+                    fields.authors.push(s.get().to_string());
+                }
+            }
+            ("date", ast::Expr::FuncCall(call)) => {
+                let mut ymd = [0i64; 3];
+                for arg in call.args().items() {
+                    let ast::Arg::Named(n) = arg else {
+                        return None;
+                    };
+                    let ast::Expr::Int(v) = n.expr() else {
+                        return None;
+                    };
+                    let k = ["year", "month", "day"]
+                        .iter()
+                        .position(|k| *k == n.name().as_str())?;
+                    ymd[k] = v.get();
+                }
+                let [y, m, d] = ymd;
+                fields.date = format!("{y:04}-{m:02}-{d:02}");
+            }
+            _ => return None,
+        }
+    }
+    // Only what the export writes for these fields.
+    let written = crate::serialize::document_metadata(&fields);
+    (written == line).then_some(fields)
 }
 
 /// Spaces and paragraph breaks.

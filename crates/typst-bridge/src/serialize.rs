@@ -6,6 +6,7 @@ use std::ops::Range;
 
 use model::{
     Block, BlockNode, Document, Inline, InlineNode, ListKind, MathKind, MathNode, MathRow, NodeId,
+    TitleFields,
 };
 
 /// Shared definitions and styles. Prepended to every block document and to
@@ -414,6 +415,16 @@ impl Writer {
             Block::Caption(inlines) => w.text_block(inlines, false),
             Block::Bibliography(source) => {
                 w.out.push_str(&crate::bib::bibliography_code(source));
+            }
+            // The editor renders the block alone, so it sets the metadata
+            // itself; the export sets it at the top of the file.
+            Block::Title(source) => {
+                let fields = TitleFields::parse(source);
+                if w.style == Style::Edit {
+                    w.out.push_str(&document_metadata(&fields));
+                    w.nl();
+                }
+                w.out.push_str(&title_content(&fields, w.style));
             }
             Block::Item { kind, term, body } => {
                 let number = w.number.take().filter(|_| w.style == Style::Edit);
@@ -911,6 +922,48 @@ fn is_simple_base(base: &MathRow) -> bool {
     )
 }
 
+/// The document's metadata from a title block, `#set document(title: […],
+/// author: (…), date: …)`: the PDF's title, authors and date.
+pub fn document_metadata(fields: &TitleFields) -> String {
+    let mut args = vec![];
+    if !fields.title.trim().is_empty() {
+        args.push(format!("title: [{}]", fields.title));
+    }
+    if !fields.authors.is_empty() {
+        let names: Vec<String> = fields.authors.iter().map(|a| quoted(a)).collect();
+        // A one-element array needs its trailing comma.
+        let comma = if names.len() == 1 { "," } else { "" };
+        args.push(format!("author: ({}{comma})", names.join(", ")));
+    }
+    if let Some((year, month, day)) = fields.ymd() {
+        args.push(format!(
+            "date: datetime(year: {year}, month: {month}, day: {day})"
+        ));
+    }
+    format!("#set document({})", args.join(", "))
+}
+
+/// The title block's author line: the document's authors, from its
+/// metadata.
+pub(crate) const TITLE_AUTHORS: &str = "#context document.author.join(\", \")";
+
+/// What a title block shows: the title (Typst's `title` element, styled by
+/// the header's `show title` rules) and a line with the authors. In the
+/// editor, an empty one shows a grey "Title".
+fn title_content(fields: &TitleFields, style: Style) -> String {
+    let mut lines = vec![];
+    if !fields.title.trim().is_empty() {
+        lines.push("#title()".to_string());
+    }
+    if !fields.authors.is_empty() {
+        lines.push(TITLE_AUTHORS.to_string());
+    }
+    if lines.is_empty() && style == Style::Edit {
+        lines.push("#text(fill: luma(140))[Title]".to_string());
+    }
+    lines.join("\n\n")
+}
+
 pub(crate) fn quoted(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
@@ -1077,6 +1130,11 @@ pub fn serialize_document(doc: &Document) -> String {
 /// blocks.
 pub fn serialize_document_mapped(doc: &Document) -> (String, SpanMap) {
     let mut out = String::from(PREAMBLE);
+    // The metadata first, so the header's rules (a template) can read it.
+    if let Some(fields) = doc.title() {
+        out.push_str(&document_metadata(&fields));
+        out.push('\n');
+    }
     out.push_str(&doc.header);
     if !out.ends_with('\n') {
         out.push('\n');
@@ -1675,6 +1733,38 @@ mod tests {
 
     /// A figure's caption is its `caption:` argument; an empty one only
     /// shows in the editor. A labelled figure is referenced as "Figure 1".
+    /// A title block renders alone (setting the metadata itself), and the
+    /// export sets the document's metadata: title, authors and date.
+    #[test]
+    fn title_block() {
+        use typst::model::Document as _;
+        let mut d = Document::empty();
+        let fields = model::TitleFields {
+            title: "On $x^2$".into(),
+            authors: vec!["Ann".into()],
+            date: "2026-11-10".into(),
+        };
+        let title = d.title_block(&fields.source());
+        let t = d.text("Body.");
+        let p = d.paragraph(vec![t]);
+        d.blocks = vec![title, p];
+        let mut world = BridgeWorld::new();
+        let (snippet, _) = serialize_block(&d.blocks[0]);
+        let (src, _) = block_document(&Around::default(), &snippet, 300.0);
+        compile(&mut world, &src).unwrap_or_else(|e| panic!("{e:?}\n{src}"));
+
+        let typ = serialize_document(&d);
+        assert!(typ.contains(
+            "#set document(title: [On $x^2$], author: (\"Ann\",), \
+             date: datetime(year: 2026, month: 11, day: 10))\n"
+        ));
+        assert!(typ.contains("\n#title()\n\n#context document.author.join(\", \")\n"));
+        let doc = compile(&mut world, &typ).unwrap();
+        let info = doc.info();
+        assert_eq!(info.title.as_deref(), Some("On x2"));
+        assert_eq!(info.author, ["Ann"]);
+    }
+
     #[test]
     fn figures() {
         let mut e = model::Editor::new(Document::new());

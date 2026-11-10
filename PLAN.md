@@ -878,3 +878,25 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
 - Found by the round trip, fixed in its own commit (da29653): a `;` right after an
   inline call ended the call's expression and vanished from the export; it is now
   doubled.
+
+## M18 — Title block (2026-11-10)
+
+- Model: `Block::Title(source)`, a block like the bibliography (two caret
+  positions, edited in a dialog), its source the fields as lines (`TitleFields`:
+  title, date, then one author per line). "Document Title…" (main menu) puts one at
+  the start of the document, or moves the caret onto the one there is; there is at
+  most one. File format 15.
+- The dialog: Title (Typst markup), Authors (comma separated), Date (`YYYY-MM-DD`,
+  optional, flagged when invalid) as entry rows; every change goes to the model at
+  once (one undo step, as for source edits); Enter or Done closes it. Double-click
+  or Enter on the block opens it, as for diagrams.
+- Source: the export sets the metadata first, `#set document(title: […], author:
+  (…), date: datetime(…))` (before the header, so a template there can read it), and
+  the block shows `#title()` (Typst's title element, restyled with `show title` in
+  the header) and an author line, `#context document.author.join(", ")`. In the
+  editor the block is rendered alone with its own `set document`; an empty one shows
+  a grey "Title". The PDF gets the title, authors and date (`title_block` test).
+- Import: the export's form (the metadata line and the title and author line as the
+  first blocks) opens as a title block again; other `set document` rules stay in the
+  header.
+- The sample starts with a title block.

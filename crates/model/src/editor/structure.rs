@@ -375,6 +375,9 @@ impl Editor {
             let op = row_insert(p.row, p.offset, node);
             return self.commit(vec![op], p.at(p.offset + 1), Last::Other);
         }
+        if kind == NewBlock::Title {
+            return self.insert_title();
+        }
         let Some(mut place) = self.doc.place(self.caret.block) else {
             return false;
         };
@@ -392,6 +395,7 @@ impl Editor {
             NewBlock::Diagram => self.doc.diagram(DIAGRAM_TEMPLATE),
             NewBlock::RawTypst => self.doc.raw(""),
             NewBlock::Bibliography => self.doc.bibliography_block(BIBLIOGRAPHY_TEMPLATE),
+            NewBlock::Title => unreachable!("inserted above"),
         };
         let after = cursor(block.id, vec![], 0);
         let replace = self.doc.at(place).is_some_and(is_empty_text_block);
@@ -405,10 +409,40 @@ impl Editor {
         self.commit(vec![op], after, Last::Other)
     }
 
+    /// A title block at the start of the document, or the caret onto the one
+    /// there is.
+    fn insert_title(&mut self) -> bool {
+        if let Some(b) = self
+            .doc
+            .blocks
+            .iter()
+            .find(|b| matches!(b.kind, Block::Title(_)))
+        {
+            let at = cursor(b.id, vec![], 0);
+            self.set_caret(at);
+            return true;
+        }
+        let block = self.doc.title_block(TITLE_TEMPLATE);
+        let after = cursor(block.id, vec![], 0);
+        let op = Op::Replace {
+            seq: Place {
+                parent: None,
+                index: 0,
+            }
+            .seq(),
+            index: 0,
+            count: 0,
+            items: Items::Blocks(vec![block]),
+        };
+        self.commit(vec![op], after, Last::Other)
+    }
+
     /// The source of a raw Typst or diagram block.
     pub fn block_source(&self, block: NodeId) -> Option<&str> {
         match self.doc.block(block).map(|b| &b.kind) {
-            Some(Block::RawTypst(s) | Block::Diagram(s) | Block::Bibliography(s)) => Some(s),
+            Some(
+                Block::RawTypst(s) | Block::Diagram(s) | Block::Bibliography(s) | Block::Title(s),
+            ) => Some(s),
             Some(_) => None,
             None => self.doc.code_source(block),
         }

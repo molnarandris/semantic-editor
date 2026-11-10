@@ -110,7 +110,7 @@ pub fn counter_sensitive(block: &BlockNode) -> bool {
         Block::RawTypst(source) => !is_code(source),
         // Footnotes are numbered through the document.
         Block::Paragraph(inlines) => has_footnote(inlines),
-        Block::Diagram(_) | Block::Caption(_) | Block::Bibliography(_) => false,
+        Block::Diagram(_) | Block::Caption(_) | Block::Bibliography(_) | Block::Title(_) => false,
     }
 }
 

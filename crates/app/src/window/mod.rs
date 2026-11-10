@@ -4,6 +4,7 @@
 
 mod block_editor;
 mod files;
+mod title_editor;
 
 use std::cell::RefCell;
 use std::future::Future;
@@ -171,7 +172,7 @@ impl Window {
 
     fn add_actions(self: &Rc<Self>) {
         type Handler = fn(Rc<Window>);
-        let actions: [(&str, Handler); 14] = [
+        let actions: [(&str, Handler); 15] = [
             ("insert-env", |w| {
                 w.editor.start_env();
                 w.editor.grab_focus();
@@ -184,6 +185,7 @@ impl Window {
             ("insert-bibliography", |w| {
                 w.insert_block(NewBlock::Bibliography)
             }),
+            ("insert-title", |w| w.insert_block(NewBlock::Title)),
             ("open", |w| spawn(async move { w.open().await })),
             ("save", |w| {
                 spawn(async move {
@@ -318,6 +320,7 @@ fn main_menu() -> gio::Menu {
     menu.append_section(None, &zoom);
     let insert = gio::Menu::new();
     insert.append(Some("Document _Header…"), Some("win.edit-header"));
+    insert.append(Some("Document _Title…"), Some("win.insert-title"));
     insert.append(Some("Insert _Environment"), Some("win.insert-env"));
     insert.append(Some("Insert _Diagram"), Some("win.insert-diagram"));
     insert.append(Some("Insert _Raw Typst"), Some("win.insert-raw"));

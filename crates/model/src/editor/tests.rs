@@ -1,5 +1,5 @@
 use super::*;
-use crate::tree::{ListKind, MathKind};
+use crate::tree::{ListKind, MathKind, TitleFields};
 
 /// "ab $x$ cd" / "ef" / display "y" / "gh"
 fn sample() -> Editor {
@@ -45,6 +45,7 @@ fn block_text(b: &BlockNode) -> String {
         Block::Paragraph(v) | Block::Heading { inlines: v, .. } => inline_text(v),
         Block::Caption(v) => format!("cap({})", inline_text(v)),
         Block::Bibliography(_) => "bib".into(),
+        Block::Title(_) => "title".into(),
         Block::DisplayMath(_) => "$$".into(),
         Block::RawTypst(s) | Block::Diagram(s) => s.clone(),
         Block::Env {
@@ -1531,6 +1532,41 @@ fn bibliography_and_citations() {
     assert!(e.go_back());
     assert_eq!(e.caret(), &before);
     assert!(!e.follow_ref("unknown"));
+}
+
+/// The title block goes to the start of the document, once; its fields
+/// round-trip through its source.
+#[test]
+fn title_block() {
+    let mut e = Editor::default();
+    e.insert_text("Text");
+    assert!(e.insert_block(NewBlock::Title));
+    assert_eq!(texts(&e), ["title", "Text"]);
+    let title = e.doc().blocks[0].id;
+    assert_eq!(e.caret().block, title);
+    let fields = e.doc().title().unwrap();
+    assert_eq!((fields.title.as_str(), fields.authors.len()), ("Title", 1));
+    // A second time: the caret goes to the one there is.
+    let end = e.doc().end_of(&e.doc().blocks[1]);
+    e.set_caret(end);
+    assert!(e.insert_block(NewBlock::Title));
+    assert_eq!(e.doc().blocks.len(), 2);
+    assert_eq!(e.caret().block, title);
+
+    let fields = TitleFields {
+        title: "On $x$".into(),
+        authors: vec!["A. B.".into(), "C".into()],
+        date: "2026-11-10".into(),
+    };
+    assert_eq!(TitleFields::parse(&fields.source()), fields);
+    assert_eq!(fields.ymd(), Some((2026, 11, 10)));
+    let bad = TitleFields {
+        date: "2026-13-01".into(),
+        ..fields
+    };
+    assert_eq!(bad.ymd(), None);
+    assert!(e.undo());
+    assert_eq!(texts(&e), ["Text"]);
 }
 
 #[test]

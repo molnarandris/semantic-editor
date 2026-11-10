@@ -67,6 +67,62 @@ pub enum Block {
     /// The bibliography: its BibTeX (or Hayagriva YAML) source, embedded and
     /// edited in the source dialog. Typst lists the works the document cites.
     Bibliography(String),
+    /// The title block: the document's title, authors and date
+    /// ([`TitleFields`], stored as lines), shown where the block is (at the
+    /// top) and set as the document's metadata. Edited in a dialog.
+    Title(String),
+}
+
+/// The fields of a title block. The title is Typst markup; the date is
+/// `YYYY-MM-DD` or empty.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TitleFields {
+    pub title: String,
+    pub authors: Vec<String>,
+    pub date: String,
+}
+
+impl TitleFields {
+    /// Read a title block's source: the title, the date, then one author
+    /// per line.
+    pub fn parse(source: &str) -> Self {
+        let mut lines = source.split('\n');
+        let title = lines.next().unwrap_or_default().to_string();
+        let date = lines.next().unwrap_or_default().to_string();
+        let authors = lines
+            .filter(|l| !l.trim().is_empty())
+            .map(String::from)
+            .collect();
+        TitleFields {
+            title,
+            authors,
+            date,
+        }
+    }
+
+    /// The source of a title block with these fields.
+    pub fn source(&self) -> String {
+        let mut lines = vec![self.title.replace('\n', " "), self.date.clone()];
+        lines.extend(self.authors.iter().map(|a| a.replace('\n', " ")));
+        lines.join("\n")
+    }
+
+    /// The date as (year, month, day), if it is a valid `YYYY-MM-DD`.
+    pub fn ymd(&self) -> Option<(i32, u8, u8)> {
+        let mut parts = self.date.trim().split('-');
+        let y = parts.next()?.parse().ok()?;
+        let m = parts
+            .next()?
+            .parse()
+            .ok()
+            .filter(|m| (1..=12).contains(m))?;
+        let d = parts
+            .next()?
+            .parse()
+            .ok()
+            .filter(|d| (1..=31).contains(d))?;
+        parts.next().is_none().then_some((y, m, d))
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -379,7 +435,9 @@ impl BlockNode {
                 inline_rows(inlines, &mut out);
                 out
             }
-            Block::RawTypst(_) | Block::Diagram(_) | Block::Bibliography(_) => vec![],
+            Block::RawTypst(_) | Block::Diagram(_) | Block::Bibliography(_) | Block::Title(_) => {
+                vec![]
+            }
         }
     }
 
@@ -395,7 +453,9 @@ impl BlockNode {
                 inline_rows_mut(inlines, &mut out);
                 out
             }
-            Block::RawTypst(_) | Block::Diagram(_) | Block::Bibliography(_) => vec![],
+            Block::RawTypst(_) | Block::Diagram(_) | Block::Bibliography(_) | Block::Title(_) => {
+                vec![]
+            }
         }
     }
 
@@ -410,6 +470,7 @@ impl BlockNode {
             Block::Item { .. } => "list item",
             Block::Caption(_) => "caption",
             Block::Bibliography(_) => "bibliography",
+            Block::Title(_) => "title",
         }
     }
 
@@ -739,7 +800,10 @@ impl Document {
                         inline_ids(title, f);
                         visit(body, f);
                     }
-                    Block::RawTypst(_) | Block::Diagram(_) | Block::Bibliography(_) => {}
+                    Block::RawTypst(_)
+                    | Block::Diagram(_)
+                    | Block::Bibliography(_)
+                    | Block::Title(_) => {}
                 }
             }
         }
@@ -1254,6 +1318,22 @@ impl Document {
             id: self.fresh_id(),
             kind: Block::Bibliography(source.into()),
         }
+    }
+
+    pub fn title_block(&mut self, source: &str) -> BlockNode {
+        BlockNode {
+            label: String::new(),
+            id: self.fresh_id(),
+            kind: Block::Title(source.into()),
+        }
+    }
+
+    /// The title block, if there is one.
+    pub fn title(&self) -> Option<TitleFields> {
+        self.blocks.iter().find_map(|b| match &b.kind {
+            Block::Title(source) => Some(TitleFields::parse(source)),
+            _ => None,
+        })
     }
 
     pub fn diagram(&mut self, source: &str) -> BlockNode {

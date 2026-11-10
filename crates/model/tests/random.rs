@@ -106,7 +106,7 @@ fn all_cursors(doc: &Document) -> Vec<CursorPath> {
                 }
             }
             Block::DisplayMath(r) => row(&mut out, b.id, vec![], r),
-            Block::RawTypst(s) | Block::Diagram(s) | Block::Bibliography(s) => {
+            Block::RawTypst(s) | Block::Diagram(s) | Block::Bibliography(s) | Block::Title(s) => {
                 (0..=s.chars().count()).for_each(|o| {
                     out.push(CursorPath {
                         block: b.id,
@@ -320,7 +320,8 @@ fn random_keystrokes_keep_the_document_sound() {
                     e.next_slot(rng.below(2) == 0);
                 }
                 13 => {
-                    let kind = [NewBlock::Diagram, NewBlock::RawTypst][rng.below(2)];
+                    let kinds = [NewBlock::Diagram, NewBlock::RawTypst, NewBlock::Title];
+                    let kind = kinds[rng.below(3)];
                     e.insert_block(kind);
                 }
                 14 => {
