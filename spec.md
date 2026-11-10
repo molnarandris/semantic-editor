@@ -514,6 +514,9 @@ Titles decided 2026-11-08: optional, never added by default; positional
   it, its counters as at the lemma (from the lemma's last render), then its own
   counter prefix. The preview is the function's real output: the lemma's number,
   its equation numbers, "restated" if asked. The copy's references get stand-ins.
+  Known limit (left for later, user decision 2026-11-10): a restated lemma with a
+  footnote shows the note twice in the editor (Typst prints notes of hidden,
+  placed or clipped content whatever the show rules; the export is fine).
   Wishlist: explicit item numbers, wide lists, numbered references to raw environments (custom figure
   kinds).
 

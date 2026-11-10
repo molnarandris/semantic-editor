@@ -1039,3 +1039,10 @@ reported targets, so only those are still listed. On the paper: no problems left
   `Document::bibliography`/`bib_keys` see it as well (citation completion, following
   a citation). No tree or format change.
 - Checked on the user's paper: `[1]` in the text, the References list in IEEE style.
+- Known limit (2026-11-10, left for later): a restated lemma with a footnote shows
+  the note twice in the editor: the hidden copy's note is printed too. Measured:
+  Typst prints the note of a footnote inside `hide`, `place` or a zero-height clipped
+  box even with `show footnote: none` / `show footnote.entry: none` in or around it
+  (a document-level `show footnote: none` works only on unhidden content). Options:
+  drop footnotes from the copy's source (preview then shows none), or find how Typst
+  collects notes from hidden content.
