@@ -502,9 +502,11 @@ Titles decided 2026-11-08: optional, never added by default; positional
   References inside raw blocks (`@thm:x` in a raw figure's caption) get the same
   stand-in or red `@label` as references in the tree, so the block's preview
   compiles on its own (user report: a red dot instead of the figure). Labels
-  attached to raw blocks are not reported yet: references to them show red.
+  attached to raw blocks are numbered too when they mark a heading, an equation
+  or a figure of a built-in kind (image, table, raw); others show red.
   Wishlist: bars as Typst writes them (a tight bar in the tree), explicit item
-  numbers, wide lists, numbered references to labelled raw blocks.
+  numbers, wide lists, numbered references to raw environments (custom figure
+  kinds).
 
 ### M18 — Title fields
 

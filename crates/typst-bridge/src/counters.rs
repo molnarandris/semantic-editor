@@ -210,6 +210,24 @@ pub fn ref_stub(target: &LabelTarget, element: &str) -> String {
     )
 }
 
+/// An invisible element like the one `target` labels, known only from its
+/// counter (a label in raw Typst): a heading, an equation, or a figure of a
+/// built-in kind. `None` for other figures (their supplement is unknown).
+pub fn stand_in(target: &LabelTarget) -> Option<String> {
+    match target.counter.as_str() {
+        "counter(heading)" => Some(format!("#heading(level: {})[]", target.value.len())),
+        "counter(math.equation)" => Some("#math.equation(block: true)[]".to_string()),
+        c => {
+            let kind = c
+                .strip_prefix("counter(figure.where(kind: ")?
+                .strip_suffix("))")?;
+            ["image", "table", "raw"]
+                .contains(&kind)
+                .then(|| format!("#figure(kind: {kind})[]"))
+        }
+    }
+}
+
 /// Typst code, before a block, showing references to `label` as a red
 /// `@label` (a missing, unnumbered or duplicate target) instead of failing.
 pub fn missing_ref(label: &str) -> String {

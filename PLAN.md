@@ -966,3 +966,15 @@ figures: a body in brackets becomes blocks, code becomes a raw Typst block
 export writes `#figure(caption: […])[…]`, which renders the same (test
 `a_figure_with_code_for_its_body_is_a_figure`). On the paper all four figures
 import as figures and their references are numbered.
+
+### Numbered references to labels on raw Typst
+
+User report: `@eq:B_A_relation` still "pointed to raw Typst": its equation
+stays raw (bars touching neighbours, `z_(|partial v|)`), and labels in raw
+blocks had no stand-in. Now `labels_in` (jobs.rs) lists the markup labels of
+non-code raw blocks with an empty element; the block's label report (all raw
+blocks are counter-sensitive) gives the counter, and `stand_in` (counters.rs)
+turns it into the stand-in: a heading of that depth, a block equation, or a
+figure of kind image/table/raw. Figures of other kinds (theorems made with
+figure) have unknown supplements and stay red. `label_problems` takes the
+reported targets, so only those are still listed. On the paper: no problems left.

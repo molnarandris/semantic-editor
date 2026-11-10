@@ -640,7 +640,8 @@ impl SemEditor {
                 Some((i, error.lines().next().unwrap_or("").to_string()))
             })
             .collect();
-        found.extend(jobs::label_problems(&ed.doc().header, blocks));
+        let targets: Vec<&LabelTarget> = views.iter().flat_map(|v| &v.targets).collect();
+        found.extend(jobs::label_problems(&ed.doc().header, blocks, &targets));
         // Stable: per block, compile errors first; one entry per block.
         found.sort_by_key(|(i, _)| *i);
         let mut merged: Vec<(usize, String)> = vec![];

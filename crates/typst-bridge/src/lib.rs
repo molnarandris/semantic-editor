@@ -21,7 +21,7 @@ pub use compile::{
 };
 pub use counters::{
     CounterState, LabelTarget, chain_code, initial_state, label_report, missing_ref, ref_stub,
-    tracked_counters,
+    stand_in, tracked_counters,
 };
 pub use deserialize::import_typ;
 pub use layout::{BlockLayout, GlyphBox, RawLayout, Rect, raw_layout};

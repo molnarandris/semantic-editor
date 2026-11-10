@@ -25,7 +25,7 @@ use typst_bridge::bib::{hidden_bibliography, hidden_cites};
 use typst_bridge::{
     Around, CounterState, LabelTarget, SpanMap, chain_code, code_display, initial_state, is_code,
     label_report, labels_in_source, missing_ref, ref_stub, refs_in_source,
-    serialize_block_numbered, tracked_counters,
+    serialize_block_numbered, stand_in, tracked_counters,
 };
 
 /// What was last submitted for a block, and how its counters ended.
@@ -67,6 +67,17 @@ fn labels_in(block: &BlockNode, out: &mut Vec<(String, String)>) {
         if let Some(element) = element {
             out.push((block.label.clone(), element));
         }
+    }
+    // Raw Typst: the stand-in follows from what the label's counter turns
+    // out to be (empty here, see `stand_in`).
+    if let Block::RawTypst(source) = &block.kind
+        && !is_code(source)
+    {
+        out.extend(
+            labels_in_source(source)
+                .into_iter()
+                .map(|l| (l, String::new())),
+        );
     }
     for child in block.kind.body().into_iter().flatten() {
         labels_in(child, out);
@@ -116,11 +127,17 @@ fn all_labels_in(block: &BlockNode, out: &mut Vec<String>) {
 }
 
 /// Problems with labels and references, per top-level block (by index):
-/// references to labels that do not exist or only on raw Typst (shown red
-/// in the editor), and labels defined more than once. Citations are fine:
-/// keys of the bibliography block, or of BibTeX entries in the header or
-/// raw Typst (a bibliography made from text in the document).
-pub fn label_problems(header: &str, blocks: &[BlockNode]) -> Vec<(usize, String)> {
+/// references to labels that do not exist or that show no number (on raw
+/// Typst, unless its block reported a heading, equation or figure; shown
+/// red in the editor), and labels defined more than once. Citations are
+/// fine: keys of the bibliography block, or of BibTeX entries in the
+/// header or raw Typst (a bibliography made from text in the document).
+/// `targets`: the labels the compiled blocks reported.
+pub fn label_problems(
+    header: &str,
+    blocks: &[BlockNode],
+    targets: &[&LabelTarget],
+) -> Vec<(usize, String)> {
     let mut sources = vec![header];
     let mut keys = vec![];
     for block in blocks {
@@ -160,7 +177,13 @@ pub fn label_problems(header: &str, blocks: &[BlockNode]) -> Vec<(usize, String)
         let mut refs = vec![];
         refs_in(block, &mut refs);
         for label in refs {
-            if numbered.iter().any(|(l, _)| *l == label) {
+            let has_stand_in = |element: &str| {
+                !element.is_empty()
+                    || targets
+                        .iter()
+                        .any(|t| t.label == label && stand_in(t).is_some())
+            };
+            if numbered.iter().any(|(l, e)| *l == label && has_stand_in(e)) {
                 continue;
             }
             if count(&label) > 0 {
@@ -320,11 +343,17 @@ pub fn stale_blocks(
             .iter()
             .filter(|l| !own.contains(l) && !cited.contains(l))
         {
-            match (table.get(label.as_str()), reported.get(label.as_str())) {
-                (Some((_, element, 1)), Some(target)) => {
-                    around.suffix.push_str(&ref_stub(target, element));
+            let stub = match (table.get(label.as_str()), reported.get(label.as_str())) {
+                (Some((_, element, 1)), Some(target)) => match *element {
+                    "" => stand_in(target),
+                    e => Some(e.to_string()),
                 }
-                _ => around.prefix.push_str(&missing_ref(label)),
+                .map(|e| ref_stub(target, &e)),
+                _ => None,
+            };
+            match stub {
+                Some(stub) => around.suffix.push_str(&stub),
+                None => around.prefix.push_str(&missing_ref(label)),
             }
         }
         // Citations are numbered as in the whole document: the earlier ones
@@ -661,7 +690,8 @@ mod tests {
             d.text("."),
         );
         let (also, r3) = (d.text(" Also "), d.reference("fig"));
-        let para = d.paragraph(vec![see, r1, and, r2, end, r3, also]);
+        let r4 = d.reference("eq:raw");
+        let para = d.paragraph(vec![see, r1, and, r2, end, r3, also, r4]);
         let (a, b) = (d.text("A"), d.text("B"));
         let first = d.heading(1, vec![a]);
         let mut second = d.heading(1, vec![b]);
@@ -671,8 +701,9 @@ mod tests {
         let mut figure = d.env("figure", vec![body, cap]);
         figure.label = "fig".into();
         let raw = d.raw("#figure([Raw], caption: [See @sec:b, @nowhere.])");
-        d.blocks = vec![para, first, second, figure, raw];
-        let header = "#set heading(numbering: \"1.1\")\n";
+        let equation = d.raw("$ |x| $ <eq:raw>");
+        d.blocks = vec![para, first, second, figure, raw, equation];
+        let header = "#set heading(numbering: \"1.1\")\n#set math.equation(numbering: \"(1)\")\n";
         let (tx, rx) = mpsc::channel();
         let worker = Worker::spawn(None, move |r| tx.send(r).unwrap());
         let mut views: Vec<View> = vec![];
@@ -727,6 +758,19 @@ mod tests {
             "raw: a stand-in"
         );
         assert!(views[4].around.prefix.contains("\"@nowhere\""), "raw: red");
+        assert_eq!(
+            views[5].targets.len(),
+            1,
+            "a raw equation reported its label"
+        );
+        assert!(
+            views[0]
+                .around
+                .suffix
+                .contains("#math.equation(block: true)[] <eq:raw>"),
+            "a label on raw Typst gets a stand-in: {}",
+            views[0].around.suffix
+        );
     }
 
     /// Missing labels, labels only on raw Typst, labels defined twice.
@@ -746,8 +790,16 @@ mod tests {
         second.label = "sec:b".into();
         let raw = d.raw("#figure([F], caption: [See @nowhere.]) <fig:raw>");
         d.blocks = vec![para, first, second, raw];
+        // Once the raw figure reported its number, the reference shows it.
+        let reported = LabelTarget {
+            label: "fig:raw".into(),
+            counter: "counter(figure.where(kind: image))".into(),
+            value: vec![1],
+        };
+        let problems = label_problems("", &d.blocks, &[&reported]);
+        assert!(problems.iter().all(|(_, p)| !p.contains("@fig:raw")));
         assert_eq!(
-            label_problems("", &d.blocks),
+            label_problems("", &d.blocks, &[]),
             [
                 (0, "@gone: no such label or bibliography entry".to_string()),
                 (
