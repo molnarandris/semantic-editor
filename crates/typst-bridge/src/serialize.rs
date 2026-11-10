@@ -521,12 +521,13 @@ impl Writer {
                             w.text_block(body, false);
                             w.out.push(']');
                             // A `.` or `(` right after would continue the
-                            // expression (`#f[…].x`, `#f[…](…)`).
+                            // expression (`#f[…].x`, `#f[…](…)`), and a `;`
+                            // would end it and vanish.
                             let next = inlines.get(i + 1).and_then(|n| match &n.kind {
                                 Inline::Text(t) => t.chars().next(),
                                 _ => None,
                             });
-                            if matches!(next, Some('.' | '(')) {
+                            if matches!(next, Some('.' | '(' | ';')) {
                                 w.out.push(';');
                             }
                         }
@@ -1798,6 +1799,7 @@ mod inline_call_tests {
                 "see #link(\"https://x.org\")[here];(1)",
                 "see #link(\"https://x.org\")[here];(1)",
             ),
+            ("x #cl[a]; b", "x #cl[a];; b", "x #cl[a];; b"),
             (
                 "x #cl[",
                 "x #cl[#text(fill: rgb(0, 0, 0, 0))[x]]",
