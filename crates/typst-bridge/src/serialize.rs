@@ -95,7 +95,7 @@ pub const SLOT: &str = "#sem-slot()";
 /// could not be mapped back to the node. `op("log")` loses the span too (a
 /// string argument is a value); a markup block keeps it. Same element, same
 /// rendering.
-const OPERATORS: &[(&str, &str, bool)] = &[
+pub(crate) const OPERATORS: &[(&str, &str, bool)] = &[
     ("arccos", "arccos", false),
     ("arcsin", "arcsin", false),
     ("arctan", "arctan", false),
@@ -1031,7 +1031,7 @@ pub fn serialize_math_node(node: &MathNode) -> String {
 /// Whether a block draws with CeTZ: a diagram (unless `diagrams` is
 /// false), or code in a formula that mentions it (an inline diagram), here
 /// or in a container's title or body.
-fn uses_cetz(block: &BlockNode, diagrams: bool) -> bool {
+pub(crate) fn uses_cetz(block: &BlockNode, diagrams: bool) -> bool {
     fn in_row(row: &MathRow) -> bool {
         row.nodes.iter().any(|n| match &n.kind {
             MathKind::Code(src) => src.contains("cetz"),

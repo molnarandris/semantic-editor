@@ -6,6 +6,7 @@ pub mod calls;
 pub mod code;
 pub mod compile;
 pub mod counters;
+pub mod deserialize;
 pub mod disk_cache;
 pub mod layout;
 pub mod serialize;
@@ -22,6 +23,7 @@ pub use counters::{
     CounterState, LabelTarget, chain_code, initial_state, label_report, missing_ref, ref_stub,
     tracked_counters,
 };
+pub use deserialize::import_typ;
 pub use layout::{BlockLayout, GlyphBox, RawLayout, Rect, raw_layout};
 pub use serialize::{
     CETZ_IMPORT, CETZ_VERSION, DEFAULT_HEADER, HEADER_SPECIMEN, PREAMBLE, SpanMap, Style,

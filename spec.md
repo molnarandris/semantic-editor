@@ -481,6 +481,20 @@ Titles decided 2026-11-08: optional, never added by default; positional
   before). Saving back into the original `.typ` is not planned for now.
 - With M10–M16 done, the header gets the leading definitions, code blocks keep the
   mid-document ones in place, and only real code ends up raw.
+- M17 decisions (2026-11-10): the header is everything before the first content,
+  `#show:` rules included (ctheorems-style `#show: thmrules` must apply to every
+  block; a template that adds content shows it in every block, the known limit of
+  M9a). What the tree cannot represent stays raw as a whole unit (the paragraph,
+  formula, heading or list item holding it), never split. A call standing alone
+  becomes an environment when its body holds blocks, starts on a new line or has a
+  title; otherwise it is a paragraph holding the call (`#highlight[…]`), which
+  reads back the same. The opened document is untitled and saved as `.sem`.
+  Known limits: formulas with bars touching their neighbours (`|x|`, a different
+  rendering from the tree's `bar.v`) stay raw; enumeration items with explicit
+  numbers stay raw; a list written with blank lines between its items (Typst's
+  wide list) becomes tight.
+  Wishlist: bars as Typst writes them (a tight bar in the tree), explicit item
+  numbers, wide lists.
 
 ### M18 — Title fields
 

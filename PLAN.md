@@ -844,3 +844,37 @@ Each milestone: `cargo test`, `cargo clippy` clean, then stop for manual testing
   paragraph.
 - Not yet: a bibliography from a file (needs project files); citation forms
   (`#cite(<key>, supplement: […])`, `form:`) other than `@key`.
+
+## M17 — Opening `.typ` files (2026-11-10)
+
+- `typst_bridge::import_typ` (`deserialize.rs`), the counterpart of the serializer:
+  Typst's parser, no compile. "Open" accepts `.typ` files too; the document opens
+  untitled ("Paper.typ (imported)") and is saved as a new `.sem` named after it.
+  The `.typ` file is never written (one-way, as decided).
+- Header: everything before the first content (`#set`, `#show`, `#let`, `#import`,
+  comments). The editor's own preamble at the start of an exported file is dropped,
+  and its CeTZ import too when the document has diagrams (the export adds it).
+- Mapped: headings, paragraphs, display formulas, labels after them, bullet,
+  numbered and term lists (nested), environments, figures with captions, diagrams
+  and the bibliography in the editor's export form; in text, bold, italic, inline
+  calls `#name(args)[…]`, links (a bare URL becomes `#link("url")[url]`), inline
+  code, references, line breaks, `~` and dashes; in formulas, everything M12 knows
+  (fractions, scripts, primes, calls, symbols by name or shorthand, text, `&`, `\`,
+  roots, code `#…` and inline diagrams).
+- A call standing alone is an environment when its body holds blocks, starts on a
+  new line or has a title (`#lemma[Title][…]`), else a paragraph with an inline
+  call; `#figure` always is one.
+- Everything else stays raw Typst, verbatim and whole: code in the middle of the
+  document (a code block, M10), a paragraph or formula holding anything the tree
+  cannot represent (`#h(1em)`, comments, `mat(…; …)`, named arguments in math, a
+  label after a paragraph), an enumeration item with an explicit number.
+- Measured: bars in formulas. Spaces around `|` show; the tree's bar is written
+  `bar.v`, which renders like `a | b`. A bar touching its neighbours (`|x|`) is a
+  different rendering the tree cannot write, so such a formula stays raw (wishlist).
+  `dif` and other names only in the math module are kept as code `#math.dif`.
+- Tests: importing then exporting renders the same pages (a paper with every
+  feature, formulas, raw fallbacks, lone calls); the sample's export opens as the
+  same document (exports to the same Typst, no new raw blocks).
+- Found by the round trip, fixed in its own commit (da29653): a `;` right after an
+  inline call ended the call's expression and vanished from the export; it is now
+  doubled.

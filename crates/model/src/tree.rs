@@ -789,7 +789,7 @@ impl Document {
 
     /// Inlines alternating Text, Math or Call, Text, …, starting and ending
     /// with text; call bodies too.
-    pub(crate) fn normalized_inlines(&mut self, inlines: Vec<InlineNode>) -> Vec<InlineNode> {
+    pub fn normalized_inlines(&mut self, inlines: Vec<InlineNode>) -> Vec<InlineNode> {
         let mut out: Vec<InlineNode> = Vec::with_capacity(inlines.len() + 2);
         for mut inline in inlines {
             if let Some(body) = inline.body_mut() {

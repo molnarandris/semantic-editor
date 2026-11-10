@@ -46,21 +46,35 @@ impl Window {
         }
         let dialog = gtk::FileDialog::builder()
             .title("Open Document")
-            .filters(&filters("Semantic documents", "sem"))
+            .filters(&filters("Semantic documents and Typst files", "sem typ"))
             .build();
         if let Ok(file) = dialog.open_future(Some(&self.window)).await {
             self.load(file).await;
         }
     }
 
+    /// Open a `.sem` file, or import a `.typ` file: its document is saved
+    /// as a new `.sem` file named after it.
     pub(super) async fn load(self: &Rc<Self>, file: gio::File) {
+        let path = file.basename().unwrap_or_default();
+        let typst = path.extension().is_some_and(|e| e == "typ");
         let result = match file.load_contents_future().await {
             Ok((bytes, _)) => std::str::from_utf8(&bytes)
                 .map_err(|_| "the file is not UTF-8 text".to_string())
-                .and_then(file::from_json),
+                .and_then(|text| match typst {
+                    true => Ok(typst_bridge::import_typ(text)),
+                    false => file::from_json(text),
+                }),
             Err(e) => Err(e.to_string()),
         };
         match result {
+            Ok(doc) if typst => {
+                self.close_block_editor();
+                self.set_document(doc, None);
+                let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned());
+                *self.imported.borrow_mut() = stem;
+                self.update_title();
+            }
             Ok(doc) => {
                 self.close_block_editor();
                 self.set_document(doc, Some(file));
@@ -177,10 +191,13 @@ async fn write_file(file: &gio::File, bytes: Vec<u8>) -> Result<(), String> {
     .map_err(|(_, e)| e.to_string())
 }
 
-fn filters(kind: &str, extension: &str) -> gio::ListStore {
+/// A filter for files with the (space separated) `extensions`.
+fn filters(kind: &str, extensions: &str) -> gio::ListStore {
     let filter = gtk::FileFilter::new();
     filter.set_name(Some(kind));
-    filter.add_suffix(extension);
+    for extension in extensions.split(' ') {
+        filter.add_suffix(extension);
+    }
     let store = gio::ListStore::new::<gtk::FileFilter>();
     store.append(&filter);
     store

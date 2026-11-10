@@ -29,6 +29,9 @@ pub struct Window {
     title: adw::WindowTitle,
     toasts: adw::ToastOverlay,
     file: RefCell<Option<gio::File>>,
+    /// The name (without extension) of the `.typ` file the document was
+    /// opened from, until it is saved as a `.sem` file.
+    imported: RefCell<Option<String>>,
     /// Header and blocks as last saved or loaded, to tell if there are
     /// changes.
     saved: RefCell<(String, Vec<BlockNode>)>,
@@ -98,6 +101,7 @@ impl Window {
             title,
             toasts,
             file: RefCell::new(None),
+            imported: RefCell::new(None),
             saved: RefCell::default(),
             block_editor: RefCell::new(None),
         });
@@ -244,6 +248,7 @@ impl Window {
     fn set_document(&self, doc: Document, file: Option<gio::File>) {
         *self.saved.borrow_mut() = (doc.header.clone(), doc.blocks.clone());
         *self.file.borrow_mut() = file;
+        *self.imported.borrow_mut() = None;
         // Emits caret-moved, which updates the title and status bar.
         self.editor.set_document(doc);
     }
@@ -261,13 +266,17 @@ impl Window {
             .as_ref()
             .and_then(|f| f.basename())
             .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
+            .or_else(|| self.imported.borrow().clone())
             .unwrap_or_else(|| "Untitled".into())
     }
 
     fn update_title(&self) {
         let name = match self.file.borrow().as_ref().and_then(|f| f.basename()) {
             Some(path) => path.to_string_lossy().into_owned(),
-            None => "Untitled".into(),
+            None => match self.imported.borrow().as_ref() {
+                Some(stem) => format!("{stem}.typ (imported)"),
+                None => "Untitled".into(),
+            },
         };
         let shown = if self.is_dirty() {
             format!("• {name}")

@@ -27,6 +27,12 @@ pub fn resolve_symbol(name: &str) -> Option<String> {
     Some(symbol.get().to_string())
 }
 
+/// Whether `name` is defined by Typst's math module but not globally
+/// (`dif`, `cal`): code in a formula must write it `math.name`.
+pub fn math_only(name: &str) -> bool {
+    LIBRARY.math.scope().get(name).is_some() && LIBRARY.global.scope().get(name).is_none()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

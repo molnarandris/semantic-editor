@@ -112,7 +112,7 @@ mod tests {
             "/ Gauge: an invertible matrix on a virtual leg.\n\n#align(center)[",
             "= Notation and markup <sec:notation>",
             "*bold*, _italic_, #underline[underlined]",
-            "#link(\"https://typst.app\")[link]; code is `cargo test`.",
+            "#link(\"https://typst.app\")[link];; code is `cargo test`.",
             "pages 3–7",
             "pause — like",
             "Fig.~1 together.\\ A line break",
@@ -157,6 +157,29 @@ mod tests {
         );
         assert!(typ.contains("caption: [A matrix product state on four sites.])["));
         assert!(refs.iter().all(|r| labels.contains(r)), "{labels:?}");
+    }
+
+    /// Opening an exported `.typ` gives the document back: it exports to
+    /// the same Typst, with no raw blocks the sample did not have.
+    #[test]
+    fn exported_typst_opens_as_the_same_document() {
+        let doc = sample::document();
+        let typ = serialize_document(&doc);
+        let opened = typst_bridge::import_typ(&typ);
+        opened.check_invariants().unwrap();
+        assert_eq!(serialize_document(&opened), typ);
+        let raw = |d: &model::Document| {
+            d.leaves()
+                .iter()
+                .filter(|b| matches!(b.kind, model::Block::RawTypst(_)))
+                .count()
+        };
+        let raws: Vec<_> = opened
+            .leaves()
+            .into_iter()
+            .filter(|b| matches!(b.kind, model::Block::RawTypst(_)))
+            .collect();
+        assert_eq!(raw(&opened), raw(&doc), "{raws:#?}");
     }
 
     #[test]
