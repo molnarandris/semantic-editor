@@ -873,6 +873,30 @@ impl Document {
         blocks(&mut self.blocks);
     }
 
+    /// Rewrite the options of every math call with `f` (files of format 17
+    /// stored them as written in math, `size: #55%`).
+    pub fn map_call_opts(&mut self, f: fn(&str) -> String) {
+        fn row(r: &mut MathRow, f: fn(&str) -> String) {
+            for n in &mut r.nodes {
+                if let MathKind::Call { opts, .. } = &mut n.kind
+                    && !opts.is_empty()
+                {
+                    *opts = f(opts);
+                }
+                n.children_mut().into_iter().for_each(|c| row(c, f));
+            }
+        }
+        fn blocks(list: &mut [BlockNode], f: fn(&str) -> String) {
+            for b in list {
+                b.rows_mut().into_iter().for_each(|r| row(r, f));
+                if let Some(body) = b.kind.body_mut() {
+                    blocks(body, f);
+                }
+            }
+        }
+        blocks(&mut self.blocks, f);
+    }
+
     /// Assign new ids to every node, e.g. after deserialization, and restore
     /// the structural invariants.
     pub fn regenerate_ids(&mut self) {

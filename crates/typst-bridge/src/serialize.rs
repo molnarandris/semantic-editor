@@ -4,6 +4,8 @@
 
 use std::ops::Range;
 
+use typst::syntax::ast::{self, AstNode};
+
 use model::{
     Block, BlockNode, Document, Inline, InlineNode, ListKind, MathKind, MathNode, MathRow, NodeId,
     TitleFields, spaced_gap,
@@ -812,7 +814,7 @@ impl Writer {
                 w.args += 1;
                 w.out.push_str(name);
                 w.out.push('(');
-                w.out.push_str(opts);
+                w.out.push_str(&math_opts(opts));
                 for (i, arg) in args.iter().enumerate() {
                     if i > 0 || !opts.is_empty() {
                         w.out.push_str(", ");
@@ -989,6 +991,38 @@ fn title_content(fields: &TitleFields, style: Style) -> String {
         lines.push("#text(fill: luma(140))[Title]".to_string());
     }
     lines.join("\n\n")
+}
+
+/// The options of a math call (code, `size: 55%`) as written in math:
+/// each value after a `#` (`size: #55%`), in parentheses when it is not one
+/// expression a `#` can take (`#(80% + 2pt)`); strings stay as they are.
+/// Options that are not all named arguments are written as typed (Typst
+/// then reports the error).
+fn math_opts(opts: &str) -> String {
+    let call = typst::syntax::parse_code(&format!("f({opts})"));
+    let args = call
+        .children()
+        .find_map(|c| c.cast::<ast::FuncCall>())
+        .filter(|_| call.errors_and_warnings().0.is_empty())
+        .map(|c| c.args().items().collect::<Vec<_>>());
+    let Some(args) = args else {
+        return opts.to_string();
+    };
+    let mut out = vec![];
+    for arg in args {
+        let ast::Arg::Named(named) = arg else {
+            return opts.to_string();
+        };
+        let expr = named.expr();
+        let value = expr.to_untyped().full_text();
+        let value = match expr {
+            ast::Expr::Str(_) => value.to_string(),
+            e if e.hash() => format!("#{value}"),
+            _ => format!("#({value})"),
+        };
+        out.push(format!("{}: {value}", named.name().as_str()));
+    }
+    out.join(", ")
 }
 
 pub(crate) fn quoted(s: &str) -> String {

@@ -949,7 +949,7 @@ impl Importer<'_> {
         let mut opts = vec![];
         for arg in call.args().arg_items() {
             if let ast::Arg::Named(named) = arg.arg {
-                opts.push(named.to_untyped().full_text().to_string());
+                opts.push(code_opt(named)?);
                 continue;
             }
             let ast::Arg::Pos(e) = arg.arg else {
@@ -964,6 +964,40 @@ impl Importer<'_> {
         out.push(self.doc.call_with(&name, &opts.join(", "), args));
         Some(())
     }
+}
+
+/// A named argument of a math call as code (`size: #55%` gives
+/// `size: 55%`): a value after `#`, or a string. `None` for math content
+/// (`attach(x, t: y)`), which is not an option.
+fn code_opt(named: ast::Named) -> Option<String> {
+    let text = named.to_untyped().full_text();
+    let (_, value) = text.split_once(':')?;
+    let value = value.trim();
+    let code = match value.strip_prefix('#') {
+        Some(code) => code,
+        None if matches!(named.expr(), ast::Expr::Str(_)) => value,
+        None => return None,
+    };
+    Some(format!("{}: {code}", named.name().as_str()))
+}
+
+/// Options written as in math (`size: #55%`) as code (`size: 55%`); as
+/// they are if they are not all options.
+pub fn code_opts(math: &str) -> String {
+    fn find(n: &SyntaxNode) -> Option<ast::MathCall<'_>> {
+        n.cast().or_else(|| n.children().find_map(find))
+    }
+    let root = parse(&format!("$ff({math})$"));
+    let opts = find(&root).and_then(|c| {
+        c.args()
+            .arg_items()
+            .map(|item| match item.arg {
+                ast::Arg::Named(named) => code_opt(named),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()
+    });
+    opts.map_or_else(|| math.to_string(), |o| o.join(", "))
 }
 
 /// Whether `nodes[i]` is the `#` of a call that stands on lines of its own
@@ -1252,11 +1286,11 @@ $ f(x) &= cases(1 "if" x > 0, 0) \
         }
     }
 
-    /// Named arguments of math calls are kept as source (`opts`), written
+    /// Named arguments of math calls are kept as code (`opts`), written
     /// before the content arguments.
     #[test]
     fn math_calls_keep_named_arguments() {
-        let src = "$ lr(size: #55%, (sum_i x_i)) + abs(x/2, size: #2em) + op(\"Ker\", limits: #true)_x $";
+        let src = "$ lr(size: #55%, (sum_i x_i)) + abs(x/2, size: #2em) + op(\"Ker\", limits: #true)_x + lr(size: #(80% + 2pt), [y]) + cases(delim: \"[\", 1, 2) $";
         let doc = renders_the_same(src);
         let Block::DisplayMath(row) = &doc.blocks[0].kind else {
             panic!("{:?}", doc.blocks[0].kind);
@@ -1273,7 +1307,16 @@ $ f(x) &= cases(1 "if" x > 0, 0) \
                 _ => None,
             })
             .collect();
-        assert_eq!(opts, ["size: #55%", "size: #2em", "limits: #true"]);
+        assert_eq!(
+            opts,
+            [
+                "size: 55%",
+                "size: 2em",
+                "limits: true",
+                "size: (80% + 2pt)",
+                "delim: \"[\""
+            ]
+        );
         assert!(
             serialize_document(&doc).contains("abs(size: #2em, x/2)"),
             "{}",

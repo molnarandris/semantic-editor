@@ -19,8 +19,9 @@ use serde::{Deserialize, Serialize};
 /// (`Block::Title`). 16: spaces in formulas next to bars and text (`space`
 /// on a math node; older files get the spaces their export wrote).
 /// 17: named arguments of calls in formulas (`opts` on `MathKind::Call`,
-/// absent when empty).
-pub const FORMAT_VERSION: u32 = 17;
+/// absent when empty), as written in math (`size: #55%`). 18: the same as
+/// code (`size: 55%`), as typed in the options tab.
+pub const FORMAT_VERSION: u32 = 18;
 
 #[derive(Serialize)]
 struct SemFileOut<'a> {
@@ -71,6 +72,9 @@ pub fn from_json(text: &str) -> Result<Document, String> {
     if file.version < 16 {
         doc.space_bars_and_text();
     }
+    if file.version == 17 {
+        doc.map_call_opts(typst_bridge::code_opts);
+    }
     doc.regenerate_ids();
     doc.check_invariants()?;
     Ok(doc)
@@ -94,6 +98,22 @@ mod tests {
         assert!(saved.contains(&format!("\"version\": {FORMAT_VERSION}")));
         assert!(saved.contains("\"header\": \"#set heading"));
         assert!(saved.contains(&format!("\"typst\": \"{}\"", typst_bridge::TYPST_VERSION)));
+    }
+
+    /// Version 17 stored a math call's options as written in math; they
+    /// load as code.
+    #[test]
+    fn version_17_options_load_as_code() {
+        let mut d = Document::empty();
+        let arg = d.row(vec![]);
+        let call = d.call_with("lr", "size: #55%, x: \"a\"", vec![arg]);
+        d.blocks = vec![d.display(vec![call])];
+        let old = to_json(&d).replace(&format!("\"version\": {FORMAT_VERSION}"), "\"version\": 17");
+        let loaded = from_json(&old).unwrap();
+        let model::MathKind::Call { opts, .. } = &loaded.blocks[0].rows()[0].nodes[0].kind else {
+            panic!("a call");
+        };
+        assert_eq!(opts, "size: 55%, x: \"a\"");
     }
 
     /// Files before version 16 get the spaces their export wrote around

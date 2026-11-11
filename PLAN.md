@@ -1077,3 +1077,13 @@ reported targets, so only those are still listed. On the paper: no problems left
 - Test `math_calls_keep_named_arguments` (`lr`, `abs`, `op` with `limits`).
 - Paper: 30 → 25 raw blocks (all five `lr(size: …)` formulas), 55 pages identical.
 - Not yet: the options are not shown or editable in the editor (step b).
+
+## Options of math calls, step (b) (2026-11-11)
+
+- Options are stored as code, as typed in the tab (`size: 55%`); the export
+  writes each value after a `#` (`size: #55%`), in parentheses when `#` cannot
+  take it as it is (`#(80% + 2pt)`, by `Expr::hash`), strings as they are. The
+  import keeps a value after `#` or a string; other named arguments (math
+  content, `attach(x, t: y)`) leave the formula raw, as before.
+- `.sem` format 18; files of format 17 (options as written in math) are
+  converted on load (`typst_bridge::code_opts`).
