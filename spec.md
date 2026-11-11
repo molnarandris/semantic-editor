@@ -550,6 +550,30 @@ Titles decided 2026-11-08: optional, never added by default; positional
   labels made in code (`label("…")`) are not seen, so references to them are
   reported. Wishlist: a list of all problems to pick from.
 
+### Options of math calls (user request, 2026-11-11)
+
+Raw Typst comes in two sorts: source by design (diagrams, code, `#restate`, the
+bibliography), edited in the source dialog, and text or formulas the tree cannot
+hold yet, which display right but are not editable in place. The paper's
+`lr(size: #55%, …)` formulas were of the second sort.
+
+- Typst's math functions take named options besides their content: `lr`, `abs`,
+  `norm`, `floor`, `ceil`, `round`, `stretch` (`size`), accents (`size`,
+  `dotless`), `frac` (`style`), `op` (`limits`), `cancel`, `cases`/`vec`/`mat`
+  (`delim`, `gap`, …). A math call keeps them as Typst source (`opts`), written
+  before its content arguments.
+- **(a)** the tree, import, export. **(b)** the options tab: while the caret is in a
+  call with options (or a call that takes them), a small tab on the top edge of
+  the call's outline shows them (`size: 55%`), drawn over the render so nothing
+  shifts. It is a caret stop like the label pill (← from the call's start, or a
+  click); typing edits the source; emptied, the options go. No shortcuts (user
+  decision). `lr` is typed like `sqrt`: `lr` + space gives `lr(▯)`, the brackets
+  and content go inside. **(c)** the partner of a bracket next to the caret is
+  highlighted (plain and `lr` pairs alike).
+- Plain brackets stay as typed (Typst pairs them, `(a]` included); existing ones
+  cannot be turned into an `lr` pair, since the partner may not be the intended
+  one. Wishlist: `lr` around a selection, once formulas have selections.
+
 
 ### Later
 

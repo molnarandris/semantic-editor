@@ -946,7 +946,12 @@ impl Importer<'_> {
             return Some(());
         }
         let mut args = vec![];
+        let mut opts = vec![];
         for arg in call.args().arg_items() {
+            if let ast::Arg::Named(named) = arg.arg {
+                opts.push(named.to_untyped().full_text().to_string());
+                continue;
+            }
             let ast::Arg::Pos(e) = arg.arg else {
                 return None;
             };
@@ -956,7 +961,7 @@ impl Importer<'_> {
             let row = self.math(e.to_untyped())?;
             args.push(self.doc.row(row));
         }
-        out.push(self.doc.call(&name, args));
+        out.push(self.doc.call_with(&name, &opts.join(", "), args));
         Some(())
     }
 }
@@ -1245,5 +1250,34 @@ $ f(x) &= cases(1 "if" x > 0, 0) \
             let doc = renders_the_same(src);
             assert!(matches!(doc.blocks[0].kind, Block::RawTypst(_)), "{src}");
         }
+    }
+
+    /// Named arguments of math calls are kept as source (`opts`), written
+    /// before the content arguments.
+    #[test]
+    fn math_calls_keep_named_arguments() {
+        let src = "$ lr(size: #55%, (sum_i x_i)) + abs(x/2, size: #2em) + op(\"Ker\", limits: #true)_x $";
+        let doc = renders_the_same(src);
+        let Block::DisplayMath(row) = &doc.blocks[0].kind else {
+            panic!("{:?}", doc.blocks[0].kind);
+        };
+        let opts: Vec<&str> = row
+            .nodes
+            .iter()
+            .filter_map(|n| match &n.kind {
+                model::MathKind::Call { opts, .. } => Some(opts.as_str()),
+                model::MathKind::Scripts { base, .. } => match &base.nodes[0].kind {
+                    model::MathKind::Call { opts, .. } => Some(opts.as_str()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        assert_eq!(opts, ["size: #55%", "size: #2em", "limits: #true"]);
+        assert!(
+            serialize_document(&doc).contains("abs(size: #2em, x/2)"),
+            "{}",
+            serialize_document(&doc)
+        );
     }
 }

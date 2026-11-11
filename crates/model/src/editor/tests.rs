@@ -991,7 +991,7 @@ fn show(row: &crate::tree::MathRow) -> String {
             MathKind::Text(t) => format!("\"{t}\""),
             MathKind::Align => "&".into(),
             MathKind::Linebreak => "\\".into(),
-            MathKind::Call { name, args } => format!(
+            MathKind::Call { name, args, .. } => format!(
                 "{name}({})",
                 args.iter().map(show).collect::<Vec<_>>().join(", ")
             ),

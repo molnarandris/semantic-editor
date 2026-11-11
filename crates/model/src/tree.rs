@@ -385,9 +385,13 @@ pub enum MathKind {
     Code(String),
     /// A call of a math function with content arguments, `sqrt(x)`,
     /// `cal(A)`, `root(3, x)`, `ket(psi)` (a header function): Typst draws
-    /// it, the caret moves through the arguments.
+    /// it, the caret moves through the arguments. `opts` are its named
+    /// arguments as Typst source, written before the content arguments
+    /// (`size: #55%` in `lr(size: #55%, (x))`), empty if none.
     Call {
         name: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        opts: String,
         args: Vec<MathRow>,
     },
     /// Primes attached to what comes before, `f'`, `f''` (the count).
@@ -1344,8 +1348,14 @@ impl Document {
     }
 
     pub fn call(&mut self, name: &str, args: Vec<MathRow>) -> MathNode {
+        self.call_with(name, "", args)
+    }
+
+    /// A math call with named arguments (`opts`, Typst source).
+    pub fn call_with(&mut self, name: &str, opts: &str, args: Vec<MathRow>) -> MathNode {
         self.node(MathKind::Call {
             name: name.into(),
+            opts: opts.into(),
             args,
         })
     }

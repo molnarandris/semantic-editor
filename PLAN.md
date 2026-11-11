@@ -1065,3 +1065,15 @@ reported targets, so only those are still listed. On the paper: no problems left
   the top quarter either over 34 keystrokes, so the jumps were probably words
   bouncing between the current and the next line. The user found it "helps quite a
   bit". Not addressed: justification re-spreading the current line (sideways shifts).
+
+## Options of math calls, step (a) (2026-11-11)
+
+- `MathKind::Call` has `opts`: its named arguments as Typst source, joined with
+  `, ` (`size: #55%`), empty if none. The export writes them first,
+  `abs(size: #2em, x/2)` for `abs(x/2, size: #2em)`, which Typst reads the same.
+  The import keeps them instead of leaving the formula raw; spread arguments
+  (`..x`) still stay raw.
+- `.sem` format 17: `opts` on a call, absent when empty (older files load as is).
+- Test `math_calls_keep_named_arguments` (`lr`, `abs`, `op` with `limits`).
+- Paper: 30 → 25 raw blocks (all five `lr(size: …)` formulas), 55 pages identical.
+- Not yet: the options are not shown or editable in the editor (step b).

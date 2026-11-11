@@ -806,14 +806,15 @@ impl Writer {
             MathKind::Text(s) => w.out.push_str(&quoted(s)),
             MathKind::Align => w.out.push('&'),
             MathKind::Linebreak => w.out.push('\\'),
-            MathKind::Call { name, args } => {
+            MathKind::Call { name, opts, args } => {
                 // Inside the arguments a comma is written `comma`, so it
                 // cannot split them.
                 w.args += 1;
                 w.out.push_str(name);
                 w.out.push('(');
+                w.out.push_str(opts);
                 for (i, arg) in args.iter().enumerate() {
-                    if i > 0 {
+                    if i > 0 || !opts.is_empty() {
                         w.out.push_str(", ");
                     }
                     w.row(arg);

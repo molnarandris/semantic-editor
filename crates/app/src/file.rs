@@ -18,7 +18,9 @@ use serde::{Deserialize, Serialize};
 /// 14: the bibliography (`Block::Bibliography`). 15: the title block
 /// (`Block::Title`). 16: spaces in formulas next to bars and text (`space`
 /// on a math node; older files get the spaces their export wrote).
-pub const FORMAT_VERSION: u32 = 16;
+/// 17: named arguments of calls in formulas (`opts` on `MathKind::Call`,
+/// absent when empty).
+pub const FORMAT_VERSION: u32 = 17;
 
 #[derive(Serialize)]
 struct SemFileOut<'a> {

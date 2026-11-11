@@ -438,7 +438,7 @@ impl Editor {
             // All arguments empty: the call goes. An extra argument of a
             // call that takes more (`cases`) goes, caret to the end of the
             // one before.
-            MathKind::Call { name, args } => {
+            MathKind::Call { name, args, .. } => {
                 let Step::Arg(i) = step else {
                     return false;
                 };

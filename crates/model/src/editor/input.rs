@@ -829,7 +829,11 @@ impl Editor {
         }
         let node = MathNode {
             id,
-            kind: MathKind::Call { name, args },
+            kind: MathKind::Call {
+                name,
+                opts: String::new(),
+                args,
+            },
             space: false,
         };
         self.word = None;
@@ -848,7 +852,7 @@ impl Editor {
             return false;
         };
         let node = self.row_nodes(prow)[j].clone();
-        let MathKind::Call { name, args } = &node.kind else {
+        let MathKind::Call { name, args, .. } = &node.kind else {
             return false;
         };
         let next = cursor(p.block, child_path(&parent, j, Step::Arg(i + 1)), 0);
