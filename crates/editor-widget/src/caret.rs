@@ -43,6 +43,9 @@ pub struct Stop {
     /// In a label pill (beside the page): clicks and line moves reach it
     /// only right of the page.
     pub label: bool,
+    /// In the options tab of a math call (above it): line moves, Home/End
+    /// and clicks on the page never reach it (see [`tab_hit`]).
+    pub tab: bool,
 }
 
 /// The label pill beside a labelled block, in pt: its distance from the
@@ -87,6 +90,7 @@ pub fn stops(block: &BlockNode, layout: Option<&BlockLayout>) -> Vec<Stop> {
             depth: 0,
             edge: false,
             label: false,
+            tab: false,
         });
     }
     out
@@ -114,6 +118,7 @@ fn stop(
         depth: 0,
         edge: false,
         label: false,
+        tab: false,
     }
 }
 
@@ -210,6 +215,25 @@ fn row_stops(
         if let Some(r) = r {
             right = r.right();
         }
+        if let Some(opts) = node.kind.tab() {
+            let mut p = path.clone();
+            p.extend([Step::Index(k), Step::Opts]);
+            let call = r.or_else(|| {
+                node.children()
+                    .iter()
+                    .filter_map(|(_, c)| l.box_of(c.id))
+                    .reduce(|a, b| a.union(&b))
+            });
+            let base = out.last().map_or(line, |s| s.line);
+            out.extend(tab_stops(
+                block,
+                p,
+                opts,
+                call.unwrap_or(rb),
+                base,
+                depth + 1,
+            ));
+        }
         for (step, child) in node.children() {
             let mut p = path.clone();
             p.extend([Step::Index(k), step]);
@@ -244,12 +268,83 @@ fn block_stops(block: &BlockNode, l: &BlockLayout, top: bool) -> Vec<Stop> {
     out
 }
 
+/// The options tab of a math call: on the top edge of its outline (which
+/// lies [`CALL_PAD_PT`] outside the call's box), its text drawn char by
+/// char at its positions like a label pill's. Its stops keep the formula's
+/// baseline `line`, so they belong to its line.
+pub const CALL_PAD_PT: f64 = 2.0;
+pub const TAB_HEIGHT_PT: f64 = 9.0;
+/// The tab's text baseline above its bottom edge.
+pub const TAB_DESCENT_PT: f64 = 2.5;
+
+/// The tab's box for a call whose box is `call`.
+pub fn tab_rect(call: Rect, chars: usize) -> Rect {
+    let bottom = call.y - CALL_PAD_PT;
+    Rect {
+        x: call.x - CALL_PAD_PT,
+        y: bottom - TAB_HEIGHT_PT,
+        w: chars.max(1) as f64 * PILL_CHAR_PT + 2.0 * PILL_PAD_PT,
+        h: TAB_HEIGHT_PT,
+    }
+}
+
+fn tab_stops(
+    block: &BlockNode,
+    path: Vec<Step>,
+    opts: &str,
+    call: Rect,
+    line: f64,
+    depth: usize,
+) -> Vec<Stop> {
+    let r = tab_rect(call, opts.chars().count());
+    (0..=opts.chars().count())
+        .map(|k| Stop {
+            depth,
+            tab: true,
+            ..stop(
+                block,
+                path.clone(),
+                k,
+                r.x + PILL_PAD_PT + k as f64 * PILL_CHAR_PT,
+                r.y + 1.0,
+                r.bottom() - 1.0,
+                line,
+            )
+        })
+        .collect()
+}
+
+/// The stop of the options tab at `(x, y)`, among the tab stops of the
+/// call in `block` whose options path is `path` (the tab shown).
+pub fn tab_hit<'a>(
+    stops: &'a [Stop],
+    block: model::NodeId,
+    path: &[Step],
+    x: f64,
+    y: f64,
+) -> Option<&'a Stop> {
+    let tab: Vec<&Stop> = stops
+        .iter()
+        .filter(|s| s.tab && s.cursor.block == block && s.cursor.path == path)
+        .collect();
+    let (first, last) = (tab.first()?, tab.last()?);
+    let inside = y >= first.top - 1.0
+        && y <= first.bottom + 1.0
+        && x >= first.x - PILL_PAD_PT
+        && x <= last.x.max(first.x + PILL_CHAR_PT) + PILL_PAD_PT;
+    inside.then(|| {
+        tab.into_iter()
+            .min_by(|a, b| (a.x - x).abs().total_cmp(&(b.x - x).abs()))
+    })?
+}
+
 /// The positions in the label pill of `block`, on the line at `line`.
 fn label_stops(block: &BlockNode, line: f64, width: f64) -> Vec<Stop> {
     let x0 = width + PILL_GAP_PT + PILL_PAD_PT;
     (0..=block.label.chars().count())
         .map(|k| Stop {
             label: true,
+            tab: false,
             ..stop(
                 block,
                 vec![Step::Label],
@@ -629,7 +724,7 @@ pub fn formula_marks(doc: &Document, caret: &CursorPath, stops: &[Stop]) -> Vec<
 pub fn call_outline(stops: &[Stop], block: model::NodeId, body: &[Step]) -> Vec<Rect> {
     let inside: Vec<Stop> = stops
         .iter()
-        .filter(|s| s.cursor.block == block && s.cursor.path.starts_with(body))
+        .filter(|s| s.cursor.block == block && s.cursor.path.starts_with(body) && !s.tab)
         .cloned()
         .collect();
     lines(&inside)
@@ -687,7 +782,7 @@ const DEPTH_PT: f64 = 0.5;
 const CLICK_DEPTH_PT: f64 = 0.01;
 
 /// Whether a stop of `line` can be reached at `x`: label stops only right
-/// of the page (from where their pill starts).
+/// of the page (from where their pill starts), tab stops never.
 fn reachable<'a>(stops: &'a [Stop], line: &[usize], x: f64) -> Vec<&'a Stop> {
     let pill = line
         .iter()
@@ -697,6 +792,7 @@ fn reachable<'a>(stops: &'a [Stop], line: &[usize], x: f64) -> Vec<&'a Stop> {
     let others = line.iter().any(|&i| !stops[i].label);
     line.iter()
         .map(|&i| &stops[i])
+        .filter(|s| !s.tab)
         .filter(|s| !s.label || !others || x >= pill - PILL_PAD_PT - 2.0)
         .collect()
 }
@@ -717,7 +813,7 @@ pub fn line_edge<'a>(stops: &'a [Stop], line: &[usize], end: bool) -> Option<&'a
     let stops = line
         .iter()
         .map(|&i| &stops[i])
-        .filter(|s| !(inside && (s.edge || s.label)));
+        .filter(|s| !s.tab && !(inside && (s.edge || s.label)));
     if end {
         stops.max_by(|a, b| a.x.total_cmp(&b.x))
     } else {
@@ -851,6 +947,41 @@ mod tests {
         let (src, offset) = block_document(&Around::default(), &snippet, width);
         let doc = compile(&mut world, &src).unwrap();
         raw_layout(&world, &doc.pages()[0], offset).resolve(&map)
+    }
+
+    /// The options tab of a math call: its stops come after the position
+    /// before the call, on the formula's line, above the call's box; line
+    /// moves and clicks on the page skip them, `tab_hit` finds them.
+    #[test]
+    fn call_option_tabs() {
+        let mut d = Document::empty();
+        let (open, x, close) = (d.sym("("), d.ident("x"), d.sym(")"));
+        let arg = d.row(vec![open, x, close]);
+        let call = d.call_with("lr", "size: 80%", vec![arg]);
+        let (a, plus) = (d.ident("a"), d.sym("+"));
+        let block = d.display(vec![a, plus, call]);
+        let l = layout_of(&block, 300.0);
+        let s = super::stops(&block, Some(&l));
+        let got: Vec<_> = s.iter().map(|s| s.cursor.clone()).collect();
+        assert_eq!(got, d.positions(&block));
+        let tab: Vec<&Stop> = s.iter().filter(|s| s.tab).collect();
+        assert_eq!(tab.len(), 10);
+        let inside = s
+            .iter()
+            .find(|s| s.cursor.path == [Step::Index(2), Step::Arg(0)])
+            .unwrap();
+        assert!(
+            tab[0].bottom < inside.top,
+            "{} {}",
+            tab[0].bottom,
+            inside.top
+        );
+        assert!((tab[0].line - inside.line).abs() < 0.01);
+        assert!(hit(&s, tab[3].x, tab[3].top + 1.0).is_some_and(|h| !h.tab));
+        let path = [Step::Index(2), Step::Opts];
+        let h = tab_hit(&s, block.id, &path, tab[3].x + 0.5, tab[3].top + 2.0).unwrap();
+        assert_eq!(h.cursor.offset, 3);
+        assert!(tab_hit(&s, block.id, &path, tab[3].x, inside.bottom + 5.0).is_none());
     }
 
     /// A call being typed is set in a code font: every char still has its

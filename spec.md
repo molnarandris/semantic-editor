@@ -568,7 +568,10 @@ hold yet, which display right but are not editable in place. The paper's
   shifts. It is a caret stop like the label pill (← from the call's start, or a
   click); typing edits the source; emptied, the options go. No shortcuts (user
   decision). `lr` is typed like `sqrt`: `lr` + space gives `lr(▯)`, the brackets
-  and content go inside. **(c)** the partner of a bracket next to the caret is
+  and content go inside (in an `lr`, `(` is a bracket). The tab shows "+ options"
+  while empty; options are typed as code (`size: 80%`, no `#`), Enter or Esc
+  leave into the first argument. Calls with a tab: Typst's math functions with
+  options (`lr`, `abs`, the accents, `cases`, …), or any call with options. **(c)** the partner of a bracket next to the caret is
   highlighted (plain and `lr` pairs alike).
 - Plain brackets stay as typed (Typst pairs them, `(a]` included); existing ones
   cannot be turned into an `lr` pair, since the partner may not be the intended

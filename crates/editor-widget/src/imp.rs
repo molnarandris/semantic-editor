@@ -101,6 +101,9 @@ const PREVIEW_ID: NodeId = NodeId(u64::MAX);
 /// Largest device pixels per point a preview is rendered at.
 const MAX_PREVIEW_PPP: f64 = 12.0;
 
+/// The math call whose options tab shows (see `SemEditor::tab_call`).
+type TabCall = (Rc<[Stop]>, f64, NodeId, Vec<model::Step>);
+
 /// A zoomed render for the source editor's preview, cropped to its ink.
 #[derive(Default)]
 struct Preview {
@@ -316,6 +319,7 @@ impl WidgetImpl for SemEditor {
         if obj.has_focus() {
             self.snapshot_env_outline(snapshot, x0, scroll);
             self.snapshot_call_outline(snapshot, x0, scroll);
+            self.snapshot_math_call_outline(snapshot, x0, scroll);
             self.snapshot_highlights(snapshot, x0, scroll);
         }
 
@@ -352,6 +356,7 @@ impl WidgetImpl for SemEditor {
         self.snapshot_label_pills(snapshot, x0, scroll, obj.has_focus());
         if obj.has_focus() {
             self.snapshot_formula_marks(snapshot, x0, scroll);
+            self.snapshot_call_tab(snapshot, x0, scroll);
         }
         if obj.has_focus()
             && self.caret_on.get()
@@ -785,6 +790,116 @@ impl SemEditor {
             let outline = gsk::RoundedRect::from_rect(rect, 2.0);
             snapshot.append_color(&blue(0.04), &rect);
             snapshot.append_border(&outline, &[1.0; 4], &[blue(0.35); 4]);
+        }
+    }
+
+    /// The math call with an options tab that the caret is in: its block's
+    /// stops, the block's top (widget y), the caret's block and the call's
+    /// path.
+    fn tab_call(&self, scroll: f64) -> Option<TabCall> {
+        let ed = self.editor.borrow();
+        let path = ed.tab_focus()?;
+        let block = ed.caret().block;
+        let index = ed.doc().top_index(block)?;
+        drop(ed);
+        let top = *self.block_tops().get(index)? - scroll;
+        Some((self.block_stops(index), top, block, path))
+    }
+
+    /// The math call with an options tab that the caret is in: outlined
+    /// like an inline call (under the render).
+    fn snapshot_math_call_outline(&self, snapshot: &gtk::Snapshot, x0: f64, scroll: f64) {
+        let Some((stops, top, block, path)) = self.tab_call(scroll) else {
+            return;
+        };
+        let zoom = self.zoom.get();
+        let pad = caret::CALL_PAD_PT * zoom;
+        let blue = |a: f32| gdk::RGBA::new(0.21, 0.52, 0.89, a);
+        for r in caret::call_outline(&stops, block, &path) {
+            let rect = graphene::Rect::new(
+                (x0 + r.x * zoom - pad) as f32,
+                (top + r.y * zoom - pad) as f32,
+                (r.w * zoom + 2.0 * pad) as f32,
+                (r.h * zoom + 2.0 * pad) as f32,
+            );
+            let outline = gsk::RoundedRect::from_rect(rect, 2.0);
+            snapshot.append_color(&blue(0.04), &rect);
+            snapshot.append_border(&outline, &[1.0; 4], &[blue(0.35); 4]);
+        }
+    }
+
+    /// The options tab of the math call the caret is in, on the top edge of
+    /// its outline, over the render (it may cover the line above): its
+    /// options, or a faint "+ options" when it has none and the caret is
+    /// not in it. The text is drawn char by char at the tab's positions.
+    fn snapshot_call_tab(&self, snapshot: &gtk::Snapshot, x0: f64, scroll: f64) {
+        let Some((stops, top, block, mut path)) = self.tab_call(scroll) else {
+            return;
+        };
+        path.push(model::Step::Opts);
+        let tab: Vec<&Stop> = stops
+            .iter()
+            .filter(|s| s.tab && s.cursor.block == block && s.cursor.path == path)
+            .collect();
+        let (Some(first), Some(last)) = (tab.first(), tab.last()) else {
+            return;
+        };
+        let (opts, editing) = {
+            let ed = self.editor.borrow();
+            let caret = ed.caret();
+            let editing = caret.block == block && caret.path == path;
+            let opts = match ed.doc().resolve(&CursorPath {
+                block,
+                path: path.clone(),
+                offset: 0,
+            }) {
+                Some(model::Target::Opts { text, .. }) => text.to_string(),
+                _ => return,
+            };
+            (opts, editing)
+        };
+        let shown = if opts.is_empty() && !editing {
+            "+ options".to_string()
+        } else {
+            opts.clone()
+        };
+        let zoom = self.zoom.get();
+        let blue = |a: f32| gdk::RGBA::new(0.21, 0.52, 0.89, a);
+        let width = (shown.chars().count().max(1) as f64 * caret::PILL_CHAR_PT
+            + 2.0 * caret::PILL_PAD_PT)
+            .max(last.x - first.x + 2.0 * caret::PILL_PAD_PT);
+        let rect = graphene::Rect::new(
+            (x0 + (first.x - caret::PILL_PAD_PT) * zoom) as f32,
+            (top + (first.top - 1.0) * zoom) as f32,
+            (width * zoom) as f32,
+            (caret::TAB_HEIGHT_PT * zoom) as f32,
+        );
+        let shape = gsk::RoundedRect::from_rect(rect, 2.0);
+        let (fill, border, text) = match (opts.is_empty(), editing) {
+            (true, false) => (blue(0.03), blue(0.3), gdk::RGBA::new(0.4, 0.45, 0.55, 0.8)),
+            (_, true) => (blue(0.12), blue(0.7), gdk::RGBA::new(0.1, 0.25, 0.5, 1.0)),
+            (false, false) => (blue(0.08), blue(0.4), gdk::RGBA::new(0.15, 0.3, 0.55, 1.0)),
+        };
+        snapshot.push_rounded_clip(&shape);
+        snapshot.append_color(&gdk::RGBA::WHITE, &rect);
+        snapshot.append_color(&fill, &rect);
+        snapshot.pop();
+        snapshot.append_border(&shape, &[1.0; 4], &[border; 4]);
+        let mut font = gtk::pango::FontDescription::from_string("Monospace");
+        font.set_absolute_size(caret::PILL_FONT_PT * zoom * gtk::pango::SCALE as f64);
+        let baseline_y = first.top - 1.0 + caret::TAB_HEIGHT_PT - caret::TAB_DESCENT_PT;
+        for (k, c) in shown.chars().enumerate() {
+            let layout = self.obj().create_pango_layout(Some(&c.to_string()));
+            layout.set_font_description(Some(&font));
+            let baseline = layout.baseline() as f64 / gtk::pango::SCALE as f64;
+            let x = first.x + k as f64 * caret::PILL_CHAR_PT;
+            snapshot.save();
+            snapshot.translate(&graphene::Point::new(
+                (x0 + x * zoom) as f32,
+                (top + baseline_y * zoom - baseline) as f32,
+            ));
+            snapshot.append_layout(&layout, &text);
+            snapshot.restore();
         }
     }
 
@@ -1392,8 +1507,28 @@ impl SemEditor {
     }
 
     fn locate(&self, x: f64, y: f64) -> Option<CursorPath> {
+        if let Some(c) = self.tab_at(x, y) {
+            return Some(c);
+        }
         let (stops, bx, by) = self.block_at(x, y)?;
         caret::hit(&stops, bx, by).map(|s| s.cursor.clone())
+    }
+
+    /// The position in the options tab shown (of the call the caret is in)
+    /// at widget point `(x, y)`. The tab may stick out above its block.
+    fn tab_at(&self, x: f64, y: f64) -> Option<CursorPath> {
+        let (block, mut path) = {
+            let ed = self.editor.borrow();
+            (ed.caret().block, ed.tab_focus()?)
+        };
+        path.push(model::Step::Opts);
+        let index = self.editor.borrow().doc().top_index(block)?;
+        let top = *self.block_tops().get(index)?;
+        let zoom = self.zoom.get();
+        let bx = (x - self.page_x(self.obj().width() as f64)) / zoom;
+        let by = (y + self.scroll() - top) / zoom;
+        let stops = self.block_stops(index);
+        caret::tab_hit(&stops, block, &path, bx, by).map(|s| s.cursor.clone())
     }
 
     fn heading_at(&self, x: f64, y: f64) -> Option<NodeId> {

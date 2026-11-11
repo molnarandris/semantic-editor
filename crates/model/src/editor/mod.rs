@@ -431,6 +431,15 @@ impl Editor {
         }
     }
 
+    /// The call's node id, the offset and the options' length when the
+    /// caret is in the options tab of a math call.
+    fn opts_pos(&self) -> Option<(NodeId, usize, usize)> {
+        match self.doc.resolve(&self.caret)? {
+            Target::Opts { node, text } => Some((node.id, self.caret.offset, text.chars().count())),
+            _ => None,
+        }
+    }
+
     fn pos_in(&self, raw: bool) -> Option<TextPos<'_>> {
         let c = &self.caret;
         let place = self.doc.place(c.block)?;
@@ -958,6 +967,9 @@ impl Editor {
             (None, None) if self.label_pos().is_some() => {
                 "label (letters, digits, - _ . :) · Enter, space or Esc → leave"
             }
+            (None, None) if self.opts_pos().is_some() => {
+                "options, as Typst code (size: 80%) · Enter or Esc → leave"
+            }
             (None, None) if self.raw_pos().is_some() => "code, kept as typed · ` or Esc → end it",
             (None, None) if let Some(hint) = self.inline_call_hint() => hint,
             (None, None) if let Some(hint) = self.call_hint() => hint,
@@ -1020,6 +1032,24 @@ impl Editor {
         let (_, mut path) = self.call_around(&self.caret.path[..at.prefix])?;
         path.push(Step::Body);
         Some(path)
+    }
+
+    /// The innermost math call with an options tab that the caret is in
+    /// (in an argument or in the tab): the path to the call node, ending
+    /// `Index(k)`. Its outline and tab show.
+    pub fn tab_focus(&self) -> Option<Vec<Step>> {
+        let block = self.doc.block(self.caret.block)?;
+        let path = &self.caret.path;
+        (1..path.len()).rev().find_map(|n| {
+            let (Step::Index(k), Step::Arg(_) | Step::Opts) = (path[n - 1], path[n]) else {
+                return None;
+            };
+            let Ok(Target::Row { row }) = self.doc.walk(block, &path[..n - 1]) else {
+                return None;
+            };
+            row.nodes.get(k)?.kind.tab()?;
+            Some(path[..n].to_vec())
+        })
     }
 
     /// The figure whose caption the caret is in.

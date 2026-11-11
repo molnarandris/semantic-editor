@@ -129,6 +129,19 @@ impl Editor {
             let after = cursor(block, vec![Step::Label], offset - 1);
             return self.commit(vec![op], after, Last::Deleting);
         }
+        if let Some((node, offset, _)) = self.opts_pos() {
+            if offset == 0 {
+                return self.move_left();
+            }
+            let op = Op::Delete {
+                seq: Seq::Opts(node),
+                index: offset - 1,
+                count: 1,
+            };
+            let mut after = self.caret.clone();
+            after.offset = offset - 1;
+            return self.commit(vec![op], after, Last::Deleting);
+        }
         if let Some(pos) = self.raw_pos() {
             // Inline code: chars go; at its start, empty code goes, else ←.
             if pos.offset > 0 {
@@ -511,6 +524,18 @@ impl Editor {
             }
             let op = Op::Delete {
                 seq: Seq::Label(block),
+                index: offset,
+                count: 1,
+            };
+            let after = self.caret.clone();
+            return self.commit(vec![op], after, Last::Deleting);
+        }
+        if let Some((node, offset, len)) = self.opts_pos() {
+            if offset == len {
+                return self.move_right();
+            }
+            let op = Op::Delete {
+                seq: Seq::Opts(node),
                 index: offset,
                 count: 1,
             };

@@ -714,7 +714,7 @@ fn inline_diagrams() {
 /// `cases` (variadic), `hat` (a symbol that can be called).
 fn fake_math_calls(_: &[&str], name: &str) -> Option<MathCallShape> {
     let (slots, variadic) = match name {
-        "sqrt" | "hat" => (1, false),
+        "sqrt" | "hat" | "lr" | "abs" => (1, false),
         "root" => (2, false),
         "cases" => (1, true),
         _ => return None,
@@ -771,6 +771,50 @@ fn math_calls() {
     let mut e = math_calls_editor();
     e.insert_text("sqrt(a,b)");
     assert_eq!(display_of(&e, 0), "sqrt(a , b)");
+}
+
+/// The options tab of a math call: ← from the start of its first argument
+/// (→ from before the call) reaches it; every char is kept; Enter or Esc
+/// go into the first argument. Calls that take no options have none.
+#[test]
+fn math_call_options() {
+    let mut e = math_calls_editor();
+    e.insert_text("lr ");
+    assert_eq!(display_of(&e, 0), "lr()");
+    assert!(e.move_left());
+    assert_eq!(e.caret().path.last(), Some(&Step::Opts));
+    assert_eq!(labels(&e).last(), Some(&"options"));
+    e.insert_text("size: 80%");
+    assert_eq!(display_of(&e, 0), "lr[size: 80%]()");
+    e.backspace();
+    e.insert_text("%");
+    assert!(e.enter());
+    assert_eq!(e.caret().path.last(), Some(&Step::Arg(0)));
+    e.insert_text("(x)");
+    assert_eq!(display_of(&e, 0), "lr[size: 80%](( x ))");
+    e.doc().check_invariants().unwrap();
+    // From before the call, → enters the tab first; Delete at its end goes
+    // on, Esc leaves.
+    let mut e = math_calls_editor();
+    e.insert_text("abs(y");
+    e.escape();
+    while !(e.caret().path.is_empty() && e.caret().offset == 0) {
+        assert!(e.move_left());
+    }
+    assert!(e.move_right());
+    assert_eq!(e.caret().path.last(), Some(&Step::Opts));
+    e.insert_text("size: 2em");
+    e.escape();
+    assert_eq!(e.caret().path.last(), Some(&Step::Arg(0)));
+    assert_eq!(display_of(&e, 0), "abs[size: 2em](y)");
+    // Undo takes the options back.
+    while e.undo() {}
+    assert_eq!(display_of(&e, 0), "");
+    // `sqrt` takes no options: ← from its argument leaves the call.
+    let mut e = math_calls_editor();
+    e.insert_text("sqrt ");
+    assert!(e.move_left());
+    assert_eq!(e.caret().path.last(), None);
 }
 
 /// `cases`: Enter starts a new case after the caret's one (also from deeper
@@ -991,8 +1035,13 @@ fn show(row: &crate::tree::MathRow) -> String {
             MathKind::Text(t) => format!("\"{t}\""),
             MathKind::Align => "&".into(),
             MathKind::Linebreak => "\\".into(),
-            MathKind::Call { name, args, .. } => format!(
-                "{name}({})",
+            MathKind::Call { name, opts, args } => format!(
+                "{name}{}({})",
+                if opts.is_empty() {
+                    String::new()
+                } else {
+                    format!("[{opts}]")
+                },
                 args.iter().map(show).collect::<Vec<_>>().join(", ")
             ),
             MathKind::Frac { num, den } => format!("frac({}, {})", show(num), show(den)),

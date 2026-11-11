@@ -58,6 +58,9 @@ impl Editor {
         if self.label_pos().is_some() {
             return self.label_char(c);
         }
+        if self.opts_pos().is_some() {
+            return self.opts_char(c);
+        }
         self.selected = None;
         // Just before/after an environment: typing starts a paragraph there.
         if let Some((place, offset)) = self.edge() {
@@ -523,6 +526,33 @@ impl Editor {
         self.paragraph_after(place)
     }
 
+    /// Typing in a math call's options tab: every char is kept as typed
+    /// (Typst code, `size: 55%`).
+    fn opts_char(&mut self, c: char) -> bool {
+        self.selected = None;
+        let Some((node, offset, _)) = self.opts_pos() else {
+            return false;
+        };
+        let op = Op::Insert {
+            seq: Seq::Opts(node),
+            index: offset,
+            items: Items::Text(c.into()),
+        };
+        let mut after = self.caret.clone();
+        after.offset = offset + 1;
+        self.commit(vec![op], after, Last::Typing { space: false })
+    }
+
+    /// Leave the options tab the caret is in: into the call's first
+    /// argument.
+    pub(super) fn leave_opts(&mut self) -> bool {
+        let Some((_, _, len)) = self.opts_pos() else {
+            return false;
+        };
+        self.caret.offset = len;
+        self.neighbour(false).is_some_and(|next| self.jump(next))
+    }
+
     /// Typing in inline code: everything is kept as typed; `` ` `` ends it.
     fn raw_char(&mut self, c: char) -> bool {
         self.selected = None;
@@ -699,7 +729,8 @@ impl Editor {
                 self.word = Some(self.caret.clone());
                 true
             }
-            '(' if p.nested() && p.len == 0 => {
+            // In an `lr`, brackets are what it scales: `(` is a bracket.
+            '(' if p.nested() && p.len == 0 && !self.in_lr(&p) => {
                 self.groups.insert(p.row);
                 true
             }
@@ -871,6 +902,16 @@ impl Editor {
             args.insert(i + 1, row);
         }
         self.commit(vec![self.row_replace(prow, j, node)], next, Last::Other)
+    }
+
+    /// Whether the caret's row is the argument of an `lr` call.
+    fn in_lr(&self, p: &RowPos) -> bool {
+        let Some((parent, j, Step::Arg(_))) = p.parent() else {
+            return false;
+        };
+        self.row_id_at(p.block, &parent)
+            .and_then(|prow| self.row_nodes(prow).get(j))
+            .is_some_and(|n| matches!(&n.kind, MathKind::Call { name, .. } if name == "lr"))
     }
 
     /// The innermost call taking more arguments (`cases`) with the caret in

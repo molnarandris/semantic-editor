@@ -181,4 +181,30 @@ mod tests {
         assert_eq!(m("k"), None);
         assert_eq!(math_call_shape(&["#let f(x) = x"], "f"), None, "one letter");
     }
+
+    /// `model::OPTION_CALLS` are the math functions (and callable symbols)
+    /// of Typst's library with named parameters that are not content
+    /// (`attach`'s are; `text` and `equation` are not called in math).
+    #[test]
+    fn option_calls_match_the_library() {
+        let mut names = vec![];
+        for (name, binding) in LIBRARY.math.scope().iter() {
+            let func = match binding.read() {
+                Value::Func(f) => f.clone(),
+                Value::Symbol(s) => match s.func() {
+                    Ok(f) => f,
+                    Err(_) => continue,
+                },
+                _ => continue,
+            };
+            if ["attach", "text", "equation"].contains(&name.as_str()) {
+                continue;
+            }
+            if func.params().any(|p| p.named() && !p.positional()) {
+                names.push(name.to_string());
+            }
+        }
+        names.sort();
+        assert_eq!(names, model::OPTION_CALLS);
+    }
 }

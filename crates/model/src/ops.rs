@@ -8,7 +8,9 @@
 use std::fmt;
 
 use crate::cursor::Step;
-use crate::tree::{Block, BlockNode, Document, Inline, InlineNode, MathNode, NodeId, Place};
+use crate::tree::{
+    Block, BlockNode, Document, Inline, InlineNode, MathKind, MathNode, NodeId, Place,
+};
 
 /// A sequence inside the document that ops splice into.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -28,6 +30,8 @@ pub enum Seq {
     Header,
     /// The chars of a block's label (by block id).
     Label(NodeId),
+    /// The chars of a math call's options (by node id).
+    Opts(NodeId),
 }
 
 impl Place {
@@ -226,6 +230,16 @@ impl Document {
                 .block_mut(block)
                 .map(|b| SeqMut::Text(&mut b.label))
                 .ok_or_else(not_found),
+            Seq::Opts(node) => {
+                let (row, k) = self
+                    .find_node(node)
+                    .map(|(r, k)| (r.id, k))
+                    .ok_or_else(not_found)?;
+                match &mut self.find_row_mut(row).ok_or_else(not_found)?.nodes[k].kind {
+                    MathKind::Call { opts, .. } => Ok(SeqMut::Text(opts)),
+                    _ => Err(OpError::KindMismatch),
+                }
+            }
         }
     }
 

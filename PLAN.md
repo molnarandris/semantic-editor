@@ -1087,3 +1087,21 @@ reported targets, so only those are still listed. On the paper: no problems left
   content, `attach(x, t: y)`) leave the formula raw, as before.
 - `.sem` format 18; files of format 17 (options as written in math) are
   converted on load (`typst_bridge::code_opts`).
+- Which calls have a tab: `model::OPTION_CALLS`, Typst's math functions (and
+  callable symbols, the accents) with named parameters that are not content,
+  or any call with options already (`MathKind::tab`). Test
+  `option_calls_match_the_library` keeps the list in step with Typst.
+- Cursor: `Step::Opts` after a call's `Index(k)`, `offset` counts chars
+  (`Target::Opts`); its positions come right after the position before the
+  call, so → from before the call and ← from the start of its first argument
+  reach the tab. Edits go through `Seq::Opts(node)` (undo works).
+- Typing: every char kept (spaces too); Enter or Esc → into the first
+  argument; Backspace at the tab's start and Delete at its end move on.
+  In an `lr` argument `(` is a bracket (elsewhere `(` in an empty argument
+  opens its group), so `lr` + space then `(x)` types the brackets to scale.
+- Widget: tab stops (`Stop::tab`) keep the formula's baseline and sit above
+  the call's box (`caret::tab_rect`); line moves, Home/End, clicks on the page
+  and the call outline skip them; a click on the shown tab (`caret::tab_hit`)
+  reaches them. While the caret is in a call with a tab (`Editor::tab_focus`),
+  the call is outlined (under the render) and the tab drawn over the render,
+  "+ options" when empty. Test `call_option_tabs`, `math_call_options`.

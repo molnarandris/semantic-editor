@@ -21,10 +21,13 @@
 //! - Row path: pairs `Index(k), <child>` descending into node `k`'s child row
 //!   (`Num`, `Den`, `Base`, `Sup`, `Sub`, `Arg(i)`); `offset` is a position `0..=len`
 //!   between the row's nodes.
+//! - Options of a math call: a row path ending `Index(k), Opts`, `offset` counts
+//!   chars of the options of call `k` (its tab). Its positions come before the
+//!   call's arguments.
 
 use serde::{Deserialize, Serialize};
 
-use crate::tree::{Block, BlockNode, Document, Inline, InlineNode, MathRow, NodeId};
+use crate::tree::{Block, BlockNode, Document, Inline, InlineNode, MathNode, MathRow, NodeId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Step {
@@ -40,6 +43,8 @@ pub enum Step {
     Body,
     /// The label of a block (`[Label]`).
     Label,
+    /// The options of a math call (`size: 55%`), in its tab.
+    Opts,
 }
 
 impl Step {
@@ -54,6 +59,7 @@ impl Step {
             Step::Arg(_) => "argument",
             Step::Body => "body",
             Step::Label => "label",
+            Step::Opts => "options",
         }
     }
 }
@@ -89,15 +95,21 @@ pub enum Target<'a> {
         block: &'a BlockNode,
         text: &'a str,
     },
+    /// The options of a math call.
+    Opts {
+        node: &'a MathNode,
+        text: &'a str,
+    },
 }
 
 impl Target<'_> {
     /// Number of caret positions minus one: chars for text, nodes for rows.
     pub fn len(&self) -> usize {
         match self {
-            Target::Text { text, .. } | Target::Raw { text, .. } | Target::Label { text, .. } => {
-                text.chars().count()
-            }
+            Target::Text { text, .. }
+            | Target::Raw { text, .. }
+            | Target::Label { text, .. }
+            | Target::Opts { text, .. } => text.chars().count(),
             Target::Row { row } => row.nodes.len(),
             Target::Edge { .. } => 1,
         }
@@ -496,6 +508,17 @@ impl Document {
         };
         while let [Step::Index(k), child, rest @ ..] = path {
             let Some(node) = row.nodes.get(*k) else { break };
+            if *child == Step::Opts {
+                crumbs.push(Crumb {
+                    label: node.label(),
+                    path_len: consumed + 1,
+                });
+                crumbs.push(Crumb {
+                    label: child.label(),
+                    path_len: consumed + 1,
+                });
+                break;
+            }
             let Some(next) = node.child(*child) else {
                 break;
             };
@@ -522,6 +545,17 @@ fn row_positions(block: NodeId, path: Vec<Step>, row: &MathRow, out: &mut Vec<Cu
             path: path.clone(),
             offset: k,
         });
+        if let Some(opts) = node.kind.tab() {
+            let mut p = path.clone();
+            p.extend([Step::Index(k), Step::Opts]);
+            for offset in 0..=opts.chars().count() {
+                out.push(CursorPath {
+                    block,
+                    path: p.clone(),
+                    offset,
+                });
+            }
+        }
         for (step, child) in node.children() {
             let mut p = path.clone();
             p.extend([Step::Index(k), step]);
@@ -538,6 +572,11 @@ fn row_positions(block: NodeId, path: Vec<Step>, row: &MathRow, out: &mut Vec<Cu
 fn walk_row<'a>(row: &'a MathRow, path: &[Step]) -> Result<Target<'a>, usize> {
     match path {
         [] => Ok(Target::Row { row }),
+        [Step::Index(k), Step::Opts] => {
+            let node = row.nodes.get(*k).ok_or(0usize)?;
+            let text = node.kind.tab().ok_or(0usize)?;
+            Ok(Target::Opts { node, text })
+        }
         [Step::Index(k), child, rest @ ..] => {
             let child = row
                 .nodes

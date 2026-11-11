@@ -408,10 +408,34 @@ pub enum MathKind {
     Diagram(String),
 }
 
+/// Typst's math functions that take options (named arguments that are not
+/// content): their calls get an options tab. Checked against Typst's
+/// library by a test in `typst-bridge`.
+pub const OPTION_CALLS: &[&str] = &[
+    "abs", "accent", "acute", "arrow", "bag", "bar", "brace", "bracket", "breve", "cancel",
+    "caron", "cases", "ceil", "chevron", "circle", "compose", "corner", "dash", "diaer", "display",
+    "dot", "fence", "floor", "frac", "grave", "harpoon", "hat", "inline", "limits", "lr", "macron",
+    "mat", "minus", "mustache", "norm", "op", "paren", "round", "script", "shell", "sscript",
+    "stretch", "tilde", "vec",
+];
+
 /// Bars Typst classes as fences: spaces written next to them show.
 pub const BARS: [&str; 3] = ["|", "‖", "⦀"];
 
 impl MathKind {
+    /// The options of a call that has an options tab: one of Typst's
+    /// functions that take options, or one with options already.
+    pub fn tab(&self) -> Option<&str> {
+        match self {
+            MathKind::Call { name, opts, .. }
+                if !opts.is_empty() || OPTION_CALLS.contains(&name.as_str()) =>
+            {
+                Some(opts)
+            }
+            _ => None,
+        }
+    }
+
     /// A bar or quoted text: Typst shows the spaces written next to it.
     pub fn is_spaced(&self) -> bool {
         match self {
