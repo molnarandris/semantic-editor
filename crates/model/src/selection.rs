@@ -1,7 +1,7 @@
 //! Selections: anchor + head cursors, normalized to whole subtrees in math.
 
 use crate::cursor::{CursorPath, Step, Target};
-use crate::tree::{Document, Inline, NodeId};
+use crate::tree::{BlockNode, Document, Inline, InlineNode, MathNode, NodeId};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Selection {
@@ -39,6 +39,19 @@ pub enum SelRange {
         start: (usize, usize),
         end: (usize, usize),
     },
+}
+
+/// A copied piece of a document: what a selection covers, to be written
+/// as Typst (copy) or put in at the caret (paste).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Fragment {
+    Blocks(Vec<BlockNode>),
+    /// Inlines of a paragraph (texts, formulas, calls…).
+    Inlines(Vec<InlineNode>),
+    /// Nodes of a math row.
+    Math(Vec<MathNode>),
+    /// Chars of a label or of a call's options: copied as they are.
+    Plain(String),
 }
 
 impl Selection {

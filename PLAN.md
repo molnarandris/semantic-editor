@@ -1152,3 +1152,14 @@ reported targets, so only those are still listed. On the paper: no problems left
 - Drawing: `selection_bounds` gives both ends as positions; every stop between
   them in the block's stop order, grouped by line, gives one band per line;
   `Blocks` shade whole block views. Test `range_selections`, selection tests.
+
+## Selection, step 3b: copy and cut (2026-11-11)
+
+- `Editor::selection_fragment` → `model::Fragment`: `Blocks`, `Inlines` (texts cut
+  at the range's ends, formulas/calls whole), `Math` (row nodes), `Plain` (chars
+  of a label or options); a raw block's whole text copies the block.
+- `typst_bridge::fragment_source`: Typst as the export writes it: inlines as a
+  paragraph's text (markup escaped, `a \*`), math nodes as a formula's content
+  without `$`, blocks joined as in the export. Test `fragments_as_typst`.
+- Widget: Ctrl+C puts it on the clipboard as text; Ctrl+X too, then deletes
+  the range. A status-bar hint names the keys while a range is selected.

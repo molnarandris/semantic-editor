@@ -7,8 +7,8 @@ use std::ops::Range;
 use typst::syntax::ast::{self, AstNode};
 
 use model::{
-    Block, BlockNode, Document, Inline, InlineNode, ListKind, MathKind, MathNode, MathRow, NodeId,
-    TitleFields, spaced_gap,
+    Block, BlockNode, Document, Fragment, Inline, InlineNode, ListKind, MathKind, MathNode,
+    MathRow, NodeId, TitleFields, spaced_gap,
 };
 
 /// Shared definitions and styles. Prepended to every block document and to
@@ -1183,6 +1183,37 @@ fn serialize_with(block: &BlockNode, style: Style, number: Option<usize>) -> (St
 }
 
 /// The whole document as one readable Typst file: preamble, header, blocks.
+/// A copied piece as Typst, written as the export writes it: blocks joined
+/// as in a document (no preamble or header), inlines as a paragraph's text,
+/// math nodes as a formula's content (without `$`).
+pub fn fragment_source(fragment: &Fragment) -> String {
+    let mut d = Document::empty();
+    let paragraph = |p: BlockNode| serialize_block_styled(&p, Style::Readable).0;
+    match fragment {
+        Fragment::Plain(s) => s.clone(),
+        Fragment::Inlines(inlines) => paragraph(d.paragraph(inlines.clone())),
+        Fragment::Math(nodes) => {
+            let m = d.math(nodes.clone());
+            let s = paragraph(d.paragraph(vec![m]));
+            let s = s.trim();
+            let s = s.strip_prefix('$').unwrap_or(s);
+            s.strip_suffix('$').unwrap_or(s).trim().to_string()
+        }
+        Fragment::Blocks(blocks) => {
+            let item = |b: &BlockNode| matches!(b.kind, Block::Item { .. });
+            let mut out = String::new();
+            for (i, block) in blocks.iter().enumerate() {
+                if i > 0 && !item(block) {
+                    out.push('\n');
+                }
+                out.push_str(&serialize_block_styled(block, Style::Readable).0);
+                out.push('\n');
+            }
+            out.trim_end().to_string()
+        }
+    }
+}
+
 pub fn serialize_document(doc: &Document) -> String {
     serialize_document_mapped(doc).0
 }
@@ -1231,6 +1262,29 @@ mod tests {
 
     fn ser(block: &BlockNode) -> String {
         serialize_block(block).0
+    }
+
+    /// Copied pieces as Typst: inlines as text, math nodes without `$`,
+    /// blocks as in the export.
+    #[test]
+    fn fragments_as_typst() {
+        let mut d = Document::empty();
+        let (a, x, b) = (d.text("a *"), d.ident("x"), d.text(" b"));
+        let m = d.math(vec![x]);
+        assert_eq!(
+            fragment_source(&Fragment::Inlines(vec![a, m, b])),
+            "a \\*$x$ b"
+        );
+        let (x, plus, y) = (d.ident("x"), d.sym("+"), d.ident("y"));
+        assert_eq!(fragment_source(&Fragment::Math(vec![x, plus, y])), "x + y");
+        let t = d.text("one");
+        let p1 = d.paragraph(vec![t]);
+        let t = d.text("two");
+        let p2 = d.paragraph(vec![t]);
+        assert_eq!(
+            fragment_source(&Fragment::Blocks(vec![p1, p2])),
+            "one\n\ntwo"
+        );
     }
 
     /// Golden cases: (description, block, expected Typst).

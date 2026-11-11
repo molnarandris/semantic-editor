@@ -402,6 +402,9 @@ enum Command {
     Heading(Option<u8>),
     /// Ctrl+plus / Ctrl+minus.
     Zoom(f64),
+    /// Ctrl+C / Ctrl+X: the selection to the clipboard as Typst.
+    Copy,
+    Cut,
 }
 
 impl Command {
@@ -655,6 +658,17 @@ impl SemEditor {
                 drop(ed);
                 self.zoom_by(steps);
                 return;
+            }
+            Command::Copy | Command::Cut => {
+                let Some(fragment) = ed.selection_fragment() else {
+                    return;
+                };
+                self.obj()
+                    .clipboard()
+                    .set_text(&typst_bridge::fragment_source(&fragment));
+                if matches!(cmd, Command::Cut) {
+                    ed.backspace();
+                }
             }
             // Moves that need the rendered geometry.
             Command::Up | Command::Down | Command::LineStart | Command::LineEnd => {
@@ -2117,6 +2131,8 @@ fn command_for(key: gdk::Key, state: gdk::ModifierType) -> Option<Command> {
             Key::z if shift => Command::Redo,
             Key::z => Command::Undo,
             Key::y => Command::Redo,
+            Key::c => Command::Copy,
+            Key::x => Command::Cut,
             _ => return None,
         },
         _ => return None,

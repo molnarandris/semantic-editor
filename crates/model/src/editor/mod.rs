@@ -14,7 +14,7 @@ use std::collections::HashSet;
 use crate::cursor::{CursorPath, Step, Target};
 use crate::history::History;
 use crate::ops::{Items, Op, Seq};
-use crate::selection::{SelRange, Selection};
+use crate::selection::{Fragment, SelRange, Selection};
 use crate::symbols;
 use crate::tree::{
     Block, BlockNode, Document, Inline, InlineNode, ListKind, MathKind, MathNode, NodeId, Place,
@@ -794,6 +794,69 @@ impl Editor {
         }
     }
 
+    /// What the selected range covers, to copy.
+    pub fn selection_fragment(&self) -> Option<Fragment> {
+        let chars =
+            |s: &str, a: usize, b: usize| -> String { s.chars().skip(a).take(b - a).collect() };
+        Some(match self.selection()? {
+            SelRange::Text {
+                block,
+                path,
+                start,
+                end,
+            } => {
+                let b = self.doc.block(block)?;
+                match self.doc.walk(b, &path).ok()? {
+                    Target::Text { text, .. } => {
+                        let mut d = Document::empty();
+                        Fragment::Inlines(vec![d.text(&chars(text, start, end))])
+                    }
+                    Target::Raw { block, .. } => Fragment::Blocks(vec![block.clone()]),
+                    Target::Label { text, .. } | Target::Opts { text, .. } => {
+                        Fragment::Plain(chars(text, start, end))
+                    }
+                    _ => return None,
+                }
+            }
+            SelRange::Row {
+                block,
+                path,
+                start,
+                end,
+            } => {
+                let row = self.row_id_at(block, &path)?;
+                Fragment::Math(self.row_nodes(row).get(start..end)?.to_vec())
+            }
+            SelRange::Inlines {
+                block,
+                prefix,
+                start: (i, c),
+                end: (j, c2),
+                ..
+            } => {
+                let b = self.doc.block(block)?;
+                let first = [&prefix[..], &[Step::Index(0)]].concat();
+                let list = self.doc.inline_at(b, &first)?.inlines;
+                let mut d = Document::empty();
+                let mut out = vec![];
+                for (k, inline) in list.iter().enumerate().take(j + 1).skip(i) {
+                    match &inline.kind {
+                        Inline::Text(t) => {
+                            let from = if k == i { c } else { 0 };
+                            let to = if k == j { c2 } else { t.chars().count() };
+                            out.push(d.text(&chars(t, from, to)));
+                        }
+                        _ => out.push(inline.clone()),
+                    }
+                }
+                Fragment::Inlines(out)
+            }
+            SelRange::Blocks { start, end } => {
+                Fragment::Blocks(self.doc.blocks.get(start..end)?.to_vec())
+            }
+        })
+    }
+
     /// Select a subtree (the first Backspace/Delete on a structure, a
     /// breadcrumb click). The caret stays.
     fn select(&mut self, sel: Selected) -> bool {
@@ -1022,6 +1085,9 @@ impl Editor {
 
     /// A short key hint for the status bar.
     pub fn hint(&self) -> &'static str {
+        if self.selection().is_some() {
+            return "selection · Ctrl+C → copy, Ctrl+X → cut · Backspace → delete · typing replaces it · Esc → cancel";
+        }
         match (&self.selected, self.row_pos()) {
             (Some(Selected::Unwrap { .. }), _) => {
                 "Backspace → remove the environment, keep its text · Esc → cancel"
