@@ -1108,3 +1108,14 @@ reported targets, so only those are still listed. On the paper: no problems left
   reaches them. While the caret is in a call with a tab (`Editor::tab_focus`),
   the call is outlined (under the render) and the tab drawn over the render,
   "+ options" when empty. Test `call_option_tabs`, `math_call_options`.
+
+## One contour around a multi-line call (2026-11-11)
+
+- User report: the outline of a call over several lines (`#audit[…]`, `#cl[…]`)
+  was one box per line, and the boxes overlapped. `caret::contour` turns the
+  lines' boxes (padded by `CALL_PAD_PT`) into polygons: consecutive lines that
+  overlap horizontally meet halfway between them and are traced as one shape
+  (down the right edges, up the left ones), straight-edge points dropped; a line
+  that does not overlap the one before starts a shape of its own. Drawn as a
+  `gsk::Path` (fill and 1 px stroke) for inline calls and math calls with a tab.
+  Test `outline_contour`.

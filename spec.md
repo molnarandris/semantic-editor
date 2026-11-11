@@ -336,7 +336,8 @@ functions and packages.
   inside a call splits it with the paragraph. Typst draws everything; export writes
   `*…*`/`_…_` where Typst reads them back the same, else `#strong[…]`.
   While the caret is in a call, it is outlined like an environment (one box per
-  line it spans; user request 2026-11-09).
+  line it spans; user request 2026-11-09). Changed 2026-11-11 (user report: the
+  boxes of a multi-line call overlapped): one contour around its lines.
 - M13b decisions (2026-11-09): inline code `` `…` `` is its own inline (`Inline::Raw`),
   edited in place: `` ` `` starts it and `` ` `` ends it, everything typed in between
   is kept verbatim. A line break is a `\n` in the text (written `\ `), typed as in

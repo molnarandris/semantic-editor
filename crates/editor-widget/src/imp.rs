@@ -762,9 +762,9 @@ impl SemEditor {
     }
 
     /// The inline call the caret is in (bold, italic, `#name[…]`): tinted
-    /// and outlined like an environment, one box per line it spans.
+    /// and outlined like an environment, one contour around the lines it
+    /// spans.
     fn snapshot_call_outline(&self, snapshot: &gtk::Snapshot, x0: f64, scroll: f64) {
-        let zoom = self.zoom.get();
         let (block, call) = {
             let ed = self.editor.borrow();
             let Some(call) = ed.call_focus() else {
@@ -779,18 +779,35 @@ impl SemEditor {
             return;
         };
         let stops = self.block_stops(index);
-        let pad = 2.0 * zoom;
+        let lines = caret::call_outline(&stops, block, &call);
+        self.snapshot_contour(snapshot, &lines, x0, top - scroll);
+    }
+
+    /// A call's outline: the contour of its lines' boxes (`lines`, block
+    /// coordinates; the block's top at widget y `top`), tinted.
+    fn snapshot_contour(
+        &self,
+        snapshot: &gtk::Snapshot,
+        lines: &[typst_bridge::Rect],
+        x0: f64,
+        top: f64,
+    ) {
+        let zoom = self.zoom.get();
         let blue = |a: f32| gdk::RGBA::new(0.21, 0.52, 0.89, a);
-        for r in caret::call_outline(&stops, block, &call) {
-            let rect = graphene::Rect::new(
-                (x0 + r.x * zoom - pad) as f32,
-                (top + r.y * zoom - scroll - pad) as f32,
-                (r.w * zoom + 2.0 * pad) as f32,
-                (r.h * zoom + 2.0 * pad) as f32,
-            );
-            let outline = gsk::RoundedRect::from_rect(rect, 2.0);
-            snapshot.append_color(&blue(0.04), &rect);
-            snapshot.append_border(&outline, &[1.0; 4], &[blue(0.35); 4]);
+        for polygon in caret::contour(lines, caret::CALL_PAD_PT) {
+            let path = gsk::PathBuilder::new();
+            for (i, &(x, y)) in polygon.iter().enumerate() {
+                let (x, y) = ((x0 + x * zoom) as f32, (top + y * zoom) as f32);
+                if i == 0 {
+                    path.move_to(x, y);
+                } else {
+                    path.line_to(x, y);
+                }
+            }
+            path.close();
+            let path = path.to_path();
+            snapshot.append_fill(&path, gsk::FillRule::Winding, &blue(0.04));
+            snapshot.append_stroke(&path, &gsk::Stroke::new(1.0), &blue(0.35));
         }
     }
 
@@ -813,20 +830,8 @@ impl SemEditor {
         let Some((stops, top, block, path)) = self.tab_call(scroll) else {
             return;
         };
-        let zoom = self.zoom.get();
-        let pad = caret::CALL_PAD_PT * zoom;
-        let blue = |a: f32| gdk::RGBA::new(0.21, 0.52, 0.89, a);
-        for r in caret::call_outline(&stops, block, &path) {
-            let rect = graphene::Rect::new(
-                (x0 + r.x * zoom - pad) as f32,
-                (top + r.y * zoom - pad) as f32,
-                (r.w * zoom + 2.0 * pad) as f32,
-                (r.h * zoom + 2.0 * pad) as f32,
-            );
-            let outline = gsk::RoundedRect::from_rect(rect, 2.0);
-            snapshot.append_color(&blue(0.04), &rect);
-            snapshot.append_border(&outline, &[1.0; 4], &[blue(0.35); 4]);
-        }
+        let lines = caret::call_outline(&stops, block, &path);
+        self.snapshot_contour(snapshot, &lines, x0, top);
     }
 
     /// The options tab of the math call the caret is in, on the top edge of

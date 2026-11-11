@@ -749,6 +749,62 @@ pub fn call_outline(stops: &[Stop], block: model::NodeId, body: &[Step]) -> Vec<
         .collect()
 }
 
+/// The contour of the boxes of a call's lines (top to bottom), each
+/// widened by `pad`: one polygon around lines that overlap horizontally
+/// (gaps between them closed), so a call over several lines gets one
+/// outline, not overlapping boxes. Lines that do not overlap the line
+/// before start a polygon of their own. Points go clockwise.
+pub fn contour(rects: &[Rect], pad: f64) -> Vec<Vec<(f64, f64)>> {
+    let boxes: Vec<(f64, f64, f64, f64)> = rects
+        .iter()
+        .map(|r| (r.x - pad, r.right() + pad, r.y - pad, r.bottom() + pad))
+        .collect();
+    let mut groups: Vec<Vec<(f64, f64, f64, f64)>> = vec![];
+    for b in boxes {
+        match groups.last_mut() {
+            Some(g) if g.last().is_some_and(|p| b.0 < p.1 && p.0 < b.1) => g.push(b),
+            _ => groups.push(vec![b]),
+        }
+    }
+    groups
+        .into_iter()
+        .map(|mut g| {
+            // Consecutive lines meet halfway between them.
+            for i in 1..g.len() {
+                let mid = (g[i - 1].3 + g[i].2) / 2.0;
+                g[i - 1].3 = mid;
+                g[i].2 = mid;
+            }
+            let mut right = vec![];
+            for &(_, x1, top, bottom) in &g {
+                right.push((x1, top));
+                right.push((x1, bottom));
+            }
+            let mut left = vec![];
+            for &(x0, _, top, bottom) in g.iter().rev() {
+                left.push((x0, bottom));
+                left.push((x0, top));
+            }
+            let mut points: Vec<(f64, f64)> = right.into_iter().chain(left).collect();
+            points.dedup();
+            // Drop points in the middle of a straight edge.
+            let n = points.len();
+            let keep: Vec<bool> = (0..n)
+                .map(|i| {
+                    let (a, p, b) = (points[(i + n - 1) % n], points[i], points[(i + 1) % n]);
+                    !(a.0 == p.0 && p.0 == b.0 || a.1 == p.1 && p.1 == b.1)
+                })
+                .collect();
+            points
+                .into_iter()
+                .zip(keep)
+                .filter(|(_, k)| *k)
+                .map(|(p, _)| p)
+                .collect()
+        })
+        .collect()
+}
+
 /// The stop for a caret; if it is not among the stops (layout not updated
 /// yet), the nearest earlier position in the same container.
 pub fn find<'a>(stops: &'a [Stop], cursor: &CursorPath) -> Option<&'a Stop> {
@@ -947,6 +1003,37 @@ mod tests {
         let (src, offset) = block_document(&Around::default(), &snippet, width);
         let doc = compile(&mut world, &src).unwrap();
         raw_layout(&world, &doc.pages()[0], offset).resolve(&map)
+    }
+
+    /// A call over several lines gets one outline: the contour of its
+    /// lines' boxes.
+    #[test]
+    fn outline_contour() {
+        let r = |x: f64, y: f64, w: f64, h: f64| Rect { x, y, w, h };
+        // Starts mid-line, a full line, ends early: one polygon around all.
+        let lines = [
+            r(50.0, 0.0, 50.0, 10.0),
+            r(0.0, 12.0, 100.0, 10.0),
+            r(0.0, 24.0, 30.0, 10.0),
+        ];
+        let c = contour(&lines, 1.0);
+        assert_eq!(c.len(), 1);
+        assert_eq!(
+            c[0],
+            [
+                (101.0, -1.0),
+                (101.0, 23.0),
+                (31.0, 23.0),
+                (31.0, 35.0),
+                (-1.0, 35.0),
+                (-1.0, 11.0),
+                (49.0, 11.0),
+                (49.0, -1.0),
+            ]
+        );
+        // Lines that do not overlap: two shapes.
+        let apart = [r(80.0, 0.0, 20.0, 10.0), r(0.0, 12.0, 20.0, 10.0)];
+        assert_eq!(contour(&apart, 1.0).len(), 2);
     }
 
     /// The options tab of a math call: its stops (not among the model's
