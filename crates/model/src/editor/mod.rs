@@ -96,6 +96,10 @@ pub enum Selected {
     /// An environment marked by Backspace at the start of its text: its
     /// outline is drawn stronger, and the next Backspace unwraps it.
     Unwrap { env: NodeId },
+    /// An inline call (`#cl[…]`, bold) marked by Backspace at the start of
+    /// its body: `path` leads to it (ends with its `Index`); the next
+    /// Backspace replaces it by its body.
+    UnwrapCall { block: NodeId, path: Vec<Step> },
 }
 
 #[derive(Debug)]
@@ -879,7 +883,7 @@ impl Editor {
                 .inline_by_path(*block, path)
                 .map_or(vec![], |i| vec![i.id]),
             Some(Selected::Block { block }) => vec![*block],
-            Some(Selected::Unwrap { .. }) | None => vec![],
+            Some(Selected::Unwrap { .. } | Selected::UnwrapCall { .. }) | None => vec![],
         }
     }
 
@@ -932,6 +936,9 @@ impl Editor {
         match (&self.selected, self.row_pos()) {
             (Some(Selected::Unwrap { .. }), _) => {
                 "Backspace → remove the environment, keep its text · Esc → cancel"
+            }
+            (Some(Selected::UnwrapCall { .. }), _) => {
+                "Backspace → remove the call, keep its text · Esc → cancel"
             }
             (Some(_), _) => "Backspace → delete selection · Esc → cancel",
             (_, Some(_)) if self.code_atom().is_some() => {
@@ -1121,6 +1128,11 @@ impl Editor {
             return Some(block.id);
         }
         self.doc.env_around(self.doc.place(block.id)?.parent?)
+    }
+
+    /// Whether the next Backspace unwraps the inline call the caret is in.
+    pub fn call_marked(&self) -> bool {
+        matches!(self.selected, Some(Selected::UnwrapCall { .. }))
     }
 
     /// Whether the next Backspace unwraps the focused environment.

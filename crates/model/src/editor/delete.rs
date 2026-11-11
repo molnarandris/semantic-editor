@@ -36,6 +36,12 @@ impl Editor {
                 let (ops, after) = self.remove_block(place);
                 self.commit(ops, after, Last::Other)
             }
+            Selected::UnwrapCall { block, path } => {
+                let Some((ops, after)) = self.unwrap_inline(block, &path) else {
+                    return false;
+                };
+                self.commit(ops, after, Last::Other)
+            }
             Selected::Unwrap { env } => {
                 let Some(place) = self.doc.place(env) else {
                     return false;
@@ -188,15 +194,19 @@ impl Editor {
             });
         }
         if pos.nested() {
-            // The start of a call's body: an empty call goes, else ←.
-            let call = &pos.prefix[..pos.prefix.len() - 1];
+            // The start of a call's body: an empty call goes, else it is
+            // marked, and the next Backspace unwraps it.
+            let call = pos.prefix[..pos.prefix.len() - 1].to_vec();
             if pos.inlines.len() == 1 && pos.len == 0 {
-                let Some((ops, after)) = self.remove_inline(block_id, call) else {
+                let Some((ops, after)) = self.remove_inline(block_id, &call) else {
                     return false;
                 };
                 return self.commit(ops, after, Last::Other);
             }
-            return self.move_left();
+            return self.select(Selected::UnwrapCall {
+                block: block_id,
+                path: call,
+            });
         }
         if pos.inline == 0 && matches!(pos.block.kind, Block::Heading { .. }) {
             // A heading first becomes a paragraph; the next press joins.
@@ -650,6 +660,61 @@ pub(super) fn remove_formula(
 }
 
 impl Editor {
+    /// Ops replacing the inline call that `path` leads to by its body (the
+    /// text around it joined with the body's first and last text), and the
+    /// caret after: where the body started.
+    fn unwrap_inline(&self, block: NodeId, path: &[Step]) -> Option<(Vec<Op>, CursorPath)> {
+        let b = self.doc.block(block)?;
+        let at = self.doc.inline_at(b, path)?;
+        if at.prefix + 1 != path.len() || at.index == 0 {
+            return None;
+        }
+        let m = at.index;
+        let body = at.inlines.get(m)?.body()?;
+        let (before, after) = (&at.inlines[m - 1], at.inlines.get(m + 1)?);
+        let len = text_of(before).chars().count();
+        let starts_block = m == 1 && at.prefix == 0;
+        let first = text_of(body.first()?);
+        let mut ops = vec![Op::Delete {
+            seq: Seq::Inlines(at.owner),
+            index: m,
+            count: 2,
+        }];
+        if body.len() == 1 {
+            let joined = format!("{first}{}", text_of(after));
+            ops.push(Op::Insert {
+                seq: Seq::Text(before.id),
+                index: len,
+                items: Items::Text(joined_tail(text_of(before), &joined, starts_block)),
+            });
+        } else {
+            let mut moved = body[1..].to_vec();
+            let last = moved.last_mut()?;
+            if let Inline::Text(t) = &mut last.kind {
+                let tail = joined_tail(t, text_of(after), false);
+                t.push_str(&tail);
+            }
+            ops.push(Op::Insert {
+                seq: Seq::Inlines(at.owner),
+                index: m,
+                items: Items::Inlines(moved),
+            });
+            ops.push(Op::Insert {
+                seq: Seq::Text(before.id),
+                index: len,
+                items: Items::Text(joined_tail(text_of(before), first, starts_block)),
+            });
+        }
+        let mut caret_path = path[..at.prefix].to_vec();
+        caret_path.push(Step::Index(m - 1));
+        let caret = CursorPath {
+            block,
+            path: caret_path,
+            offset: len,
+        };
+        Some((ops, caret))
+    }
+
     /// Ops removing the inline formula or call that `path` leads to, and the
     /// caret after.
     pub(super) fn remove_inline(

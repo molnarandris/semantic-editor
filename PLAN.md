@@ -1119,3 +1119,16 @@ reported targets, so only those are still listed. On the paper: no problems left
   that does not overlap the one before starts a shape of its own. Drawn as a
   `gsk::Path` (fill and 1 px stroke) for inline calls and math calls with a tab.
   Test `outline_contour`.
+
+## Unwrapping inline calls (2026-11-11)
+
+- User request: Backspace at the start of a call's body (`#cl[…]`, `#audit[…]`,
+  bold) unwraps it, as for environments. First press: `Selected::UnwrapCall`
+  (hint "Backspace → remove the call, keep its text", outline drawn stronger,
+  `Editor::call_marked`; Esc cancels). Second press: `unwrap_inline` deletes the
+  call and the text after it, moves the body's inlines in (ids kept), the text
+  before takes the body's first text and the body's last text takes the text
+  after (`joined_tail`, so spaces collapse as Typst would); the caret stays where
+  the body started. An empty call still goes at once. Test
+  `inline_calls_unwrap`; `backspace_around_inline_calls` updated (it used to
+  move left).

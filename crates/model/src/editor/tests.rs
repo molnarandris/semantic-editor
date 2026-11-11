@@ -1309,6 +1309,49 @@ fn bold_and_italic_as_in_typst() {
     assert_eq!(texts(&e), [""]);
 }
 
+/// Backspace at the start of an inline call's body marks the call (Esc
+/// cancels); the next one replaces it by its body, joined with the text
+/// around it.
+#[test]
+fn inline_calls_unwrap() {
+    let body_start = |e: &mut Editor| {
+        let block = e.doc().blocks[0].id;
+        e.set_caret(CursorPath {
+            block,
+            path: vec![Step::Index(1), Step::Body, Step::Index(0)],
+            offset: 0,
+        });
+    };
+    let mut e = Editor::default();
+    e.insert_text("a #cl[xy] b");
+    body_start(&mut e);
+    assert!(e.backspace());
+    assert!(e.call_marked());
+    assert!(e.escape());
+    assert!(!e.call_marked());
+    assert_eq!(texts(&e), ["a #cl[xy] b"]);
+    e.backspace();
+    e.backspace();
+    assert_eq!(texts(&e), ["a xy b"]);
+    assert_eq!(
+        (e.caret().path.clone(), e.caret().offset),
+        (vec![Step::Index(0)], 2)
+    );
+    e.doc().check_invariants().unwrap();
+    assert!(e.undo());
+    assert_eq!(texts(&e), ["a #cl[xy] b"]);
+    // A body with calls in it keeps them.
+    let mut e = Editor::default();
+    e.insert_text("a #audit[x *y* z] b");
+    body_start(&mut e);
+    e.backspace();
+    e.backspace();
+    assert_eq!(texts(&e), ["a x *y* z b"]);
+    e.doc().check_invariants().unwrap();
+    while e.undo() {}
+    assert_eq!(texts(&e), [""]);
+}
+
 #[test]
 fn inline_calls_typed() {
     let mut e = Editor::default();
@@ -1338,7 +1381,8 @@ fn backspace_around_inline_calls() {
     assert!(e.selected().is_some(), "first press selects the call");
     assert!(e.backspace());
     assert_eq!(texts(&e), ["a c"]);
-    // In an empty call: it goes. At the start of a full one: ←.
+    // In an empty call: it goes. At the start of a full one: marked, then
+    // unwrapped (user request 2026-11-11; it used to be ←).
     let mut e = Editor::default();
     e.insert_text("a *");
     assert!(e.backspace());
@@ -1349,6 +1393,9 @@ fn backspace_around_inline_calls() {
     e.move_left();
     assert!(e.backspace());
     assert_eq!(texts(&e), ["a *b*"]);
+    assert!(e.call_marked());
+    assert!(e.backspace());
+    assert_eq!(texts(&e), ["a b"]);
     assert_eq!(
         (e.caret().path.clone(), e.caret().offset),
         (vec![Step::Index(0)], 2)

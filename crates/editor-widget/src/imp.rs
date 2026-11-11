@@ -763,14 +763,14 @@ impl SemEditor {
 
     /// The inline call the caret is in (bold, italic, `#name[…]`): tinted
     /// and outlined like an environment, one contour around the lines it
-    /// spans.
+    /// spans; stronger when the next Backspace unwraps it.
     fn snapshot_call_outline(&self, snapshot: &gtk::Snapshot, x0: f64, scroll: f64) {
-        let (block, call) = {
+        let (block, call, marked) = {
             let ed = self.editor.borrow();
             let Some(call) = ed.call_focus() else {
                 return;
             };
-            (ed.caret().block, call)
+            (ed.caret().block, call, ed.call_marked())
         };
         let Some(index) = self.editor.borrow().doc().top_index(block) else {
             return;
@@ -780,18 +780,21 @@ impl SemEditor {
         };
         let stops = self.block_stops(index);
         let lines = caret::call_outline(&stops, block, &call);
-        self.snapshot_contour(snapshot, &lines, x0, top - scroll);
+        self.snapshot_contour(snapshot, &lines, x0, top - scroll, marked);
     }
 
     /// A call's outline: the contour of its lines' boxes (`lines`, block
-    /// coordinates; the block's top at widget y `top`), tinted.
+    /// coordinates; the block's top at widget y `top`), tinted; `strong`
+    /// for a call marked for unwrapping.
     fn snapshot_contour(
         &self,
         snapshot: &gtk::Snapshot,
         lines: &[typst_bridge::Rect],
         x0: f64,
         top: f64,
+        strong: bool,
     ) {
+        let (width, alpha) = if strong { (2.0, 0.8) } else { (1.0, 0.35) };
         let zoom = self.zoom.get();
         let blue = |a: f32| gdk::RGBA::new(0.21, 0.52, 0.89, a);
         for polygon in caret::contour(lines, caret::CALL_PAD_PT) {
@@ -807,7 +810,7 @@ impl SemEditor {
             path.close();
             let path = path.to_path();
             snapshot.append_fill(&path, gsk::FillRule::Winding, &blue(0.04));
-            snapshot.append_stroke(&path, &gsk::Stroke::new(1.0), &blue(0.35));
+            snapshot.append_stroke(&path, &gsk::Stroke::new(width), &blue(alpha));
         }
     }
 
@@ -831,7 +834,7 @@ impl SemEditor {
             return;
         };
         let lines = caret::call_outline(&stops, block, &path);
-        self.snapshot_contour(snapshot, &lines, x0, top);
+        self.snapshot_contour(snapshot, &lines, x0, top, false);
     }
 
     /// The options tab of the math call the caret is in, on the top edge of

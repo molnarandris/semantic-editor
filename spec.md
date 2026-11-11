@@ -332,7 +332,10 @@ functions and packages.
   Typst reads them as plain text (`snake_case`, `a*b`); `\*` gives a literal `*`.
   `#name[` (or `#name(args)[`) starts any call, `#name` + space too when it is not the
   whole paragraph (then it is a block call, as before); `]` leaves the innermost call.
-  Backspace after a call selects it, then deletes it; in an empty call it goes. Enter
+  Backspace after a call selects it, then deletes it; in an empty call it goes; at
+  the start of a full call's body it marks the call (stronger outline), and the
+  next Backspace replaces the call by its body, as for environments (user
+  request 2026-11-11; it used to move left). Enter
   inside a call splits it with the paragraph. Typst draws everything; export writes
   `*…*`/`_…_` where Typst reads them back the same, else `#strong[…]`.
   While the caret is in a call, it is outlined like an environment (one box per
