@@ -28,10 +28,14 @@ pub enum SelRange {
         start: usize,
         end: usize,
     },
-    /// Across inlines of a paragraph: from (inline, char) to (inline, char).
-    /// Math inlines are always covered whole.
+    /// Across the inlines of one inline list (a paragraph's, a title's, a
+    /// call's body, by `owner`; `prefix` is the path to it): from (inline,
+    /// char) to (inline, char). Formulas, calls, code and references are
+    /// covered whole.
     Inlines {
         block: NodeId,
+        owner: NodeId,
+        prefix: Vec<Step>,
         start: (usize, usize),
         end: (usize, usize),
     },
@@ -91,27 +95,6 @@ impl Selection {
         }
 
         let prefix = &a.path[..d];
-        if let Some(inlines) = block.kind.text_inlines().filter(|_| d == 0) {
-            let bound = |c: &CursorPath| -> Option<((usize, usize), (usize, usize))> {
-                let Some(Step::Index(i)) = c.path.first() else {
-                    return None;
-                };
-                Some(match inlines.get(*i)?.kind {
-                    Inline::Text(_) => ((*i, c.offset), (*i, c.offset)),
-                    Inline::Math(_) | Inline::Call { .. } | Inline::Raw(_) | Inline::Ref(_) => {
-                        ((*i, 0), (*i + 1, 0))
-                    }
-                })
-            };
-            let (sa, ea) = bound(a)?;
-            let (sh, eh) = bound(h)?;
-            return Some(SelRange::Inlines {
-                block: block_id,
-                start: sa.min(sh),
-                end: ea.max(eh),
-            });
-        }
-
         if let Ok(Target::Row { .. }) = doc.walk(block, prefix) {
             // Diverging inside this row: cover each side's branch whole.
             let bound = |c: &CursorPath| match c.path.get(d) {
@@ -128,15 +111,48 @@ impl Selection {
             });
         }
 
-        // Diverging between children of one structure: select the structure.
-        let Some(Step::Index(k)) = prefix.last() else {
+        // Diverging between children of one structure in a row (numerator
+        // and denominator): select the structure.
+        if let Some(Step::Index(k)) = prefix.last()
+            && let Ok(Target::Row { .. }) = doc.walk(block, &prefix[..d - 1])
+        {
+            return Some(SelRange::Row {
+                block: block_id,
+                path: prefix[..d - 1].to_vec(),
+                start: *k,
+                end: k + 1,
+            });
+        }
+
+        // The innermost inline list both are in: the block's, or the body
+        // of a call (a prefix ending `Body`).
+        let k = (0..=d)
+            .rev()
+            .find(|&k| k == 0 || a.path[k - 1] == Step::Body)?;
+        let at = doc.inline_at(block, &a.path[..=k])?;
+        if at.prefix != k {
             return None;
+        }
+        let inlines = at.inlines;
+        let bound = |c: &CursorPath| -> Option<((usize, usize), (usize, usize))> {
+            let Some(Step::Index(i)) = c.path.get(k) else {
+                return None;
+            };
+            let text = matches!(inlines.get(*i)?.kind, Inline::Text(_));
+            Some(if text && c.path.len() == k + 1 {
+                ((*i, c.offset), (*i, c.offset))
+            } else {
+                ((*i, 0), (*i + 1, 0))
+            })
         };
-        Some(SelRange::Row {
+        let (sa, ea) = bound(a)?;
+        let (sh, eh) = bound(h)?;
+        Some(SelRange::Inlines {
             block: block_id,
-            path: prefix[..d - 1].to_vec(),
-            start: *k,
-            end: k + 1,
+            owner: at.owner,
+            prefix: a.path[..k].to_vec(),
+            start: sa.min(sh),
+            end: ea.max(eh),
         })
     }
 }
@@ -220,6 +236,41 @@ mod tests {
             s.normalized(&doc),
             Some(SelRange::Inlines {
                 block,
+                owner: block,
+                prefix: vec![],
+                start: (0, 1),
+                end: (2, 0)
+            })
+        );
+    }
+
+    /// In a call's body: a range of its inlines.
+    #[test]
+    fn inside_a_call_body() {
+        let mut doc = Document::empty();
+        let (a, x, b) = (doc.text("a "), doc.text("x "), doc.text(" y"));
+        let one = doc.num("1");
+        let m = doc.math(vec![one]);
+        let call = doc.inline_call("cl", "", vec![x, m, b]);
+        let (call_id, c) = (call.id, doc.text(" c"));
+        let p = doc.paragraph(vec![a, call, c]);
+        let block = p.id;
+        doc.blocks = vec![p];
+        let at = |path: Vec<Step>, offset| CursorPath {
+            block,
+            path,
+            offset,
+        };
+        let s = Selection {
+            anchor: at(vec![Step::Index(1), Step::Body, Step::Index(0)], 1),
+            head: at(vec![Step::Index(1), Step::Body, Step::Index(1)], 1),
+        };
+        assert_eq!(
+            s.normalized(&doc),
+            Some(SelRange::Inlines {
+                block,
+                owner: call_id,
+                prefix: vec![Step::Index(1), Step::Body],
                 start: (0, 1),
                 end: (2, 0)
             })

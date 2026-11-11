@@ -42,6 +42,26 @@ impl Editor {
     /// input in math.
     pub fn insert_text(&mut self, s: &str) -> bool {
         let mut changed = false;
+        // Typing replaces a selected range; selected math nodes are kept
+        // for the first char, which may wrap them (`/`, `^`, `_`).
+        match self.selection() {
+            Some(SelRange::Row {
+                block,
+                path,
+                start,
+                end,
+            }) => {
+                self.anchor = None;
+                self.selected = Some(Selected::Nodes {
+                    block,
+                    path,
+                    start,
+                    end,
+                });
+            }
+            Some(_) => changed |= self.delete_range(),
+            None => self.anchor = None,
+        }
         for c in s.chars() {
             changed |= self.input_char(c);
         }

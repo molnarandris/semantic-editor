@@ -14,6 +14,7 @@ use std::collections::HashSet;
 use crate::cursor::{CursorPath, Step, Target};
 use crate::history::History;
 use crate::ops::{Items, Op, Seq};
+use crate::selection::{SelRange, Selection};
 use crate::symbols;
 use crate::tree::{
     Block, BlockNode, Document, Inline, InlineNode, ListKind, MathKind, MathNode, NodeId, Place,
@@ -128,6 +129,9 @@ pub struct Editor {
     math_calls: Option<MathCallResolver>,
     /// Where the caret was before following references (Alt+← goes back).
     back: Vec<CursorPath>,
+    /// The other end of a range selection (Shift + a move, a drag); the
+    /// caret is its head. `None`: no range.
+    anchor: Option<CursorPath>,
 }
 
 /// Looks up a symbol name with `.modifiers`; `None` if it is not a symbol.
@@ -308,6 +312,7 @@ impl Editor {
             calls: None,
             math_calls: None,
             back: vec![],
+            anchor: None,
         }
     }
 
@@ -370,6 +375,7 @@ impl Editor {
     pub fn set_caret(&mut self, caret: CursorPath) {
         self.finish_word();
         self.selected = None;
+        self.anchor = None;
         let old = std::mem::replace(&mut self.caret, self.doc.fix_cursor(&caret));
         self.last = Last::Other;
         self.drop_left_title(&old);
@@ -387,6 +393,7 @@ impl Editor {
     fn reset_state(&mut self) {
         self.last = Last::Other;
         self.selected = None;
+        self.anchor = None;
         self.word = None;
         self.held_space = None;
         self.groups.clear();
@@ -524,6 +531,7 @@ impl Editor {
                 self.caret = self.doc.fix_cursor(&after);
                 self.last = last;
                 self.selected = None;
+                self.anchor = None;
                 true
             }
             Err(e) => {
@@ -538,6 +546,7 @@ impl Editor {
     fn jump(&mut self, caret: CursorPath) -> bool {
         self.last = Last::Other;
         self.selected = None;
+        self.anchor = None;
         let changed = caret != self.caret;
         let old = std::mem::replace(&mut self.caret, caret);
         self.drop_left_title(&old);
@@ -703,6 +712,86 @@ impl Editor {
             }
         }
         self.caret = self.doc.fix_cursor(&after_caret);
+    }
+
+    // ----- Range selection -----
+
+    /// The anchor a selecting move keeps: the current one, else the caret.
+    /// Pass it to [`Editor::set_anchor`] after the move.
+    pub fn anchor(&self) -> CursorPath {
+        self.anchor.clone().unwrap_or_else(|| self.caret.clone())
+    }
+
+    /// Keep `anchor` as the other end of the selection (none if it is the
+    /// caret).
+    pub fn set_anchor(&mut self, anchor: CursorPath) {
+        self.anchor = (anchor != self.caret).then_some(anchor);
+    }
+
+    /// The selected range, normalized to whole pieces (see
+    /// [`Selection::normalized`]); `None` without one.
+    pub fn selection(&self) -> Option<SelRange> {
+        let anchor = self.anchor.clone()?;
+        let range = Selection {
+            anchor,
+            head: self.caret.clone(),
+        }
+        .normalized(&self.doc)?;
+        let empty = match &range {
+            SelRange::Text { start, end, .. } | SelRange::Row { start, end, .. } => start == end,
+            SelRange::Inlines { start, end, .. } => start == end,
+            SelRange::Blocks { .. } => false,
+        };
+        (!empty).then_some(range)
+    }
+
+    /// The two ends of the selected range as caret positions in one block
+    /// (to draw it: every position between them is selected); `None` for
+    /// whole blocks or no range.
+    pub fn selection_bounds(&self) -> Option<(CursorPath, CursorPath)> {
+        let at = |block, path, offset| CursorPath {
+            block,
+            path,
+            offset,
+        };
+        match self.selection()? {
+            SelRange::Text {
+                block,
+                path,
+                start,
+                end,
+            }
+            | SelRange::Row {
+                block,
+                path,
+                start,
+                end,
+            } => Some((at(block, path.clone(), start), at(block, path, end))),
+            SelRange::Inlines {
+                block,
+                prefix,
+                start: (i, c),
+                end: (j, c2),
+                ..
+            } => {
+                let b = self.doc.block(block)?;
+                let first = [&prefix[..], &[Step::Index(0)]].concat();
+                let list = self.doc.inline_at(b, &first)?.inlines;
+                let start = match &list.get(i)?.kind {
+                    Inline::Text(_) => at(block, [&prefix[..], &[Step::Index(i)]].concat(), c),
+                    _ => {
+                        let k = i.checked_sub(1)?;
+                        let len = text_of(&list[k]).chars().count();
+                        at(block, [&prefix[..], &[Step::Index(k)]].concat(), len)
+                    }
+                };
+                Some((
+                    start,
+                    at(block, [&prefix[..], &[Step::Index(j)]].concat(), c2),
+                ))
+            }
+            SelRange::Blocks { .. } => None,
+        }
     }
 
     /// Select a subtree (the first Backspace/Delete on a structure, a

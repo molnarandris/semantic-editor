@@ -1132,3 +1132,23 @@ reported targets, so only those are still listed. On the paper: no problems left
   the body started. An empty call still goes at once. Test
   `inline_calls_unwrap`; `backspace_around_inline_calls` updated (it used to
   move left).
+
+## Selection, step 3a: selecting (2026-11-11)
+
+- `Editor::anchor` (the other end; the caret is the head): kept by Shift + a
+  move (`anchor()` before, `set_anchor` after; the widget's `run_selecting`),
+  Shift+click, a drag (`GestureDrag`: anchor at the press point, head at the
+  pointer); cleared by any other move, edit, `set_caret`, Esc.
+- `Selection::normalized` reworked: same container → `Text`/`Row`; a common
+  math row → `Row` (branches whole); two children of one structure → the
+  structure; else the innermost common inline list (`SelRange::Inlines` now
+  has `owner` and `prefix`, so it works in call bodies and titles); different
+  blocks → whole top-level `Blocks`.
+- `delete_range`: chars (`Text`, also labels and options; a raw block's whole
+  text removes the block), nodes (through `Selected::Nodes`), inlines (texts at
+  both ends joined with `joined_tail`), blocks (an emptied document gets an
+  empty paragraph). Backspace/Delete/typing/Enter go through it; typing over
+  a math range keeps it as `Selected::Nodes` so `/`, `^`, `_` wrap it.
+- Drawing: `selection_bounds` gives both ends as positions; every stop between
+  them in the block's stop order, grouped by line, gives one band per line;
+  `Blocks` shade whole block views. Test `range_selections`, selection tests.

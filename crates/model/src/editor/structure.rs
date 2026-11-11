@@ -71,6 +71,9 @@ impl Editor {
     /// just after it), else leave the formula, else the inline call, else
     /// the environment.
     pub fn escape(&mut self) -> bool {
+        if self.anchor.take().is_some() {
+            return true;
+        }
         self.finish_word();
         if self.selected.take().is_some() {
             return true;
@@ -118,6 +121,10 @@ impl Editor {
     /// after it; in a display formula or raw block, start a new paragraph.
     pub fn enter(&mut self) -> bool {
         self.finish_word();
+        if self.selection().is_some() {
+            self.delete_range();
+        }
+        self.anchor = None;
         self.selected = None;
         if self.label_pos().is_some() {
             return self.leave_label();

@@ -5,6 +5,163 @@ use super::*;
 impl Editor {
     // ----- Deleting -----
 
+    /// Delete the selected range (Backspace, Delete, typing over it); the
+    /// caret goes to where it started. A math range becomes the node
+    /// selection first, so `/`, `^`, `_` typed over it still wrap it.
+    pub(super) fn delete_range(&mut self) -> bool {
+        let range = self.selection();
+        self.anchor = None;
+        let Some(range) = range else {
+            return false;
+        };
+        match range {
+            SelRange::Row {
+                block,
+                path,
+                start,
+                end,
+            } => {
+                self.selected = Some(Selected::Nodes {
+                    block,
+                    path,
+                    start,
+                    end,
+                });
+                self.delete_selection()
+            }
+            SelRange::Text {
+                block,
+                path,
+                start,
+                end,
+            } => {
+                let Some(b) = self.doc.block(block) else {
+                    return false;
+                };
+                let seq = match self.doc.walk(b, &path) {
+                    Ok(Target::Text { inline, .. }) => Seq::Text(inline.id),
+                    Ok(Target::Label { block, .. }) => Seq::Label(block.id),
+                    Ok(Target::Opts { node, .. }) => Seq::Opts(node.id),
+                    // Raw Typst (its start to its end): the block goes.
+                    Ok(Target::Raw { .. }) => {
+                        let Some(place) = self.doc.place(block) else {
+                            return false;
+                        };
+                        let (ops, after) = self.remove_block(place);
+                        return self.commit(ops, after, Last::Other);
+                    }
+                    _ => return false,
+                };
+                let op = Op::Delete {
+                    seq,
+                    index: start,
+                    count: end - start,
+                };
+                self.commit(vec![op], cursor(block, path, start), Last::Other)
+            }
+            SelRange::Inlines {
+                block,
+                owner,
+                prefix,
+                start,
+                end,
+            } => self.delete_inlines(block, owner, &prefix, start, end),
+            SelRange::Blocks { start, end } => self.delete_blocks(start, end),
+        }
+    }
+
+    /// Delete from (inline, char) `start` to `end` of the inline list owned
+    /// by `owner` at `prefix`: the texts at both ends are joined.
+    fn delete_inlines(
+        &mut self,
+        block: NodeId,
+        owner: NodeId,
+        prefix: &[Step],
+        start: (usize, usize),
+        end: (usize, usize),
+    ) -> bool {
+        let Some(b) = self.doc.block(block) else {
+            return false;
+        };
+        let first_path = [prefix, &[Step::Index(0)]].concat();
+        let Some(at) = self.doc.inline_at(b, &first_path) else {
+            return false;
+        };
+        let list = at.inlines;
+        let (mut i, mut c) = start;
+        let (j, c2) = end;
+        // A range starting with a formula or call starts at the end of the
+        // text before it.
+        if !matches!(list.get(i).map(|n| &n.kind), Some(Inline::Text(_))) {
+            let Some(k) = i.checked_sub(1) else {
+                return false;
+            };
+            i = k;
+            c = text_of(&list[i]).chars().count();
+        }
+        let (Some(first), Some(last)) = (list.get(i), list.get(j)) else {
+            return false;
+        };
+        let (ft, lt) = (text_of(first), text_of(last));
+        let ops = if i == j {
+            vec![Op::Delete {
+                seq: Seq::Text(first.id),
+                index: c,
+                count: c2.saturating_sub(c),
+            }]
+        } else {
+            let head: String = ft.chars().take(c).collect();
+            let tail: String = lt.chars().skip(c2).collect();
+            let starts_block = i == 0 && prefix.is_empty();
+            vec![
+                Op::Delete {
+                    seq: Seq::Inlines(owner),
+                    index: i + 1,
+                    count: j - i,
+                },
+                Op::Delete {
+                    seq: Seq::Text(first.id),
+                    index: c,
+                    count: ft.chars().count() - c,
+                },
+                Op::Insert {
+                    seq: Seq::Text(first.id),
+                    index: c,
+                    items: Items::Text(joined_tail(&head, &tail, starts_block)),
+                },
+            ]
+        };
+        let after = cursor(block, [prefix, &[Step::Index(i)]].concat(), c);
+        self.commit(ops, after, Last::Other)
+    }
+
+    /// Delete top-level blocks `start..end`; an emptied document gets an
+    /// empty paragraph. The caret goes to the start of the block after them,
+    /// else to the end of the block before.
+    fn delete_blocks(&mut self, start: usize, end: usize) -> bool {
+        let n = self.doc.blocks.len();
+        let mut ops = vec![Op::Delete {
+            seq: Seq::Blocks,
+            index: start,
+            count: end - start,
+        }];
+        let after = if end < n {
+            self.doc.start_of(&self.doc.blocks[end])
+        } else if start > 0 {
+            self.doc.end_of(&self.doc.blocks[start - 1])
+        } else {
+            let para = self.doc.paragraph(vec![]);
+            let after = cursor(para.id, vec![Step::Index(0)], 0);
+            ops.push(Op::Insert {
+                seq: Seq::Blocks,
+                index: 0,
+                items: Items::Blocks(vec![para]),
+            });
+            after
+        };
+        self.commit(ops, after, Last::Other)
+    }
+
     /// Remove the selection.
     pub(super) fn delete_selection(&mut self) -> bool {
         let Some(sel) = self.selected.take() else {
@@ -113,6 +270,9 @@ impl Editor {
         // A space typed but not placed yet (held): forget it.
         if self.held_space.take().as_ref() == Some(&self.caret) {
             return true;
+        }
+        if self.selection().is_some() {
+            return self.delete_range();
         }
         if self.selected.is_some() {
             return self.delete_selection();
@@ -522,6 +682,9 @@ impl Editor {
     /// Delete the char or node after the caret (structures and formulas:
     /// select first); at the end of a text, join with the next block.
     pub fn delete(&mut self) -> bool {
+        if self.selection().is_some() {
+            return self.delete_range();
+        }
         if self.selected.is_some() {
             return self.delete_selection();
         }

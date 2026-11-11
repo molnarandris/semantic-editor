@@ -321,6 +321,7 @@ impl WidgetImpl for SemEditor {
             self.snapshot_call_outline(snapshot, x0, scroll);
             self.snapshot_math_call_outline(snapshot, x0, scroll);
             self.snapshot_highlights(snapshot, x0, scroll);
+            self.snapshot_selection(snapshot, x0, scroll);
         }
 
         let snap = self.pixel_snapper();
@@ -403,6 +404,23 @@ enum Command {
     Zoom(f64),
 }
 
+impl Command {
+    /// A caret move: with Shift it extends the selection.
+    fn is_move(&self) -> bool {
+        matches!(
+            self,
+            Command::Left
+                | Command::Right
+                | Command::Up
+                | Command::Down
+                | Command::LineStart
+                | Command::LineEnd
+                | Command::DocStart
+                | Command::DocEnd
+        )
+    }
+}
+
 impl SemEditor {
     pub(crate) fn set_document(&self, doc: Document) {
         let mut editor = Editor::new(doc);
@@ -441,7 +459,12 @@ impl SemEditor {
             if obj.imp().completion_key(key) {
                 return glib::Propagation::Stop;
             }
+            let shift = state.contains(gdk::ModifierType::SHIFT_MASK);
             match command_for(key, state) {
+                Some(cmd) if shift && cmd.is_move() => {
+                    obj.imp().run_selecting(cmd);
+                    glib::Propagation::Stop
+                }
                 Some(cmd) => {
                     obj.imp().run(cmd);
                     glib::Propagation::Stop
@@ -503,7 +526,16 @@ impl SemEditor {
                     imp.goal_x.set(None);
                     imp.after_command(true);
                 } else if let Some(cursor) = imp.locate(x, y) {
-                    imp.editor.borrow_mut().set_caret(cursor);
+                    let shift = gesture
+                        .current_event_state()
+                        .contains(gdk::ModifierType::SHIFT_MASK);
+                    let mut ed = imp.editor.borrow_mut();
+                    let anchor = ed.anchor();
+                    ed.set_caret(cursor);
+                    if shift {
+                        ed.set_anchor(anchor);
+                    }
+                    drop(ed);
                     imp.goal_x.set(None);
                     imp.after_command(false);
                     if n_press == 2 {
@@ -513,6 +545,33 @@ impl SemEditor {
             }
         });
         obj.add_controller(click);
+
+        // Dragging selects from where the button went down.
+        let drag = gtk::GestureDrag::new();
+        drag.set_button(gdk::BUTTON_PRIMARY);
+        let weak = obj.downgrade();
+        drag.connect_drag_update(move |gesture, dx, dy| {
+            let Some(obj) = weak.upgrade() else {
+                return;
+            };
+            let Some((x, y)) = gesture.start_point() else {
+                return;
+            };
+            let imp = obj.imp();
+            let (Some(anchor), Some(head)) = (imp.locate(x, y), imp.locate(x + dx, y + dy)) else {
+                return;
+            };
+            let mut ed = imp.editor.borrow_mut();
+            if head == ed.caret().clone() && ed.selection().is_some() {
+                return;
+            }
+            ed.set_caret(head);
+            ed.set_anchor(anchor);
+            drop(ed);
+            imp.goal_x.set(None);
+            imp.after_command(true);
+        });
+        obj.add_controller(drag);
 
         // Ctrl+wheel and touchpad pinch zoom.
         let scroll = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
@@ -548,6 +607,14 @@ impl SemEditor {
         obj.add_controller(pinch);
 
         let _ = self.im.set(im);
+    }
+
+    /// Shift + a move: the caret moves, the selection's anchor stays.
+    fn run_selecting(&self, cmd: Command) {
+        let anchor = self.editor.borrow().anchor();
+        self.run(cmd);
+        self.editor.borrow_mut().set_anchor(anchor);
+        self.obj().queue_draw();
     }
 
     fn run(&self, cmd: Command) {
@@ -811,6 +878,79 @@ impl SemEditor {
             let path = path.to_path();
             snapshot.append_fill(&path, gsk::FillRule::Winding, &blue(0.04));
             snapshot.append_stroke(&path, &gsk::Stroke::new(width), &blue(alpha));
+        }
+    }
+
+    /// The selected range, under the text: a band per line from the first
+    /// to the last selected position on it; whole blocks entirely.
+    fn snapshot_selection(&self, snapshot: &gtk::Snapshot, x0: f64, scroll: f64) {
+        let zoom = self.zoom.get();
+        let color = gdk::RGBA::new(0.21, 0.52, 0.89, 0.25);
+        let ed = self.editor.borrow();
+        let tops = self.block_tops();
+        if let Some(model::SelRange::Blocks { start, end }) = ed.selection() {
+            let views = self.views.borrow();
+            for i in start..end {
+                let (Some(&top), Some(view)) = (tops.get(i), views.get(i)) else {
+                    continue;
+                };
+                let w = self.page_width_pt.get() * zoom;
+                let rect = graphene::Rect::new(
+                    x0 as f32,
+                    (top - scroll) as f32,
+                    w as f32,
+                    (view.height_pt() * zoom) as f32,
+                );
+                snapshot.append_color(&color, &rect);
+            }
+            return;
+        }
+        let Some((first, last)) = ed.selection_bounds() else {
+            return;
+        };
+        let Some(index) = ed.doc().top_index(first.block) else {
+            return;
+        };
+        drop(ed);
+        let Some(&top) = tops.get(index) else {
+            return;
+        };
+        let stops = self.block_stops(index);
+        let (Some(a), Some(b)) = (
+            stops.iter().position(|s| s.cursor == first),
+            stops.iter().position(|s| s.cursor == last),
+        ) else {
+            return;
+        };
+        let inside: Vec<Stop> = stops[a.min(b)..=a.max(b)]
+            .iter()
+            .filter(|s| !s.tab && !s.label)
+            .cloned()
+            .collect();
+        for line in caret::lines(&inside) {
+            let x_min = line
+                .iter()
+                .map(|&i| inside[i].x)
+                .fold(f64::INFINITY, f64::min);
+            let x_max = line
+                .iter()
+                .map(|&i| inside[i].x)
+                .fold(f64::NEG_INFINITY, f64::max);
+            let y_min = line
+                .iter()
+                .map(|&i| inside[i].top)
+                .fold(f64::INFINITY, f64::min);
+            let y_max = line
+                .iter()
+                .map(|&i| inside[i].bottom)
+                .fold(f64::NEG_INFINITY, f64::max);
+            let rect = graphene::Rect::new(
+                (x0 + x_min * zoom) as f32,
+                (top - scroll + y_min * zoom) as f32,
+                ((x_max - x_min) * zoom).max(1.0) as f32,
+                ((y_max - y_min) * zoom) as f32,
+            );
+            snapshot.append_color(&color, &rect);
         }
     }
 

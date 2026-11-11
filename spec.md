@@ -591,6 +591,25 @@ hold yet, which display right but are not editable in place. The paper's
   render the same in both.
 
 
+### Selection, copy and paste (user request, 2026-11-11)
+
+Asked for overnight; decisions taken by Claude (to be confirmed by the user).
+
+- **3a Selecting**: Shift + a caret move (←/→/↑/↓, Home/End, Ctrl+Home/End),
+  Shift+click and dragging with the mouse select from the anchor to the caret.
+  The range is normalized to whole pieces (`Selection::normalized`): chars of
+  one text, nodes of one math row (a structure whose two children are reached
+  is taken whole), inlines of one inline list (a paragraph's or a call's body;
+  formulas, calls, references covered whole), and **whole top-level blocks**
+  when the ends are in different blocks (precise cross-paragraph ranges:
+  wishlist). Drawn as a light band per line, under the text. Backspace/Delete
+  delete it, typing and Enter replace it (selected math nodes still wrap with
+  `/`, `^`, `_`), Esc cancels, one undo step restores it.
+- **3b Copy/Cut** (Ctrl+C/X): the selection as Typst source, written as the
+  export writes it.
+- **3c Paste** (Ctrl+V): the clipboard text read as Typst: in a formula as
+  math, in text as inlines when it is one paragraph, else as blocks.
+
 ### Later
 
 - Project files: images, `#include`, local imports, bibliography files.

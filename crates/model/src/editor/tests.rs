@@ -1798,3 +1798,99 @@ fn figures_and_captions() {
     while e.undo() {}
     assert_eq!(texts(&e), [""]);
 }
+
+/// Shift + a move: the anchor stays, the caret moves.
+fn select_with(e: &mut Editor, mut moves: impl FnMut(&mut Editor)) {
+    let anchor = e.anchor();
+    moves(e);
+    e.set_anchor(anchor);
+}
+
+/// Range selections: Backspace deletes them, typing replaces them, Esc
+/// cancels them; one undo step brings the text back.
+#[test]
+fn range_selections() {
+    // Text: the last word.
+    let mut e = Editor::default();
+    e.insert_text("hello world");
+    select_with(&mut e, |e| {
+        for _ in 0..5 {
+            e.move_left();
+        }
+    });
+    assert!(matches!(
+        e.selection(),
+        Some(SelRange::Text {
+            start: 6,
+            end: 11,
+            ..
+        })
+    ));
+    assert!(e.backspace());
+    assert_eq!(texts(&e), ["hello "]);
+    assert!(e.undo());
+    assert_eq!(texts(&e), ["hello world"]);
+    // Typing over it; Esc cancels a range.
+    let end = e.doc().doc_end();
+    e.set_caret(end);
+    select_with(&mut e, |e| _ = e.move_left());
+    e.insert_text("D");
+    assert_eq!(texts(&e), ["hello worlD"]);
+    select_with(&mut e, |e| _ = e.move_left());
+    assert!(e.escape());
+    assert!(e.selection().is_none());
+    // Across a formula: covered whole, the texts joined.
+    let mut e = Editor::default();
+    e.insert_text("ab $x$ cd");
+    let block = e.doc().blocks[0].id;
+    e.set_caret(CursorPath {
+        block,
+        path: vec![Step::Index(0)],
+        offset: 1,
+    });
+    select_with(&mut e, |e| {
+        e.set_caret(CursorPath {
+            block,
+            path: vec![Step::Index(2)],
+            offset: 2,
+        })
+    });
+    assert!(e.delete());
+    assert_eq!(texts(&e), ["ad"]);
+    e.doc().check_invariants().unwrap();
+    assert!(e.undo());
+    assert_eq!(texts(&e), ["ab $ cd"]);
+    // Across blocks: whole blocks.
+    let mut e = Editor::default();
+    e.insert_text("one");
+    e.enter();
+    e.insert_text("two");
+    e.enter();
+    e.insert_text("three");
+    select_with(&mut e, |e| {
+        e.move_left();
+        for _ in 0..7 {
+            e.move_left();
+        }
+    });
+    assert!(matches!(
+        e.selection(),
+        Some(SelRange::Blocks { start: 1, end: 3 })
+    ));
+    e.backspace();
+    assert_eq!(texts(&e), ["one"]);
+    // Math nodes: `/` typed over them wraps them.
+    let mut e = empty_display();
+    e.insert_text("a+b");
+    select_with(&mut e, |e| {
+        for _ in 0..3 {
+            e.move_left();
+        }
+    });
+    e.insert_text("/");
+    assert!(
+        display_of(&e, 0).starts_with("frac(a + b"),
+        "{}",
+        display_of(&e, 0)
+    );
+}
