@@ -26,6 +26,7 @@ use delete::joined_tail;
 mod input;
 mod list;
 mod motion;
+mod paste;
 mod structure;
 #[cfg(test)]
 mod tests;
@@ -45,6 +46,9 @@ enum Last {
     Source(NodeId),
     /// Editing the document header.
     Header,
+    /// A later step of one edit (a paste after deleting the selection):
+    /// joins the step before in one undo.
+    Chained,
 }
 
 /// A block inserted by [`Editor::insert_block`].
@@ -516,6 +520,7 @@ impl Editor {
             (Last::Deleting, Last::Deleting) => true,
             (Last::Source(a), Last::Source(b)) => a == b,
             (Last::Header, Last::Header) => true,
+            (_, Last::Chained) => true,
             _ => false,
         };
         let before = self.caret.clone();

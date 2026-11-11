@@ -405,6 +405,8 @@ enum Command {
     /// Ctrl+C / Ctrl+X: the selection to the clipboard as Typst.
     Copy,
     Cut,
+    /// Ctrl+V: the clipboard's text, read as Typst, at the caret.
+    Paste,
 }
 
 impl Command {
@@ -657,6 +659,25 @@ impl SemEditor {
             Command::Zoom(steps) => {
                 drop(ed);
                 self.zoom_by(steps);
+                return;
+            }
+            Command::Paste => {
+                drop(ed);
+                let weak = self.obj().downgrade();
+                self.obj().clipboard().read_text_async(
+                    None::<&gtk::gio::Cancellable>,
+                    move |text| {
+                        let (Some(obj), Ok(Some(text))) = (weak.upgrade(), text) else {
+                            return;
+                        };
+                        let imp = obj.imp();
+                        let in_math = imp.editor.borrow().in_math();
+                        let fragment = typst_bridge::parse_fragment(&text, in_math);
+                        imp.editor.borrow_mut().paste(fragment);
+                        imp.goal_x.set(None);
+                        imp.after_command(true);
+                    },
+                );
                 return;
             }
             Command::Copy | Command::Cut => {
@@ -2133,6 +2154,7 @@ fn command_for(key: gdk::Key, state: gdk::ModifierType) -> Option<Command> {
             Key::y => Command::Redo,
             Key::c => Command::Copy,
             Key::x => Command::Cut,
+            Key::v => Command::Paste,
             _ => return None,
         },
         _ => return None,

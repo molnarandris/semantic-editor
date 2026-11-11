@@ -826,6 +826,40 @@ impl MathRow {
     }
 }
 
+fn visit_inline_ids(inlines: &mut [InlineNode], f: &mut impl FnMut(&mut NodeId)) {
+    for inline in inlines {
+        f(&mut inline.id);
+        match &mut inline.kind {
+            Inline::Math(row) => row.visit_ids(f),
+            Inline::Call { body, .. } => visit_inline_ids(body, f),
+            Inline::Text(_) | Inline::Raw(_) | Inline::Ref(_) => {}
+        }
+    }
+}
+
+/// Visit the ids of `blocks` and of everything in them.
+fn visit_block_ids(blocks: &mut [BlockNode], f: &mut impl FnMut(&mut NodeId)) {
+    for block in blocks {
+        f(&mut block.id);
+        match &mut block.kind {
+            Block::Paragraph(inlines)
+            | Block::Heading { inlines, .. }
+            | Block::Caption(inlines) => {
+                visit_inline_ids(inlines, f);
+            }
+            Block::DisplayMath(row) => row.visit_ids(f),
+            Block::Env { title, body, .. }
+            | Block::Item {
+                term: title, body, ..
+            } => {
+                visit_inline_ids(title, f);
+                visit_block_ids(body, f);
+            }
+            Block::RawTypst(_) | Block::Diagram(_) | Block::Bibliography(_) | Block::Title(_) => {}
+        }
+    }
+}
+
 /// The whole document: a list of blocks; environments hold blocks of their own.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Document {
@@ -924,47 +958,37 @@ impl Document {
     /// Assign new ids to every node, e.g. after deserialization, and restore
     /// the structural invariants.
     pub fn regenerate_ids(&mut self) {
-        fn inline_ids(inlines: &mut [InlineNode], f: &mut impl FnMut(&mut NodeId)) {
-            for inline in inlines {
-                f(&mut inline.id);
-                match &mut inline.kind {
-                    Inline::Math(row) => row.visit_ids(f),
-                    Inline::Call { body, .. } => inline_ids(body, f),
-                    Inline::Text(_) | Inline::Raw(_) | Inline::Ref(_) => {}
-                }
-            }
-        }
-        fn visit(blocks: &mut [BlockNode], f: &mut impl FnMut(&mut NodeId)) {
-            for block in blocks {
-                f(&mut block.id);
-                match &mut block.kind {
-                    Block::Paragraph(inlines)
-                    | Block::Heading { inlines, .. }
-                    | Block::Caption(inlines) => {
-                        inline_ids(inlines, f);
-                    }
-                    Block::DisplayMath(row) => row.visit_ids(f),
-                    Block::Env { title, body, .. }
-                    | Block::Item {
-                        term: title, body, ..
-                    } => {
-                        inline_ids(title, f);
-                        visit(body, f);
-                    }
-                    Block::RawTypst(_)
-                    | Block::Diagram(_)
-                    | Block::Bibliography(_)
-                    | Block::Title(_) => {}
-                }
-            }
-        }
         let mut next = 1;
-        visit(&mut self.blocks, &mut |id: &mut NodeId| {
+        visit_block_ids(&mut self.blocks, &mut |id: &mut NodeId| {
             *id = NodeId(next);
             next += 1;
         });
         self.next_id = next;
         self.normalize();
+    }
+
+    /// Give every node of `fragment` (from another document: a paste) a
+    /// fresh id of this document.
+    pub fn adopt(&mut self, fragment: &mut crate::Fragment) {
+        let mut next = self.next_id;
+        let mut f = |id: &mut NodeId| {
+            *id = NodeId(next);
+            next += 1;
+        };
+        match fragment {
+            crate::Fragment::Blocks(blocks) => visit_block_ids(blocks, &mut f),
+            crate::Fragment::Inlines(inlines) => visit_inline_ids(inlines, &mut f),
+            crate::Fragment::Math(nodes) => {
+                for node in nodes {
+                    f(&mut node.id);
+                    for row in node.children_mut() {
+                        row.visit_ids(&mut f);
+                    }
+                }
+            }
+            crate::Fragment::Plain(_) => {}
+        }
+        self.next_id = next;
     }
 
     /// Enforce the paragraph invariant: inlines alternate Text, Math, Text, …,

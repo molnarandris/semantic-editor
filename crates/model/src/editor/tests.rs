@@ -1894,3 +1894,71 @@ fn range_selections() {
         display_of(&e, 0)
     );
 }
+
+/// Paste: inlines join the text at both ends, blocks go between blocks (a
+/// paragraph split at the caret), math nodes into the formula; a selected
+/// range is replaced; one undo step.
+#[test]
+fn pasting() {
+    let frag = |e: &mut Editor| {
+        let mut d = Document::empty();
+        let (x, y, z) = (d.text("X "), d.ident("y"), d.text(" Z"));
+        let m = d.math(vec![y]);
+        let _ = e;
+        Fragment::Inlines(vec![x, m, z])
+    };
+    let mut e = Editor::default();
+    e.insert_text("abcd");
+    e.move_left();
+    e.move_left();
+    let f = frag(&mut e);
+    assert!(e.paste(f));
+    assert_eq!(texts(&e), ["abX $ Zcd"]);
+    e.doc().check_invariants().unwrap();
+    e.insert_text("!");
+    assert_eq!(texts(&e), ["abX $ Z!cd"]);
+    e.undo();
+    assert!(e.undo());
+    assert_eq!(texts(&e), ["abcd"]);
+    // Over a selection.
+    select_with(&mut e, |e| _ = e.move_left());
+    let f = frag(&mut e);
+    e.paste(f);
+    assert_eq!(texts(&e), ["aX $ Zcd"]);
+    assert!(e.undo());
+    assert_eq!(texts(&e), ["abcd"]);
+    // Blocks in the middle of a paragraph: it is split.
+    let mut d = Document::empty();
+    let t = d.text("one");
+    let p1 = d.paragraph(vec![t]);
+    let t = d.text("two");
+    let p2 = d.paragraph(vec![t]);
+    let mut e = Editor::default();
+    e.insert_text("abcd");
+    e.move_left();
+    e.move_left();
+    e.paste(Fragment::Blocks(vec![p1, p2]));
+    assert_eq!(texts(&e), ["ab", "one", "two", "cd"]);
+    e.insert_text("!");
+    assert_eq!(texts(&e), ["ab", "one", "two!", "cd"]);
+    e.undo();
+    assert!(e.undo());
+    assert_eq!(texts(&e), ["abcd"]);
+    // Blocks into an empty paragraph replace it.
+    let mut d = Document::empty();
+    let t = d.text("one");
+    let p1 = d.paragraph(vec![t]);
+    let mut e = Editor::default();
+    e.paste(Fragment::Blocks(vec![p1]));
+    assert_eq!(texts(&e), ["one"]);
+    // Math nodes into a formula.
+    let mut e = empty_display();
+    e.insert_text("a");
+    let mut d = Document::empty();
+    let (plus, b) = (d.sym("+"), d.ident("b"));
+    e.paste(Fragment::Math(vec![plus, b]));
+    assert_eq!(display_of(&e, 0), "a + b");
+    e.insert_text("c");
+    assert_eq!(display_of(&e, 0), "a + b c");
+    e.doc().check_invariants().unwrap();
+}

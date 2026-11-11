@@ -1163,3 +1163,19 @@ reported targets, so only those are still listed. On the paper: no problems left
   without `$`, blocks joined as in the export. Test `fragments_as_typst`.
 - Widget: Ctrl+C puts it on the clipboard as text; Ctrl+X too, then deletes
   the range. A status-bar hint names the keys while a range is selected.
+
+## Selection, step 3c: paste (2026-11-11)
+
+- Ctrl+V reads the clipboard's text (async) and `typst_bridge::parse_fragment`
+  reads it as Typst: in a formula (`Editor::in_math`) as `$…$` → math nodes, or,
+  if that is not one formula, plain text typed in; elsewhere imported after a
+  dummy first paragraph (so leading `#set`/`#let` are content, not a header):
+  one unlabelled paragraph → inlines, else blocks.
+- `Editor::paste` (`editor/paste.rs`): fresh ids for the fragment
+  (`Document::adopt`); a selected range is deleted first and the paste joins it
+  in one undo step (`Last::Chained`). Math nodes go into the caret's row (in
+  text: as an inline formula); inlines are spliced into the caret's text, the
+  texts at both seams joined (`joined_tail`), also in a call's body; blocks
+  replace an empty paragraph, go before/after the caret's block at its start/
+  end, or the paragraph is split (Enter) and they go between; at an
+  environment's edge before/after it. Tests `pasting`, `pasted_typst`.

@@ -8,7 +8,8 @@
 //! raw as a whole.
 
 use model::{
-    Block, BlockNode, Document, InlineNode, ListKind, MathKind, MathNode, TitleFields, spaced_gap,
+    Block, BlockNode, Document, Fragment, Inline, InlineNode, ListKind, MathKind, MathNode,
+    TitleFields, spaced_gap,
 };
 use typst::syntax::ast::{self, AstNode, MathTextKind};
 use typst::syntax::{LinkedNode, SyntaxKind, SyntaxNode, parse};
@@ -981,6 +982,36 @@ fn code_opt(named: ast::Named) -> Option<String> {
     Some(format!("{}: {code}", named.name().as_str()))
 }
 
+/// Pasted Typst as a fragment. In a formula (`in_math`) it is read as
+/// math (`$…$`); if it is not a formula, as text to type. Else it is read
+/// as a document's content, after a first paragraph so leading rules and
+/// definitions are content, not a header: one paragraph gives inlines,
+/// anything else blocks.
+pub fn parse_fragment(text: &str, in_math: bool) -> Fragment {
+    if in_math {
+        let doc = import_typ(&format!("${}$", text.trim()));
+        if let [block] = &doc.blocks[..]
+            && let Block::Paragraph(inlines) = &block.kind
+            && let [_, m, _] = &inlines[..]
+            && let Inline::Math(row) = &m.kind
+        {
+            return Fragment::Math(row.nodes.clone());
+        }
+        return Fragment::Plain(text.to_string());
+    }
+    let mut blocks = import_typ(&format!("x\n\n{text}")).blocks;
+    if !blocks.is_empty() {
+        blocks.remove(0);
+    }
+    match &blocks[..] {
+        [block] if block.label.is_empty() => match &block.kind {
+            Block::Paragraph(inlines) => Fragment::Inlines(inlines.clone()),
+            _ => Fragment::Blocks(blocks),
+        },
+        _ => Fragment::Blocks(blocks),
+    }
+}
+
 /// Options written as in math (`size: #55%`) as code (`size: 55%`); as
 /// they are if they are not all options.
 pub fn code_opts(math: &str) -> String {
@@ -1284,6 +1315,28 @@ $ f(x) &= cases(1 "if" x > 0, 0) \
             let doc = renders_the_same(src);
             assert!(matches!(doc.blocks[0].kind, Block::RawTypst(_)), "{src}");
         }
+    }
+
+    /// Pasted Typst: a paragraph's text as inlines, several blocks (also
+    /// rules, which would be a file's header) as blocks, math as nodes.
+    #[test]
+    fn pasted_typst() {
+        let Fragment::Inlines(inlines) = parse_fragment("a *b* $x$", false) else {
+            panic!("inlines");
+        };
+        assert_eq!(inlines.len(), 5, "{inlines:?}");
+        let Fragment::Blocks(blocks) = parse_fragment("= H\n\ntext", false) else {
+            panic!("blocks");
+        };
+        assert_eq!(blocks.len(), 2);
+        let Fragment::Blocks(blocks) = parse_fragment("#set text(red)\nhello", false) else {
+            panic!("blocks");
+        };
+        assert!(matches!(blocks[0].kind, Block::RawTypst(_)), "{blocks:?}");
+        let Fragment::Math(nodes) = parse_fragment("x^2 + 1", true) else {
+            panic!("math");
+        };
+        assert_eq!(nodes.len(), 3);
     }
 
     /// Named arguments of math calls are kept as code (`opts`), written
