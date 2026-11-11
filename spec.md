@@ -573,6 +573,13 @@ hold yet, which display right but are not editable in place. The paper's
 - Plain brackets stay as typed (Typst pairs them, `(a]` included); existing ones
   cannot be turned into an `lr` pair, since the partner may not be the intended
   one. Wishlist: `lr` around a selection, once formulas have selections.
+- Known limit (measured 2026-11-11): code in a formula (`bigbx` from the header,
+  a large operator with limits) is boxed in the editor so the caret finds it; the
+  box loses its limits, its centring on the axis and the height `lr` scales to,
+  so the editor shows it differently from the export. Putting `limits`/`class`
+  back around the box fixed the limits, not the bracket size. User decision: they
+  avoid such header operators; built-ins (`limits(⊠)`, `op(⊠, limits: #true)`)
+  render the same in both.
 
 
 ### Later
