@@ -949,9 +949,10 @@ mod tests {
         raw_layout(&world, &doc.pages()[0], offset).resolve(&map)
     }
 
-    /// The options tab of a math call: its stops come after the position
-    /// before the call, on the formula's line, above the call's box; line
-    /// moves and clicks on the page skip them, `tab_hit` finds them.
+    /// The options tab of a math call: its stops (not among the model's
+    /// positions, ←/→ skip them) are on the formula's line, above the
+    /// call's box; line moves and clicks on the page skip them, `tab_hit`
+    /// finds them.
     #[test]
     fn call_option_tabs() {
         let mut d = Document::empty();
@@ -962,7 +963,11 @@ mod tests {
         let block = d.display(vec![a, plus, call]);
         let l = layout_of(&block, 300.0);
         let s = super::stops(&block, Some(&l));
-        let got: Vec<_> = s.iter().map(|s| s.cursor.clone()).collect();
+        let got: Vec<_> = s
+            .iter()
+            .filter(|s| !s.tab)
+            .map(|s| s.cursor.clone())
+            .collect();
         assert_eq!(got, d.positions(&block));
         let tab: Vec<&Stop> = s.iter().filter(|s| s.tab).collect();
         assert_eq!(tab.len(), 10);

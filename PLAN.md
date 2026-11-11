@@ -1092,11 +1092,14 @@ reported targets, so only those are still listed. On the paper: no problems left
   or any call with options already (`MathKind::tab`). Test
   `option_calls_match_the_library` keeps the list in step with Typst.
 - Cursor: `Step::Opts` after a call's `Index(k)`, `offset` counts chars
-  (`Target::Opts`); its positions come right after the position before the
-  call, so → from before the call and ← from the start of its first argument
-  reach the tab. Edits go through `Seq::Opts(node)` (undo works).
+  (`Target::Opts`). Not among `Document::positions` (user request: ←/→ skip
+  the tab): `vertical_target` gives it for ↑ from an argument of the call
+  when nothing structural is above (numerator, earlier case of `cases`); the
+  widget picks the char nearest the caret's x. In the tab ←/→ stay in it,
+  Home/End go to its ends (`tab_edge`), ↓ (`tab_exit`) into the first
+  argument. Edits go through `Seq::Opts(node)` (undo works).
 - Typing: every char kept (spaces too); Enter or Esc → into the first
-  argument; Backspace at the tab's start and Delete at its end move on.
+  argument; Backspace at the tab's start and Delete at its end do nothing.
   In an `lr` argument `(` is a bracket (elsewhere `(` in an empty argument
   opens its group), so `lr` + space then `(x)` types the brackets to scale.
 - Widget: tab stops (`Stop::tab`) keep the formula's baseline and sit above

@@ -565,8 +565,10 @@ hold yet, which display right but are not editable in place. The paper's
 - **(a)** the tree, import, export. **(b)** the options tab: while the caret is in a
   call with options (or a call that takes them), a small tab on the top edge of
   the call's outline shows them (`size: 55%`), drawn over the render so nothing
-  shifts. It is a caret stop like the label pill (← from the call's start, or a
-  click); typing edits the source; emptied, the options go. No shortcuts (user
+  shifts. ↑ from the call's arguments (when nothing in them is above, like a
+  numerator over a denominator) or a click reaches it; ←/→ skip it (user
+  request after testing) and, in it, stay in it; ↓, Enter or Esc go back into
+  the first argument. Typing edits the source; emptied, the options go. No shortcuts (user
   decision). `lr` is typed like `sqrt`: `lr` + space gives `lr(▯)`, the brackets
   and content go inside (in an `lr`, `(` is a bracket). The tab shows "+ options"
   while empty; options are typed as code (`size: 80%`, no `#`), Enter or Esc

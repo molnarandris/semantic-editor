@@ -546,11 +546,24 @@ impl Editor {
     /// Leave the options tab the caret is in: into the call's first
     /// argument.
     pub(super) fn leave_opts(&mut self) -> bool {
-        let Some((_, _, len)) = self.opts_pos() else {
-            return false;
+        self.opts_pos().is_some() && self.jump(self.tab_exit())
+    }
+
+    /// Where the caret goes from the options tab it is in: the start of
+    /// the call's first argument (after the call if it has none).
+    pub(super) fn tab_exit(&self) -> CursorPath {
+        let c = &self.caret;
+        let call = &c.path[..c.path.len() - 1];
+        let has_arg = self
+            .doc
+            .resolve(&cursor(c.block, [call, &[Step::Arg(0)]].concat(), 0));
+        if matches!(has_arg, Some(Target::Row { .. })) {
+            return cursor(c.block, [call, &[Step::Arg(0)]].concat(), 0);
+        }
+        let Some(Step::Index(k)) = call.last() else {
+            return c.clone();
         };
-        self.caret.offset = len;
-        self.neighbour(false).is_some_and(|next| self.jump(next))
+        cursor(c.block, call[..call.len() - 1].to_vec(), k + 1)
     }
 
     /// Typing in inline code: everything is kept as typed; `` ` `` ends it.

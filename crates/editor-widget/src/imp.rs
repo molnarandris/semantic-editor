@@ -594,11 +594,12 @@ impl SemEditor {
                 let down = matches!(cmd, Command::Down);
                 let target = match cmd {
                     Command::Up | Command::Down => ed.vertical_target(down),
-                    _ => None,
+                    _ => ed.tab_edge(matches!(cmd, Command::LineEnd)),
                 };
                 drop(ed);
                 let next = match target {
-                    Some(t) => Some(self.column_in_row(t)),
+                    Some(t) if down || matches!(cmd, Command::Up) => Some(self.column_in_row(t)),
+                    Some(t) => Some(t),
                     None => self.geometric_move(cmd),
                 };
                 ed = self.editor.borrow_mut();

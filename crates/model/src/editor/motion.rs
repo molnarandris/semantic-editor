@@ -9,14 +9,35 @@ impl Editor {
     /// Move the caret one position left, entering and leaving structures.
     pub fn move_left(&mut self) -> bool {
         self.finish_word();
+        if let Some((_, offset, _)) = self.opts_pos() {
+            return offset > 0 && self.tab_to(offset - 1);
+        }
         let next = self.neighbour(true);
         next.is_some_and(|c| self.jump(c))
     }
 
     pub fn move_right(&mut self) -> bool {
         self.finish_word();
+        if let Some((_, offset, len)) = self.opts_pos() {
+            return offset < len && self.tab_to(offset + 1);
+        }
         let next = self.neighbour(false);
         next.is_some_and(|c| self.jump(c))
+    }
+
+    /// Home/End in an options tab: the start or end of its text.
+    pub fn tab_edge(&self, end: bool) -> Option<CursorPath> {
+        let (_, _, len) = self.opts_pos()?;
+        let mut c = self.caret.clone();
+        c.offset = if end { len } else { 0 };
+        Some(c)
+    }
+
+    /// ←/→ in an options tab: through its text, never out of it.
+    fn tab_to(&mut self, offset: usize) -> bool {
+        let mut c = self.caret.clone();
+        c.offset = offset;
+        self.jump(c)
     }
 
     pub(super) fn neighbour(&self, back: bool) -> Option<CursorPath> {
@@ -70,6 +91,13 @@ impl Editor {
     /// the column. `None` means
     /// move by lines.
     pub fn vertical_target(&self, down: bool) -> Option<CursorPath> {
+        // In an options tab: ↓ into the call, ↑ stays.
+        if self.opts_pos().is_some() {
+            if !down {
+                return Some(self.caret.clone());
+            }
+            return Some(self.tab_exit());
+        }
         let p = self.row_pos()?;
         let mut path = p.path.clone();
         while path.len() > p.base {
@@ -91,9 +119,14 @@ impl Editor {
                 (Step::Base, true) => Some(Step::Sub),
                 (Step::Base, false) => Some(Step::Sup),
                 (Step::Arg(i), true) if stacked => Some(Step::Arg(i + 1)),
-                (Step::Arg(i), false) if stacked => i.checked_sub(1).map(Step::Arg),
+                (Step::Arg(i), false) if stacked && i > 0 => Some(Step::Arg(i - 1)),
+                // Above a call's arguments: its options tab.
+                (Step::Arg(_), false) if node.kind.tab().is_some() => Some(Step::Opts),
                 _ => None,
             };
+            if to == Some(Step::Opts) {
+                return Some(cursor(p.block, child_path(parent, j, Step::Opts), 0));
+            }
             if let Some(to) = to.filter(|t| node.child(*t).is_some()) {
                 return Some(cursor(p.block, child_path(parent, j, to), 0));
             }

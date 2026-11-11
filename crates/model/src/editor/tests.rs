@@ -773,48 +773,61 @@ fn math_calls() {
     assert_eq!(display_of(&e, 0), "sqrt(a , b)");
 }
 
-/// The options tab of a math call: ← from the start of its first argument
-/// (→ from before the call) reaches it; every char is kept; Enter or Esc
-/// go into the first argument. Calls that take no options have none.
+/// The options tab of a math call: ↑ from its arguments reaches it (the
+/// widget picks the char by x); ←/→ skip it and stay in it; every char is
+/// kept; ↓, Enter or Esc go into the first argument. Calls that take no
+/// options have none.
 #[test]
 fn math_call_options() {
+    let up = |e: &mut Editor| {
+        let t = e.vertical_target(false).unwrap();
+        e.set_caret(t);
+    };
     let mut e = math_calls_editor();
     e.insert_text("lr ");
     assert_eq!(display_of(&e, 0), "lr()");
-    assert!(e.move_left());
+    up(&mut e);
     assert_eq!(e.caret().path.last(), Some(&Step::Opts));
     assert_eq!(labels(&e).last(), Some(&"options"));
     e.insert_text("size: 80%");
     assert_eq!(display_of(&e, 0), "lr[size: 80%]()");
     e.backspace();
     e.insert_text("%");
+    assert!(!e.move_right(), "→ stays in the tab");
+    assert!(e.move_left());
+    assert_eq!(e.caret().offset, 8);
+    let down = e.vertical_target(true).unwrap();
+    assert_eq!(down.path.last(), Some(&Step::Arg(0)));
     assert!(e.enter());
     assert_eq!(e.caret().path.last(), Some(&Step::Arg(0)));
     e.insert_text("(x)");
     assert_eq!(display_of(&e, 0), "lr[size: 80%](( x ))");
     e.doc().check_invariants().unwrap();
-    // From before the call, → enters the tab first; Delete at its end goes
-    // on, Esc leaves.
+    // ← from the start of the argument and → from before the call skip the
+    // tab; ↑ from a fraction's denominator goes to the numerator first.
     let mut e = math_calls_editor();
-    e.insert_text("abs(y");
-    e.escape();
-    while !(e.caret().path.is_empty() && e.caret().offset == 0) {
-        assert!(e.move_left());
-    }
-    assert!(e.move_right());
+    e.insert_text("abs(1/y");
+    e.move_left();
+    assert_eq!(e.caret().path.last(), Some(&Step::Den));
+    up(&mut e);
+    assert_eq!(e.caret().path.last(), Some(&Step::Num));
+    up(&mut e);
     assert_eq!(e.caret().path.last(), Some(&Step::Opts));
     e.insert_text("size: 2em");
     e.escape();
     assert_eq!(e.caret().path.last(), Some(&Step::Arg(0)));
-    assert_eq!(display_of(&e, 0), "abs[size: 2em](y)");
+    assert_eq!(display_of(&e, 0), "abs[size: 2em](frac(1, y))");
+    assert!(e.move_left());
+    assert!(e.caret().path.is_empty(), "before the call");
+    assert!(e.move_right());
+    assert_eq!(e.caret().path.last(), Some(&Step::Arg(0)));
     // Undo takes the options back.
     while e.undo() {}
     assert_eq!(display_of(&e, 0), "");
-    // `sqrt` takes no options: ← from its argument leaves the call.
+    // `sqrt` takes no options: ↑ finds no tab.
     let mut e = math_calls_editor();
     e.insert_text("sqrt ");
-    assert!(e.move_left());
-    assert_eq!(e.caret().path.last(), None);
+    assert!(e.vertical_target(false).is_none());
 }
 
 /// `cases`: Enter starts a new case after the caret's one (also from deeper

@@ -22,8 +22,9 @@
 //!   (`Num`, `Den`, `Base`, `Sup`, `Sub`, `Arg(i)`); `offset` is a position `0..=len`
 //!   between the row's nodes.
 //! - Options of a math call: a row path ending `Index(k), Opts`, `offset` counts
-//!   chars of the options of call `k` (its tab). Its positions come before the
-//!   call's arguments.
+//!   chars of the options of call `k` (its tab). Not among a block's
+//!   positions (←/→ skip the tab): ↑ from the call's arguments or a click
+//!   reach it.
 
 use serde::{Deserialize, Serialize};
 
@@ -545,17 +546,6 @@ fn row_positions(block: NodeId, path: Vec<Step>, row: &MathRow, out: &mut Vec<Cu
             path: path.clone(),
             offset: k,
         });
-        if let Some(opts) = node.kind.tab() {
-            let mut p = path.clone();
-            p.extend([Step::Index(k), Step::Opts]);
-            for offset in 0..=opts.chars().count() {
-                out.push(CursorPath {
-                    block,
-                    path: p.clone(),
-                    offset,
-                });
-            }
-        }
         for (step, child) in node.children() {
             let mut p = path.clone();
             p.extend([Step::Index(k), step]);
