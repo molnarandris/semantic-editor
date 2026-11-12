@@ -1370,3 +1370,19 @@ reported targets, so only those are still listed. On the paper: no problems left
 - Not yet: files named by an included `.typ` (only the main file is
   scanned); paths built in code (`"figs/" + name`).
 - Test `local_files_of_a_source`.
+
+## Screenshots without a window on the screen (2026-11-12)
+
+- `SEM_SAMPLE=1` opens the sample at start; `SEM_SCREENSHOT_DELAY` (ms) sets
+  how long `SEM_SCREENSHOT` waits. Run on GTK's Broadway backend inside the
+  SDK, with a private session bus (the sandbox may not own the app's name),
+  nothing shows on the user's display:
+
+  ```sh
+  build-aux/sdk dbus-run-session -- sh -c 'gtk4-broadwayd :9 & B=$!; sleep 1;
+    GDK_BACKEND=broadway BROADWAY_DISPLAY=:9 SEM_SAMPLE=1 SEM_SCREENSHOT_DELAY=10000 \
+    SEM_SCREENSHOT=docs/screenshots/editor.png target/sdk/debug/semantic-editor; kill $B'
+  ```
+- Use a display number not used before (a stale one gave "nothing
+  rendered"). The Broadway screen is 1024×768. A second shot after jumping
+  to a label failed on and off; not pursued.

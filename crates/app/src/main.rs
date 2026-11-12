@@ -24,6 +24,10 @@ fn main() -> gtk::glib::ExitCode {
     app.connect_activate(|app| {
         let window = Window::new(app);
         window.present();
+        // Debug aid: the sample document (for screenshots).
+        if std::env::var_os("SEM_SAMPLE").is_some() {
+            WidgetExt::activate_action(&window.window, "win.open-sample", None).ok();
+        }
         if let Ok(path) = std::env::var("SEM_SCREENSHOT") {
             screenshot_and_quit(app, &window.window, path);
         }
@@ -77,11 +81,17 @@ fn setup_actions(app: &adw::Application) {
     }
 }
 
-/// Debug aid: save a PNG of the window once the first renders are in, then
-/// quit. Used to check rendering without a human looking at the screen.
+/// Debug aid: save a PNG of the window once the first renders are in (after
+/// `SEM_SCREENSHOT_DELAY` ms, default 1500), then quit. Used to check
+/// rendering without a human looking at the screen (run it on a headless
+/// display, e.g. GTK's Broadway backend).
 fn screenshot_and_quit(app: &adw::Application, window: &adw::ApplicationWindow, path: String) {
     let (app, window) = (app.clone(), window.clone());
-    gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(1500), move || {
+    let delay = std::env::var("SEM_SCREENSHOT_DELAY")
+        .ok()
+        .and_then(|d| d.parse().ok())
+        .unwrap_or(1500);
+    gtk::glib::timeout_add_local_once(std::time::Duration::from_millis(delay), move || {
         let paintable = gtk::WidgetPaintable::new(Some(&window));
         let (w, h) = (window.width() as f64, window.height() as f64);
         let snapshot = gtk::Snapshot::new();
