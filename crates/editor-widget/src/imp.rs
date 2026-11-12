@@ -166,6 +166,9 @@ pub struct SemEditor {
     goal_x: Cell<Option<f64>>,
     /// Scroll the caret into view when its block is rendered.
     reveal: Cell<bool>,
+    /// The caret jumped (to a heading, a reference's target, back): the
+    /// next reveal puts it a third down the view.
+    reveal_third: Cell<bool>,
     /// The completion list while a reference is typed: the chosen entry,
     /// the label typed when it was chosen (a new one starts at the top),
     /// and the rows as last drawn (widget coordinates), for clicks.
@@ -543,7 +546,7 @@ impl SemEditor {
                     // Ctrl+click on a reference: to its target (Alt+←
                     // comes back).
                     imp.goal_x.set(None);
-                    imp.after_command(true);
+                    imp.after_jump();
                 } else if let Some(env) = imp.heading_at(x, y)
                     && imp.editor.borrow_mut().edit_title(env)
                 {
@@ -662,7 +665,7 @@ impl SemEditor {
             }
             Command::Enter => _ = ed.enter(),
             Command::LineBreak => _ = ed.line_break(),
-            Command::Back => _ = ed.go_back(),
+            Command::Back => self.reveal_third.set(ed.go_back()),
             Command::Undo => _ = ed.undo(),
             Command::Redo => _ = ed.redo(),
             Command::Escape => _ = ed.escape(),
@@ -751,6 +754,13 @@ impl SemEditor {
         self.obj().emit_by_name::<()>("caret-moved", &[]);
     }
 
+    /// After the caret jumped somewhere: as `after_command`, with the caret
+    /// shown a third down the view.
+    pub(crate) fn after_jump(&self) {
+        self.reveal_third.set(true);
+        self.after_command(true);
+    }
+
     /// Ask the app to open the caret's raw/diagram block, or the code atom
     /// next to it, for editing.
     fn request_source_edit(&self) {
@@ -805,7 +815,8 @@ impl SemEditor {
             let caret = ed.doc().start_of(block);
             ed.set_caret(caret);
         }
-        self.after_command(true);
+        self.goal_x.set(None);
+        self.after_jump();
     }
 
     /// Select the structure of breadcrumb entry `path_len`.
@@ -1800,7 +1811,11 @@ impl SemEditor {
         let (top, bottom) = (r.y() as f64 - margin, (r.y() + r.height()) as f64 + margin);
         let page = adj.page_size();
         let value = adj.value();
-        if top < 0.0 {
+        if self.reveal_third.take() {
+            // As far as the document's ends allow.
+            let wanted = value + r.y() as f64 - page / 3.0;
+            adj.set_value(wanted.clamp(adj.lower(), (adj.upper() - page).max(adj.lower())));
+        } else if top < 0.0 {
             adj.set_value(value + top);
         } else if bottom > page {
             adj.set_value(value + bottom - page);

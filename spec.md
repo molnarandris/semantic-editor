@@ -407,7 +407,9 @@ Titles decided 2026-11-08: optional, never added by default; positional
 - **References**: `@` in text opens a completion popover at the caret listing labels
   (with their kind and number), filtered as you type. New inline node `Ref(label)`,
   an atom for the caret (Backspace selects, then deletes). Dangling refs are flagged.
-- **Navigation**: clicking a reference scrolls to its target and puts the caret there;
+- **Navigation** (2026-11-12: every jump — a reference, the outline, the next
+  problem, back — shows its destination a third down the view, as far as the
+  document's ends allow): clicking a reference scrolls to its target and puts the caret there;
   Plain click follows the link (the caret reaches a reference with the arrow keys
   instead); Alt+Left goes back.
 - Effort: medium–large (model node, popover, label table, resolution).

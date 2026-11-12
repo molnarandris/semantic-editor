@@ -1243,3 +1243,13 @@ reported targets, so only those are still listed. On the paper: no problems left
   heading styles).
 - Not yet: headings inside environments; a theme switch re-renders entries
   only when their heading is compiled again.
+
+## Jumps land a third down the view (2026-11-12)
+
+- User: a destination (outline entry, any link) should be placed in the top
+  third of the view if possible. `reveal_third`: set by `after_jump` (used by
+  `go_to_block`: outline and problems; Ctrl+click on a reference) and by
+  Alt+← back; the next `reveal_caret` puts the caret's top a third down the
+  view, clamped to the scroll range (near the document's ends it cannot), and
+  waits for the target block's render like the plain reveal. Other moves keep
+  the minimal scroll.
