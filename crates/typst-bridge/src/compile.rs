@@ -44,7 +44,8 @@ pub fn block_document(around: &Around, snippet: &str, width_pt: f64) -> (String,
 /// Typst code drawing a heading as an entry of an outline (the editor's
 /// outline pane): its number and title, indented by level, level 1 bold,
 /// at a fixed size (whatever the header makes of headings) and in `color`
-/// (Typst code, `rgb("#202020")`). Lines span ascender to descender, so
+/// (Typst code, `rgb("#202020")`). A wrapped title continues under its
+/// first letter, not under the number. Lines span ascender to descender, so
 /// every entry's line box has the same height and the page holds its ink.
 pub fn outline_entry_rule(color: &str) -> String {
     format!(
@@ -52,8 +53,10 @@ pub fn outline_entry_rule(color: &str) -> String {
   set text(size: 11pt, fill: {color}, weight: if it.level == 1 {{ \"bold\" }} else {{ \"regular\" }},
     top-edge: \"ascender\", bottom-edge: \"descender\")
   set par(justify: false, leading: 0.25em)
-  if it.numbering != none {{ context counter(heading).display(it.numbering); h(0.5em) }}
-  it.body
+  if it.numbering == none {{ it.body }} else {{
+    grid(columns: (auto, 1fr), column-gutter: 0.5em, row-gutter: 0.25em,
+      context counter(heading).display(it.numbering), it.body)
+  }}
 }})
 "
     )
@@ -217,6 +220,24 @@ mod tests {
             doc.pages()[0].frame.height().to_pt()
         };
         assert!((page("= Name") - page("= Typing")).abs() < 0.01);
+        // A wrapped title's second line starts under its first letter: the
+        // lower half's ink starts right of the number's.
+        let mut world = BridgeWorld::new();
+        let around = Around {
+            header: numbered.into(),
+            prefix: outline_entry_rule("black"),
+            ..Around::default()
+        };
+        let long = "= Wide words wrap onto a second line here";
+        let doc = compile(&mut world, &block_document(&around, long, 120.0).0).expect("compiles");
+        let raster = render_page(&doc.pages()[0], 2.0);
+        let (_, y, _, h) = raster.ink_bounds().expect("ink");
+        let half = |top: u32, bottom: u32| {
+            let band = raster.crop((0, top, raster.width, bottom - top));
+            band.ink_bounds().expect("ink").0
+        };
+        let (upper, lower) = (half(y, y + h / 2), half(y + h / 2, y + h));
+        assert!(lower > upper + 10, "{upper} {lower}");
         assert!(first.0 > plain.0 + 10, "{first:?} {plain:?}");
         // The counters before it: 1.1 is narrower than 12.1.
         let later = ink(

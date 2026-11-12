@@ -1265,3 +1265,11 @@ reported targets, so only those are still listed. On the paper: no problems left
   ink: the entry rule sets the text's edges to ascender/descender (every line
   the same height, descenders or not; wrapped lines with 0.25em leading), the
   crop keeps the page's content box widened to any ink outside it.
+
+## Outline entries: hanging indent (2026-11-12)
+
+- User: a wrapped title's second line should start under the title, not
+  under the number. `outline_entry_rule` puts a numbered heading in a grid,
+  number | title (0.5em apart, as `outline()` indents its entries); the test
+  `outline_entries` checks a wrapped entry's lower half starts right of its
+  number.
