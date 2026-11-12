@@ -20,6 +20,13 @@ use crate::{math_call_shape, resolve_symbol};
 
 /// The document a `.typ` file holds.
 pub fn import_typ(source: &str) -> Document {
+    import_project(source, model::Files::default())
+}
+
+/// [`import_typ`] for a Typst project: `source` is its main file, `files`
+/// the files it uses (pictures, `.bib`), which become the document's. A
+/// `#bibliography("x.bib")` of one of them becomes the bibliography block.
+pub fn import_project(source: &str, files: model::Files) -> Document {
     let source = source.replace("\r\n", "\n");
     // A file this editor exported starts with its own preamble.
     let body = source.strip_prefix(PREAMBLE).unwrap_or(&source);
@@ -37,10 +44,12 @@ pub fn import_typ(source: &str) -> Document {
         doc: Document::empty(),
         src: body,
         sources: [body],
+        files,
     };
     let blocks = importer.blocks(&children[split..]);
     let mut doc = importer.doc;
     doc.blocks = blocks;
+    doc.files = importer.files;
     doc.normalize();
 
     let mut header = body[..header_end].to_string();
@@ -283,6 +292,8 @@ struct Importer<'s> {
     src: &'s str,
     /// Where functions are defined, for telling calls from symbols in math.
     sources: [&'s str; 1],
+    /// The project's files.
+    files: model::Files,
 }
 
 impl Importer<'_> {
@@ -515,6 +526,16 @@ impl Importer<'_> {
             return Some(self.doc.diagram(&src));
         }
         if let Some(src) = bibliography_source(&code) {
+            return Some(self.doc.bibliography_block(&src));
+        }
+        let bib_file = code
+            .strip_prefix("bibliography(\"")
+            .and_then(|rest| rest.strip_suffix("\")"))
+            .filter(|path| !path.contains('"'))
+            .and_then(|path| self.files.get(path))
+            .and_then(|bytes| std::str::from_utf8(bytes).ok());
+        if let Some(src) = bib_file {
+            let src = src.trim_end().to_string();
             return Some(self.doc.bibliography_block(&src));
         }
         let (name, mut args, contents) = call_parts(self.src, call)?;
@@ -1255,6 +1276,25 @@ $ f(x) &= cases(1 "if" x > 0, 0) \
             (r.w - 56.7).abs() < 1.0 && (r.h - 28.3).abs() < 1.0,
             "{r:?}"
         );
+    }
+
+    /// A project's `#bibliography("x.bib")` is the bibliography block, its
+    /// source from the file; the export names `refs.bib`.
+    #[test]
+    fn bibliography_files() {
+        let bib = "@book{beta,\n  title = {B},\n  author = {Beta, Bob},\n  year = {2021},\n}\n";
+        let mut files = model::Files::default();
+        files.insert("lit.bib", bib.as_bytes().to_vec());
+        let doc = import_project("See @beta.\n\n#bibliography(\"lit.bib\")\n", files);
+        assert!(
+            matches!(&doc.blocks[1].kind, Block::Bibliography(s) if s == bib.trim_end()),
+            "{:?}",
+            doc.blocks[1].kind
+        );
+        assert!(serialize_document(&doc).ends_with("#bibliography(\"refs.bib\")\n"));
+        // Without the file it stays as written.
+        let doc = import_typ("#bibliography(\"lit.bib\")\n");
+        assert!(matches!(&doc.blocks[0].kind, Block::RawTypst(_)));
     }
 
     #[test]

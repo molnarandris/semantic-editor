@@ -642,7 +642,8 @@ files, so it can hold pictures and a bibliography file. Decisions (user, 2026-11
   replacing a `main.typ` there).
 - **Bibliography**: its source moves from the document into the project file
   `refs.bib`; the block names it, `#bibliography("refs.bib")`, and the source
-  dialog still edits it.
+  dialog still edits it. (Built so: the block keeps the source, with undo as before;
+  the project and the export write it as `refs.bib`, which `main.typ` reads.)
 - **Import**: a `.typ` naming local files (pictures, `.bib`) gets them copied into
   the project. The Flatpak sandbox grants only the chosen file, so a folder dialog
   asks once for the `.typ`'s folder (no extra permission).

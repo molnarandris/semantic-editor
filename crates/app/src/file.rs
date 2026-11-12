@@ -69,21 +69,35 @@ pub fn from_json(text: &str) -> Result<Document, String> {
     Ok(doc)
 }
 
-/// The document as a Typst project: `main.typ` and the files it names (a
-/// picture deleted since stays out; the document keeps it, for undo), by
-/// path. What the zip holds besides `document.json`, and what Export Typst
-/// writes.
+/// The document as a Typst project: `main.typ`, the bibliography's source
+/// as `refs.bib`, and the files `main.typ` names (a picture deleted since
+/// stays out; the document keeps it, for undo), by path. What the zip holds
+/// besides `document.json`, and what Export Typst writes.
 pub fn typst_project(doc: &Document) -> Vec<(String, Vec<u8>)> {
     let main = typst_bridge::serialize_document(doc);
+    let bib = typst_bridge::bib::BIB_FILE;
+    let source = doc.blocks.iter().find_map(|b| match &b.kind {
+        model::Block::Bibliography(source) => Some(format!("{source}\n")),
+        _ => None,
+    });
     let files = doc
         .files
         .iter()
-        .filter(|(p, _)| main.contains(p) && safe_path(p))
-        .map(|(p, b)| (p.to_string(), b.to_vec()))
-        .collect::<Vec<_>>();
-    std::iter::once((MAIN.to_string(), main.into_bytes()))
+        .filter(|(p, _)| main.contains(p) && safe_path(p) && *p != bib)
+        .map(|(p, b)| (p.to_string(), b.to_vec()));
+    std::iter::once((MAIN.to_string(), main.clone().into_bytes()))
+        .chain(source.map(|s| (bib.to_string(), s.into_bytes())))
         .chain(files)
         .collect()
+}
+
+/// The files `main.typ` reads (see [`typst_project`]), to compile it.
+pub fn project_files(doc: &Document) -> model::Files {
+    let mut files = model::Files::default();
+    for (path, bytes) in typst_project(doc).into_iter().skip(1) {
+        files.insert(path, bytes);
+    }
+    files
 }
 
 /// Whether `path` stays inside the project: relative, no `..`.
@@ -171,7 +185,7 @@ mod tests {
     #[test]
     fn exported_typst_compiles_to_pdf() {
         let doc = sample::document();
-        let pdf = compile_pdf(&serialize_document(&doc), doc.files.clone()).unwrap();
+        let pdf = compile_pdf(&serialize_document(&doc), project_files(&doc)).unwrap();
         assert!(pdf.starts_with(b"%PDF-"));
     }
 
@@ -247,7 +261,7 @@ mod tests {
     fn exported_typst_opens_as_the_same_document() {
         let doc = sample::document();
         let typ = serialize_document(&doc);
-        let opened = typst_bridge::import_typ(&typ);
+        let opened = typst_bridge::import_project(&typ, project_files(&doc));
         opened.check_invariants().unwrap();
         assert_eq!(serialize_document(&opened), typ);
         let raw = |d: &model::Document| {
@@ -269,13 +283,14 @@ mod tests {
     #[test]
     fn projects_are_zips() {
         let mut doc = sample::document();
-        let files = doc.files.clone();
+        let files = project_files(&doc);
         doc.files.insert("images/unused.svg", b"<svg/>".to_vec());
         let zip = to_zip(&doc).unwrap();
         let back = from_zip(&zip).unwrap();
         assert_eq!(to_json(&back), to_json(&doc));
-        assert!(!files.is_empty(), "the sample has a picture");
-        assert_eq!(back.files, files, "only the files the document names");
+        let paths: Vec<&str> = files.iter().map(|(p, _)| p).collect();
+        assert_eq!(paths, ["images/correlations.png", "refs.bib"]);
+        assert_eq!(back.files, files, "only the files the document reads");
         let mut archive = zip::ZipArchive::new(Cursor::new(&zip[..])).unwrap();
         let mut main = String::new();
         archive

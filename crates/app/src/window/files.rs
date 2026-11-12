@@ -212,7 +212,7 @@ impl Window {
         };
         self.apply_block_edit();
         let source = serialize_document(&self.editor.document());
-        let files = self.editor.document().files.clone();
+        let files = file::project_files(&self.editor.document());
         // A full-document compile can take a while: off the main thread.
         let result = match gio::spawn_blocking(move || compile_pdf(&source, files)).await {
             Ok(Ok(pdf)) => write_file(&file, pdf).await,

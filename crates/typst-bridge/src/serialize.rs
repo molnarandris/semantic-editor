@@ -445,9 +445,14 @@ impl Writer {
             // In a figure, written by the figure; elsewhere (not made by the
             // editor) like a paragraph.
             Block::Caption(inlines) => w.text_block(inlines, false),
-            Block::Bibliography(source) => {
-                w.out.push_str(&crate::bib::bibliography_code(source));
-            }
+            // The export names the project's `refs.bib` (written from the
+            // block); the editor's renders embed the source.
+            Block::Bibliography(source) => match w.style {
+                Style::Readable => w
+                    .out
+                    .push_str(&format!("#bibliography({})", quoted(crate::bib::BIB_FILE))),
+                Style::Edit => w.out.push_str(&crate::bib::bibliography_code(source)),
+            },
             // The editor renders the block alone, so it sets the metadata
             // itself; the export sets it at the top of the file.
             Block::Title(source) => {

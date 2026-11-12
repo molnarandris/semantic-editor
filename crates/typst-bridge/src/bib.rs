@@ -4,6 +4,9 @@
 
 use crate::serialize::quoted;
 
+/// The project file the exported Typst reads the bibliography from.
+pub const BIB_FILE: &str = "refs.bib";
+
 /// The Typst expression for an embedded bibliography source (BibTeX or
 /// Hayagriva YAML): its text in a raw block, so it stays verbatim. The fence
 /// is longer than any run of backticks in the source.

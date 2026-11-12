@@ -1340,3 +1340,19 @@ reported targets, so only those are still listed. On the paper: no problems left
 - `file::safe_path`: project paths are relative without `..`; `from_zip`
   rejects other entries, the export skips them (a crafted `.sem` cannot
   write outside the folder).
+
+## Projects, step 6: the bibliography as `refs.bib` (2026-11-12)
+
+- The exported Typst (`main.typ`, Style::Readable) writes
+  `#bibliography("refs.bib")`; `file::typst_project` adds `refs.bib` with
+  the block's source, so the zip, Export Typst Project and Export PDF
+  (`project_files`) all have it. The editor's own renders still embed the
+  source (no file needed per block), and the block keeps the source, so the
+  source dialog, undo and the citation keys work as before (moving the
+  source into `Document::files` would need undoable file ops; not needed
+  for what the user sees).
+- `import_project(source, files)` (`import_typ` without files): a
+  `#bibliography("x.bib")` whose file the project has becomes the
+  bibliography block with that source; without it, raw as before. The
+  exported project opens as the same document again. Test
+  `bibliography_files`.
