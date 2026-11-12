@@ -1525,7 +1525,14 @@ mod tests {
             let l = layout_of(&block, 300.0);
             let s = stops(&block, Some(&l));
             let got: Vec<_> = s.iter().map(|s| s.cursor.clone()).collect();
-            assert_eq!(got, e.doc().positions(&block), "{keys}");
+            let want = e.doc().positions(&block);
+            if keys.contains("footnote") {
+                // ←/→ visit a footnote's text after the paragraph's.
+                assert_eq!(got.len(), want.len(), "{keys}");
+                assert!(want.iter().all(|c| got.contains(c)), "{keys}");
+            } else {
+                assert_eq!(got, want, "{keys}");
+            }
             // Left to right along each line (a line break or a footnote's
             // text below starts another one).
             let xs: Vec<_> = s

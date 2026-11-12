@@ -1202,3 +1202,13 @@ reported targets, so only those are still listed. On the paper: no problems left
   keep the first line's baseline for grouping into lines; the pill's text is
   drawn from its bottom edge. Test in `label_pills` (a fraction: above the
   baseline).
+
+## Footnote text after its paragraph for ←/→ (2026-11-12)
+
+- User: → on a footnote's marker should not enter the footnote; its text is
+  reached where it is shown, after the paragraph. `Document::positions` puts
+  the positions of a footnote's text after the rest of its paragraph (several
+  footnotes in reading order, a footnote's own footnotes after it), so the
+  marker is one step for ←/→. ↑/↓ already go by the layout. Test
+  `footnotes_after_their_paragraph`; `stops_in_inline_calls` compares a
+  footnote paragraph's stops with the positions as sets.

@@ -1305,6 +1305,42 @@ fn bold_and_italic_as_in_typst() {
     assert_eq!(texts(&e), [""]);
 }
 
+/// ←/→ pass a footnote's marker in one step; its text comes after the rest
+/// of the paragraph, where it is shown.
+#[test]
+fn footnotes_after_their_paragraph() {
+    let mut e = Editor::default();
+    e.insert_text("ab#footnote[n] c#footnote[m]");
+    e.enter();
+    e.insert_text("x");
+    let at = |e: &Editor| (e.caret().path.clone(), e.caret().offset);
+    let (i, body) = (Step::Index, Step::Body);
+    e.set_caret(e.doc().start_of(&e.doc().blocks[0]));
+    let mut seen = vec![at(&e)];
+    while e.move_right() && e.caret().block == e.doc().blocks[0].id {
+        seen.push(at(&e));
+    }
+    assert_eq!(
+        seen,
+        [
+            (vec![i(0)], 0),
+            (vec![i(0)], 1),
+            (vec![i(0)], 2),
+            (vec![i(2)], 0),
+            (vec![i(2)], 1),
+            (vec![i(2)], 2),
+            (vec![i(4)], 0),
+            (vec![i(1), body, i(0)], 0),
+            (vec![i(1), body, i(0)], 1),
+            (vec![i(3), body, i(0)], 0),
+            (vec![i(3), body, i(0)], 1),
+        ]
+    );
+    // ← from the next paragraph: into the last footnote's end.
+    assert!(e.move_left());
+    assert_eq!(at(&e), (vec![i(3), body, i(0)], 1));
+}
+
 /// Backspace at the start of an inline call's body marks the call (Esc
 /// cancels); the next one replaces it by its body, joined with the text
 /// around it.

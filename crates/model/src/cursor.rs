@@ -344,8 +344,9 @@ impl Document {
 
     /// Every caret position of a block in reading order: the chars of each
     /// text, and in math rows each position between nodes, with the rows of
-    /// a structure visited right after the position before it. ←/→ step
-    /// through this list.
+    /// a structure visited right after the position before it. A footnote's
+    /// text comes after the rest of its paragraph (it is shown under it).
+    /// ←/→ step through this list.
     pub fn positions(&self, block: &BlockNode) -> Vec<CursorPath> {
         let mut out = vec![];
         let at = |path: Vec<Step>, offset| CursorPath {
@@ -358,6 +359,7 @@ impl Document {
             prefix: &[Step],
             inlines: &[InlineNode],
             out: &mut Vec<CursorPath>,
+            notes: &mut Vec<CursorPath>,
         ) {
             for (i, inline) in inlines.iter().enumerate() {
                 let mut path = prefix.to_vec();
@@ -373,16 +375,25 @@ impl Document {
                         }
                     }
                     Inline::Math(row) => row_positions(block, path, row, out),
+                    Inline::Call { name, body, .. } if name == "footnote" => {
+                        path.push(Step::Body);
+                        let (mut note, mut inner) = (vec![], vec![]);
+                        inline_positions(block, &path, body, &mut note, &mut inner);
+                        notes.extend(note);
+                        notes.extend(inner);
+                    }
                     Inline::Call { body, .. } => {
                         path.push(Step::Body);
-                        inline_positions(block, &path, body, out);
+                        inline_positions(block, &path, body, out, notes);
                     }
                     Inline::Ref(_) => {}
                 }
             }
         }
         let inline_positions = |inlines: &[InlineNode], out: &mut Vec<CursorPath>| {
-            inline_positions(block.id, &[], inlines, out)
+            let mut notes = vec![];
+            inline_positions(block.id, &[], inlines, out, &mut notes);
+            out.extend(notes);
         };
         match &block.kind {
             Block::Paragraph(inlines) | Block::Caption(inlines) => {
