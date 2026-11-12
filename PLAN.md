@@ -1386,3 +1386,23 @@ reported targets, so only those are still listed. On the paper: no problems left
 - Use a display number not used before (a stale one gave "nothing
   rendered"). The Broadway screen is 1024×768. A second shot after jumping
   to a label failed on and off; not pursued.
+
+## History, step A: a git repository in the `.sem` (2026-11-12)
+
+- `history.rs` (crate `git2` with a bundled libgit2, `tempfile`): a bare
+  repository in a temporary folder (deleted with the window's `History`).
+  `commit(files, author, message)` builds the tree from the files' paths and
+  commits on `main` unless the tree is the last one's; `entries()` writes
+  the repository for the zip: one pack of every version and tag
+  (`PackBuilder`), `packed-refs`, `HEAD`, a non-bare config;
+  `from_entries` rebuilds it. Versions, tags (annotated: the message keeps
+  the typed name, the ref a safe form), the files of a version: for the
+  next steps. Test `versions_and_tags`, `tag_ref_names`.
+- `file::snapshot(doc)`: `document.json` and the Typst project, what a
+  version holds; `to_zip(doc, history)` adds the history under `.git/`,
+  `from_zip` returns the document and its history (a new one without).
+- The window keeps the history of its document; every save commits first
+  ("Saved", author `glib::real_name`, else the user name; libgit2 needs an
+  email, so the placeholder `none`). A new, imported or sample document
+  starts an empty one. If the temporary folder cannot be made, saving
+  still works, without versions.

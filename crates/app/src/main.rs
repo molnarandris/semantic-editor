@@ -1,6 +1,7 @@
 //! Application shell: windows, actions and shortcuts, files, export.
 
 mod file;
+mod history;
 mod sample;
 mod window;
 

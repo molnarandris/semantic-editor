@@ -9,6 +9,8 @@ use typst_bridge::{compile_pdf, serialize_document};
 
 use model::Files;
 
+use crate::history::History;
+
 use super::Window;
 use crate::file;
 
@@ -65,24 +67,24 @@ impl Window {
             Ok((bytes, _)) if typst => match String::from_utf8(bytes.to_vec()) {
                 Ok(text) => {
                     let files = self.local_files(&file, &text).await;
-                    Ok(typst_bridge::import_project(&text, files))
+                    Ok((typst_bridge::import_project(&text, files), None))
                 }
                 Err(_) => Err("the file is not UTF-8 text".to_string()),
             },
-            Ok((bytes, _)) => file::from_zip(&bytes),
+            Ok((bytes, _)) => file::from_zip(&bytes).map(|(doc, h)| (doc, Some(h))),
             Err(e) => Err(e.to_string()),
         };
         match result {
-            Ok(doc) if typst => {
+            Ok((doc, _)) if typst => {
                 self.close_block_editor();
-                self.set_document(doc, None);
+                self.set_document(doc, None, None);
                 let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned());
                 *self.imported.borrow_mut() = stem;
                 self.update_title();
             }
-            Ok(doc) => {
+            Ok((doc, history)) => {
                 self.close_block_editor();
-                self.set_document(doc, Some(file));
+                self.set_document(doc, Some(file), history);
             }
             Err(e) => self.toast(&format!("Could not open the file: {e}")),
         }
@@ -162,7 +164,20 @@ impl Window {
             let doc = self.editor.document();
             (doc.header.clone(), doc.blocks.clone(), doc.files.clone())
         };
-        let zip = file::to_zip(&self.editor.document());
+        // Every save that changes something is a version.
+        if self.history.borrow().is_none() {
+            *self.history.borrow_mut() = History::new().ok();
+        }
+        let zip = {
+            let history = self.history.borrow();
+            if let Some(history) = history.as_ref() {
+                let snapshot = file::snapshot(&self.editor.document());
+                if let Err(e) = history.commit(&snapshot, &author(), "Saved") {
+                    self.toast(&format!("Saved without a new version: {e}"));
+                }
+            }
+            file::to_zip(&self.editor.document(), history.as_ref())
+        };
         match async { write_file(&file, zip?).await }.await {
             Ok(()) => {
                 *self.saved.borrow_mut() = saved;
@@ -291,6 +306,16 @@ impl Window {
             }
             Err(e) => self.toast(&format!("Export failed: {e}")),
         }
+    }
+}
+
+/// The author of new versions: the account's full name (else its user
+/// name), no email address.
+pub(super) fn author() -> String {
+    let real = gtk::glib::real_name().to_string_lossy().into_owned();
+    match real.as_str() {
+        "" | "Unknown" => gtk::glib::user_name().to_string_lossy().into_owned(),
+        _ => real,
     }
 }
 

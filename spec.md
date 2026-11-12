@@ -651,11 +651,36 @@ files, so it can hold pictures and a bibliography file. Decisions (user, 2026-11
   options; 4 Insert Picture and the sample's picture; 5 export to a folder;
   6 `refs.bib`; 7 import with files.
 
+### Version history (user request, 2026-11-12)
+
+The user works linearly and alone, wants every save kept, versions to find in the
+sidebar and to tag (arXiv submission, journal submission), now and then a parallel
+version, and comparing versions later. Decisions (user, 2026-11-12):
+
+- **Git, inside the `.sem`**: the zip holds a git repository under `.git/` (one
+  pack, packed refs; unzipped, the folder is an ordinary checkout). While a document
+  is open it lives in a private temporary folder. Every save that changes something
+  commits the document (`document.json`, `main.typ`, `refs.bib`, the pictures). The
+  author is the account's full name, no email address. Copying the `.sem` copies its
+  history.
+- **Versions in the sidebar**: a Versions tab beside the outline; tagged versions
+  with their names, the other saves grouped by day (collapsed). Tags with any name.
+- **An old version opens read-only** in a new window; "Restore this Version" makes
+  it the current one (as a new version: nothing is lost).
+- **Scratch files** (scans of handwritten notes, draft figures): a `scratch/` folder,
+  kept in the `.sem`, never committed, never exported; moving a file out of it puts
+  it under version control.
+- **Later**: parallel versions (branches), comparing versions, saving a copy
+  without history.
+- Steps: A history and a commit per save; B the Versions tab and tags; C opening and
+  restoring old versions; D scratch files.
+
 ### Later
 
 - Project files: images, `#include`, local imports, bibliography files.
 - Multi-file projects: a zip holding the document, its files and a git repository for
-  version control (idea, 2026-11-08; compare Typesetter's project format).
+  version control (idea, 2026-11-08; done 2026-11-12, see Projects and pictures and
+  Version history).
 - Matrices, tables (2D content arguments).
 
 ## Risks, fallbacks, open questions

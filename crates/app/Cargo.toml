@@ -14,3 +14,5 @@ sourceview5 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 zip = { version = "9.5.1", default-features = false, features = ["deflate"] }
+git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2"] }
+tempfile = "3.27.0"

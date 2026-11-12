@@ -3,13 +3,16 @@
 //! and the blocks (node ids are not stored; they are regenerated on load);
 //! `main.typ` is the document as Typst, written on every save so the
 //! unzipped folder compiles as is (not read back); every other entry is a
-//! project file at its path (`images/chain.png`).
+//! project file at its path (`images/chain.png`), except the version
+//! history under `.git/` (see [`History`]).
 
 use std::io::{Cursor, Read, Write};
 
 use model::{BlockNode, Document};
 use serde::{Deserialize, Serialize};
 use zip::write::SimpleFileOptions;
+
+use crate::history::{GIT_DIR, History};
 
 /// Version of `document.json` written by this build (restarted at 1 with
 /// the zipped format, 2026-11-12).
@@ -110,8 +113,21 @@ pub fn safe_path(path: &str) -> bool {
             .all(|part| part != ".." && part != "." && !part.is_empty())
 }
 
-/// The project zip of a document: `document.json` and its Typst project.
-pub fn to_zip(doc: &Document) -> Result<Vec<u8>, String> {
+/// What a version of the document holds: `document.json` and its Typst
+/// project.
+pub fn snapshot(doc: &Document) -> Vec<(String, Vec<u8>)> {
+    std::iter::once((DOCUMENT.to_string(), to_json(doc).into_bytes()))
+        .chain(typst_project(doc))
+        .collect()
+}
+
+/// The project zip of a document: its [`snapshot`] and its `history` (if
+/// it has one).
+pub fn to_zip(doc: &Document, history: Option<&History>) -> Result<Vec<u8>, String> {
+    let git = history
+        .map(History::entries)
+        .transpose()?
+        .unwrap_or_default();
     let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
     let options = SimpleFileOptions::default();
     let mut add = |path: &str, bytes: &[u8]| -> zip::result::ZipResult<()> {
@@ -120,9 +136,11 @@ pub fn to_zip(doc: &Document) -> Result<Vec<u8>, String> {
         Ok(())
     };
     let written = (|| {
-        add(DOCUMENT, to_json(doc).as_bytes())?;
-        for (path, bytes) in typst_project(doc) {
+        for (path, bytes) in snapshot(doc) {
             add(&path, &bytes)?;
+        }
+        for (path, bytes) in &git {
+            add(&format!("{GIT_DIR}{path}"), bytes)?;
         }
         Ok::<_, zip::result::ZipError>(())
     })();
@@ -131,8 +149,9 @@ pub fn to_zip(doc: &Document) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-/// Read a project zip: its document with its files.
-pub fn from_zip(bytes: &[u8]) -> Result<Document, String> {
+/// Read a project zip: its document with its files, and its history (an
+/// empty one if it has none).
+pub fn from_zip(bytes: &[u8]) -> Result<(Document, History), String> {
     let not_sem = |e: zip::result::ZipError| format!("not a valid .sem file: {e}");
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(not_sem)?;
     let count = zip.len();
@@ -145,6 +164,7 @@ pub fn from_zip(bytes: &[u8]) -> Result<Document, String> {
     };
     let mut json = None;
     let mut files = model::Files::default();
+    let mut git = vec![];
     for i in 0..count {
         let (name, bytes) = read(i)?;
         match name.as_str() {
@@ -152,14 +172,21 @@ pub fn from_zip(bytes: &[u8]) -> Result<Document, String> {
             MAIN => {}
             _ if name.ends_with('/') => {}
             _ if !safe_path(&name) => return Err(format!("not a valid .sem file: entry {name}")),
-            _ => files.insert(name, bytes),
+            _ => match name.strip_prefix(GIT_DIR) {
+                Some(path) => git.push((path.to_string(), bytes)),
+                None => files.insert(name, bytes),
+            },
         }
     }
     let json = json.ok_or("not a valid .sem file: no document.json")?;
     let text = std::str::from_utf8(&json).map_err(|_| "document.json is not UTF-8")?;
     let mut doc = from_json(text)?;
     doc.files = files;
-    Ok(doc)
+    let history = match git.is_empty() {
+        true => History::new()?,
+        false => History::from_entries(&git)?,
+    };
+    Ok((doc, history))
 }
 
 #[cfg(test)]
@@ -285,8 +312,19 @@ mod tests {
         let mut doc = sample::document();
         let files = project_files(&doc);
         doc.files.insert("images/unused.svg", b"<svg/>".to_vec());
-        let zip = to_zip(&doc).unwrap();
-        let back = from_zip(&zip).unwrap();
+        let history = History::new().unwrap();
+        history.commit(&snapshot(&doc), "Ada", "Saved").unwrap();
+        let zip = to_zip(&doc, Some(&history)).unwrap();
+        let (back, back_history) = from_zip(&zip).unwrap();
+        assert_eq!(
+            back_history.versions().unwrap(),
+            history.versions().unwrap()
+        );
+        let version = back_history.versions().unwrap()[0].id;
+        assert_eq!(
+            back_history.files_at(version).unwrap().len(),
+            snapshot(&doc).len()
+        );
         assert_eq!(to_json(&back), to_json(&doc));
         let paths: Vec<&str> = files.iter().map(|(p, _)| p).collect();
         assert_eq!(paths, ["images/correlations.png", "refs.bib"]);

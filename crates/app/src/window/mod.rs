@@ -16,6 +16,7 @@ use editor_widget::{PreviewTarget, SemEditor};
 use gtk::{gio, glib};
 use model::{BlockNode, Document, Files, NewBlock};
 
+use crate::history::History;
 use crate::sample;
 use block_editor::BlockEditor;
 use outline::Outline;
@@ -39,6 +40,9 @@ pub struct Window {
     /// Header, blocks and files as last saved or loaded, to tell if there are
     /// changes.
     saved: RefCell<(String, Vec<BlockNode>, Files)>,
+    /// The document's version history (`None` if it could not be set up:
+    /// saving then works without one).
+    history: RefCell<Option<History>>,
     /// The open source editor dialog, if any.
     block_editor: RefCell<Option<Rc<BlockEditor>>>,
     /// The toast of the last problem gone to, replaced by the next one.
@@ -128,12 +132,13 @@ impl Window {
             file: RefCell::new(None),
             imported: RefCell::new(None),
             saved: RefCell::default(),
+            history: RefCell::new(None),
             block_editor: RefCell::new(None),
             problem_toast: RefCell::new(None),
         });
         this.add_actions();
         this.connect_signals();
-        this.set_document(new_document(), None);
+        this.set_document(new_document(), None, None);
         WINDOWS.with(|w| w.borrow_mut().push(this.clone()));
         this
     }
@@ -244,7 +249,7 @@ impl Window {
             ("open-sample", |w| {
                 spawn(async move {
                     if w.confirm_discard().await {
-                        w.set_document(sample::document(), None);
+                        w.set_document(sample::document(), None, None);
                     }
                 })
             }),
@@ -291,7 +296,9 @@ impl Window {
 
     // ----- State -----
 
-    fn set_document(&self, doc: Document, file: Option<gio::File>) {
+    /// Show `doc` (from `file`, with its `history`; a new history if none).
+    fn set_document(&self, doc: Document, file: Option<gio::File>, history: Option<History>) {
+        *self.history.borrow_mut() = history.or_else(|| History::new().ok());
         *self.saved.borrow_mut() = (doc.header.clone(), doc.blocks.clone(), doc.files.clone());
         *self.file.borrow_mut() = file;
         *self.imported.borrow_mut() = None;
