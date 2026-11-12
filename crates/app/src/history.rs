@@ -21,7 +21,6 @@ pub struct History {
 }
 
 /// One saved version: a commit.
-#[allow(dead_code)] // For the Versions pane (next step).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Version {
     pub id: Oid,
@@ -187,7 +186,6 @@ impl History {
     }
 
     /// The saved versions, newest first, with their tags.
-    #[allow(dead_code)] // For the Versions pane (next step).
     pub fn versions(&self) -> Result<Vec<Version>, String> {
         let Some(head) = self.head() else {
             return Ok(vec![]);
@@ -223,7 +221,6 @@ impl History {
         Ok(out)
     }
 
-    #[allow(dead_code)] // For the Versions pane (next step).
     /// Tag version `id` with `name` (as typed; the ref gets a safe form of
     /// it). An existing tag of the same name moves.
     pub fn tag(&self, id: Oid, name: &str, author: &str) -> Result<(), String> {
@@ -240,7 +237,7 @@ impl History {
     }
 
     /// The files of version `id` (path, contents).
-    #[allow(dead_code)] // For the Versions pane (next step).
+    #[allow(dead_code)] // For opening old versions (next step).
     pub fn files_at(&self, id: Oid) -> Result<Vec<(String, Vec<u8>)>, String> {
         let tree = self
             .repo
@@ -285,7 +282,6 @@ fn signature(name: &str) -> Result<Signature<'static>, String> {
     Signature::now(name, "none").map_err(err)
 }
 
-#[allow(dead_code)] // For the Versions pane (next step).
 /// A git ref name for a tag called `name`: letters, digits, `.`, `_`, `-`;
 /// other chars become `-`.
 fn ref_name(name: &str) -> String {

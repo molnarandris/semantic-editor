@@ -1406,3 +1406,16 @@ reported targets, so only those are still listed. On the paper: no problems left
   email, so the placeholder `none`). A new, imported or sample document
   starts an empty one. If the temporary folder cannot be made, saving
   still works, without versions.
+
+## History, step B: the Versions tab and named versions (2026-11-12)
+
+- The sidebar has two pages, Outline and Versions (`adw::ViewStack` with an
+  `InlineViewSwitcher` on top). `window/versions.rs`: "Name Current
+  Version…" (`win.name-version`: saves, then tags the saved version), the
+  named versions (tags, with day and time), then every save grouped by day
+  (`adw::ExpanderRow`s, "Today", "Yesterday", "3 November 2026"; the newest
+  day open), each save with its time and tags. Clicking a version offers to
+  name it (step C opens it instead). Naming saves the file, so the tag is
+  kept; the list is refreshed on load, save and naming.
+- A name is asked in a dialog with an entry; any text, kept as typed in the
+  annotated tag (see step A).

@@ -6,6 +6,7 @@ mod block_editor;
 mod files;
 mod outline;
 mod title_editor;
+mod versions;
 
 use std::cell::RefCell;
 use std::future::Future;
@@ -20,6 +21,7 @@ use crate::history::History;
 use crate::sample;
 use block_editor::BlockEditor;
 use outline::Outline;
+use versions::VersionsPane;
 
 thread_local! {
     /// Open windows. Closures hold weak references; this keeps each window's
@@ -33,6 +35,7 @@ pub struct Window {
     title: adw::WindowTitle,
     toasts: adw::ToastOverlay,
     outline: Outline,
+    versions: VersionsPane,
     file: RefCell<Option<gio::File>>,
     /// The name (without extension) of the `.typ` file the document was
     /// opened from, until it is saved as a `.sem` file.
@@ -93,9 +96,25 @@ impl Window {
         let toasts = adw::ToastOverlay::new();
         toasts.set_child(Some(&scroller));
 
+        // The sidebar: the outline and the versions, a switcher on top.
         let outline = Outline::new();
+        let versions = VersionsPane::new();
+        let pages = adw::ViewStack::new();
+        pages.add_titled(&outline.widget, Some("outline"), "Outline");
+        pages.add_titled(&versions.widget, Some("versions"), "Versions");
+        let switcher = adw::InlineViewSwitcher::builder()
+            .stack(&pages)
+            .margin_start(6)
+            .margin_end(6)
+            .margin_top(6)
+            .margin_bottom(6)
+            .build();
+        let sidebar = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        sidebar.append(&switcher);
+        pages.set_vexpand(true);
+        sidebar.append(&pages);
         let split = adw::OverlaySplitView::builder()
-            .sidebar(&outline.widget)
+            .sidebar(&sidebar)
             .content(&toasts)
             .max_sidebar_width(260.0)
             .build();
@@ -129,6 +148,7 @@ impl Window {
             title,
             toasts,
             outline,
+            versions,
             file: RefCell::new(None),
             imported: RefCell::new(None),
             saved: RefCell::default(),
@@ -167,6 +187,12 @@ impl Window {
         self.editor.connect_outline_rendered(move |editor, id| {
             if let Some(this) = weak.upgrade() {
                 this.outline.show_render(editor, id);
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.versions.connect_pick(move |id| {
+            if let Some(this) = weak.upgrade() {
+                spawn(async move { this.name_version(Some(id)).await });
             }
         });
         let weak = Rc::downgrade(self);
@@ -216,7 +242,7 @@ impl Window {
 
     fn add_actions(self: &Rc<Self>) {
         type Handler = fn(Rc<Window>);
-        let actions: [(&str, Handler); 18] = [
+        let actions: [(&str, Handler); 19] = [
             ("insert-env", |w| {
                 w.editor.start_env();
                 w.editor.grab_focus();
@@ -252,6 +278,9 @@ impl Window {
                         w.set_document(sample::document(), None, None);
                     }
                 })
+            }),
+            ("name-version", |w| {
+                spawn(async move { w.name_version(None).await })
             }),
             ("next-problem", |w| w.go_to_problem(true)),
             ("previous-problem", |w| w.go_to_problem(false)),
@@ -304,6 +333,62 @@ impl Window {
         *self.imported.borrow_mut() = None;
         // Emits caret-moved, which updates the title and status bar.
         self.editor.set_document(doc);
+        self.update_versions();
+    }
+
+    /// Show the history's versions in the sidebar.
+    fn update_versions(&self) {
+        let versions = self
+            .history
+            .borrow()
+            .as_ref()
+            .and_then(|h| h.versions().ok())
+            .unwrap_or_default();
+        self.versions.update(&versions);
+    }
+
+    /// Name a version (`None`: the current one, saved first) with a name
+    /// asked for; the file is saved, so the name is kept.
+    async fn name_version(self: Rc<Self>, id: Option<git2::Oid>) {
+        let Some(name) = self.ask_version_name().await else {
+            return;
+        };
+        if id.is_none() && !self.save().await {
+            return;
+        }
+        let head = |w: &Self| {
+            let history = w.history.borrow();
+            history.as_ref()?.versions().ok()?.first().map(|v| v.id)
+        };
+        let Some(id) = id.or_else(|| head(&self)) else {
+            return;
+        };
+        let tagged = match self.history.borrow().as_ref() {
+            Some(history) => history.tag(id, &name, &files::author()),
+            None => Err("no version history".into()),
+        };
+        match tagged {
+            Ok(()) => _ = self.save().await,
+            Err(e) => self.toast(&format!("Could not name the version: {e}")),
+        }
+        self.update_versions();
+    }
+
+    /// Ask for a version's name ("arXiv submission").
+    async fn ask_version_name(&self) -> Option<String> {
+        let entry = gtk::Entry::builder()
+            .placeholder_text("e.g. arXiv submission")
+            .activates_default(true)
+            .build();
+        let dialog = adw::AlertDialog::new(Some("Name This Version"), None);
+        dialog.set_extra_child(Some(&entry));
+        dialog.add_responses(&[("cancel", "_Cancel"), ("name", "_Name")]);
+        dialog.set_response_appearance("name", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("name"));
+        dialog.set_close_response("cancel");
+        let answer = dialog.choose_future(Some(&self.window)).await;
+        let name = entry.text().trim().to_string();
+        (answer == "name" && !name.is_empty()).then_some(name)
     }
 
     /// Unsaved changes; an imported `.typ` counts until it is saved as `.sem`.

@@ -184,6 +184,7 @@ impl Window {
                 *self.file.borrow_mut() = Some(file);
                 *self.imported.borrow_mut() = None;
                 self.update_title();
+                self.update_versions();
                 true
             }
             Err(e) => {
