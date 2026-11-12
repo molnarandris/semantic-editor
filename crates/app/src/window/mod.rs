@@ -376,7 +376,7 @@ fn main_menu() -> gio::Menu {
     menu.append_section(None, &file);
     let export = gio::Menu::new();
     export.append(Some("Export _PDF…"), Some("win.export-pdf"));
-    export.append(Some("Export _Typst…"), Some("win.export-typ"));
+    export.append(Some("Export _Typst Project…"), Some("win.export-typ"));
     menu.append_section(None, &export);
     let zoom = gio::Menu::new();
     zoom.append(Some("Zoom _In"), Some("win.zoom-in"));

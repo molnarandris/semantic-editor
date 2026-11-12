@@ -1330,3 +1330,13 @@ reported targets, so only those are still listed. On the paper: no problems left
   `sample_has_every_feature`, `projects_are_zips`.
 - Seen on the way, not fixed: `insert_block` (diagram, raw Typst) from a
   caption probably puts the block inside the figure after its caption.
+
+## Projects, step 5: Export Typst Project (2026-11-12)
+
+- "Export Typst Project…" asks for a folder (the portal grants it) and
+  writes `file::typst_project`: `main.typ` and the files it names, their
+  folders made as needed; an existing `main.typ` there is replaced only
+  after asking. The zip writes the same set.
+- `file::safe_path`: project paths are relative without `..`; `from_zip`
+  rejects other entries, the export skips them (a crafted `.sem` cannot
+  write outside the folder).

@@ -154,16 +154,53 @@ impl Window {
         dialog.save_future(Some(&self.window)).await.ok()
     }
 
+    /// Export the document as a Typst project into a chosen folder:
+    /// `main.typ` and the files it names, asking before replacing a
+    /// `main.typ` there.
     pub(super) async fn export_typ(self: Rc<Self>) {
-        let Some(file) = self
-            .choose_target("Export Typst", "Typst files", "typ")
-            .await
-        else {
+        let dialog = gtk::FileDialog::builder()
+            .title("Export Typst Project Into Folder")
+            .build();
+        let Ok(folder) = dialog.select_folder_future(Some(&self.window)).await else {
             return;
         };
+        let main = folder.child("main.typ");
+        if main.query_exists(None::<&gio::Cancellable>) && !self.confirm_replace(&folder).await {
+            return;
+        }
         self.apply_block_edit();
-        let source = serialize_document(&self.editor.document());
-        self.finish_export(&file, write_file(&file, source.into_bytes()).await);
+        let project = file::typst_project(&self.editor.document());
+        let mut result = Ok(());
+        for (path, bytes) in project {
+            let target = folder.resolve_relative_path(&path);
+            if let Some(parent) = target.parent() {
+                // Already there is fine.
+                let _ = parent.make_directory_with_parents(None::<&gio::Cancellable>);
+            }
+            result = write_file(&target, bytes).await;
+            if result.is_err() {
+                break;
+            }
+        }
+        self.finish_export(&main, result);
+    }
+
+    /// Ask whether to replace the Typst project in `folder`.
+    async fn confirm_replace(&self, folder: &gio::File) -> bool {
+        let name = folder
+            .basename()
+            .map_or_else(String::new, |p| p.to_string_lossy().into_owned());
+        let dialog = adw::AlertDialog::new(
+            Some("Replace main.typ?"),
+            Some(&format!(
+                "“{name}” already has a main.typ. Exporting replaces it and the pictures of the same names."
+            )),
+        );
+        dialog.add_responses(&[("cancel", "_Cancel"), ("replace", "_Replace")]);
+        dialog.set_response_appearance("replace", adw::ResponseAppearance::Destructive);
+        dialog.set_default_response(Some("cancel"));
+        dialog.set_close_response("cancel");
+        dialog.choose_future(Some(&self.window)).await == "replace"
     }
 
     pub(super) async fn export_pdf(self: Rc<Self>) {

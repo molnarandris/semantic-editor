@@ -69,11 +69,35 @@ pub fn from_json(text: &str) -> Result<Document, String> {
     Ok(doc)
 }
 
-/// The project zip of a document: `document.json`, `main.typ` and the
-/// files it names (a picture deleted since stays out; the document keeps
-/// it, for undo).
-pub fn to_zip(doc: &Document) -> Result<Vec<u8>, String> {
+/// The document as a Typst project: `main.typ` and the files it names (a
+/// picture deleted since stays out; the document keeps it, for undo), by
+/// path. What the zip holds besides `document.json`, and what Export Typst
+/// writes.
+pub fn typst_project(doc: &Document) -> Vec<(String, Vec<u8>)> {
     let main = typst_bridge::serialize_document(doc);
+    let files = doc
+        .files
+        .iter()
+        .filter(|(p, _)| main.contains(p) && safe_path(p))
+        .map(|(p, b)| (p.to_string(), b.to_vec()))
+        .collect::<Vec<_>>();
+    std::iter::once((MAIN.to_string(), main.into_bytes()))
+        .chain(files)
+        .collect()
+}
+
+/// Whether `path` stays inside the project: relative, no `..`.
+pub fn safe_path(path: &str) -> bool {
+    !path.is_empty()
+        && !path.starts_with('/')
+        && !path.contains('\\')
+        && path
+            .split('/')
+            .all(|part| part != ".." && part != "." && !part.is_empty())
+}
+
+/// The project zip of a document: `document.json` and its Typst project.
+pub fn to_zip(doc: &Document) -> Result<Vec<u8>, String> {
     let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
     let options = SimpleFileOptions::default();
     let mut add = |path: &str, bytes: &[u8]| -> zip::result::ZipResult<()> {
@@ -83,9 +107,8 @@ pub fn to_zip(doc: &Document) -> Result<Vec<u8>, String> {
     };
     let written = (|| {
         add(DOCUMENT, to_json(doc).as_bytes())?;
-        add(MAIN, main.as_bytes())?;
-        for (path, bytes) in doc.files.iter().filter(|(p, _)| main.contains(p)) {
-            add(path, bytes)?;
+        for (path, bytes) in typst_project(doc) {
+            add(&path, &bytes)?;
         }
         Ok::<_, zip::result::ZipError>(())
     })();
@@ -114,6 +137,7 @@ pub fn from_zip(bytes: &[u8]) -> Result<Document, String> {
             DOCUMENT => json = Some(bytes),
             MAIN => {}
             _ if name.ends_with('/') => {}
+            _ if !safe_path(&name) => return Err(format!("not a valid .sem file: entry {name}")),
             _ => files.insert(name, bytes),
         }
     }
@@ -261,6 +285,16 @@ mod tests {
             .unwrap();
         assert_eq!(main, serialize_document(&doc));
         assert!(from_zip(b"not a zip").is_err());
+        for (path, safe) in [
+            ("images/a.png", true),
+            ("refs.bib", true),
+            ("../a.png", false),
+            ("/etc/x", false),
+            ("a/../../b", false),
+            ("a//b", false),
+        ] {
+            assert_eq!(safe_path(path), safe, "{path}");
+        }
     }
 
     #[test]

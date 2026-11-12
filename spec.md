@@ -638,7 +638,8 @@ files, so it can hold pictures and a bibliography file. Decisions (user, 2026-11
   the project (`images/<name>`) and adds a figure, `#figure(image("images/x.png"),
   caption: […])`, its caption to type. The image's options (`width: 80%`) are typed
   in an options tab on its outline, as for math calls (click or ↑).
-- **Export Typst** writes a folder: `main.typ` and the project's files.
+- **Export Typst** writes a folder: `main.typ` and the project's files (asking before
+  replacing a `main.typ` there).
 - **Bibliography**: its source moves from the document into the project file
   `refs.bib`; the block names it, `#bibliography("refs.bib")`, and the source
   dialog still edits it.
