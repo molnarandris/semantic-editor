@@ -231,6 +231,7 @@ fn compile_job(
     job: &CompileJob,
 ) -> Result<(Arc<Raster>, Arc<RawLayout>), Vec<String>> {
     let (src, offset) = block_document(&job.around, &job.snippet, job.width_pt);
+    world.set_files(job.around.files.clone());
     let doc = compile(world, &src)?;
     let page = doc
         .pages()

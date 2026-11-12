@@ -253,7 +253,8 @@ labels (110), CeTZ drawings inside formulas (101), theorem environments (~70, bu
 figures with a kind), ~100 document-level `#let`s next to the figures that use them, a
 mid-document `#set heading(numbering: …)` (appendix), primes (129), text in math (90),
 lists (90 items), text markup (~100), multi-line aligned equations (30), `cases`,
-figures, footnotes, an embedded bibliography. Not used: images, tables, local files.
+figures, footnotes, an embedded bibliography. Not used: images, tables, local files
+(images and local files: see Projects and pictures, 2026-11-12).
 
 Principle (discussed 2026-11-08): **stay close to Typst in what a document means,
 diverge freely in how it is typed and shown.** Every structure the editor has maps to
@@ -621,6 +622,32 @@ Asked for overnight; decisions taken by Claude (to be confirmed by the user).
   export writes it.
 - **3c Paste** (Ctrl+V): the clipboard text read as Typst: in a formula as
   math, in text as inlines when it is one paragraph, else as blocks.
+
+### Projects and pictures (user request, 2026-11-12)
+
+A document becomes a project: the `.sem` file is a zip of the document and its
+files, so it can hold pictures and a bibliography file. Decisions (user, 2026-11-12):
+
+- **Format**: `.sem` stays the extension; no files of the old format exist, so the
+  format versions restart at 1. The zip holds `document.json` (header and blocks, as
+  before), a `main.typ` written on every save (the export, so the unzipped folder
+  compiles with the Typst CLI as is; on open only `document.json` counts) and the
+  project's files at their paths (`images/…`, `refs.bib`). A `.git` folder can come
+  later.
+- **Pictures** go in as figures only: "Insert Picture…" copies the chosen file into
+  the project (`images/<name>`) and adds a figure, `#figure(image("images/x.png"),
+  caption: […])`, its caption to type. The image's options (`width: 80%`) are typed
+  in an options tab on its outline, as for math calls (click or ↑).
+- **Export Typst** writes a folder: `main.typ` and the project's files.
+- **Bibliography**: its source moves from the document into the project file
+  `refs.bib`; the block names it, `#bibliography("refs.bib")`, and the source
+  dialog still edits it.
+- **Import**: a `.typ` naming local files (pictures, `.bib`) gets them copied into
+  the project. The Flatpak sandbox grants only the chosen file, so a folder dialog
+  asks once for the `.typ`'s folder (no extra permission).
+- Steps: 1 files in the document and the compiler; 2 the zip; 3 picture blocks with
+  options; 4 Insert Picture and the sample's picture; 5 export to a folder;
+  6 `refs.bib`; 7 import with files.
 
 ### Later
 

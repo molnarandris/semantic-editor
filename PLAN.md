@@ -1273,3 +1273,15 @@ reported targets, so only those are still listed. On the paper: no problems left
   number | title (0.5em apart, as `outline()` indents its entries); the test
   `outline_entries` checks a wrapped entry's lower half starts right of its
   number.
+
+## Projects, step 1: files in the document and the compiler (2026-11-12)
+
+- `model::Files`: the project's files by path (`images/chain.png`), shared
+  until changed, each with its hash computed once (`Hash` uses those, so
+  cache keys do not rehash bytes); `free_path` for a new file's name.
+  `Document::files` (not in `document.json`; the zip stores them, step 2).
+- `Around::files`: every block's job carries the document's files
+  (`stale_blocks_editing(.., files, ..)`, the preview too); the worker hands
+  them to the world before compiling, and `BridgeWorld` serves project paths
+  from them (bytes, or a `Source` for `.typ`). `compile_pdf(source, files)`.
+  Test `project_files` (an SVG by its path).

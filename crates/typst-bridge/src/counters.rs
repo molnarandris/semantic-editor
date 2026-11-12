@@ -301,6 +301,7 @@ mod tests {
                 header: HEADER.into(),
                 prefix,
                 suffix,
+                ..Around::default()
             };
             state = end_state(&compile_block(&mut world, &around, snippet)).unwrap();
             chained.push(state.clone());
@@ -414,6 +415,7 @@ mod tests {
                 header: HEADER.into(),
                 prefix: prefix.into(),
                 suffix: report(&[label]),
+                ..Around::default()
             };
             targets.extend(label_targets(&compile_block(&mut world, &around, snippet)));
         }
@@ -443,6 +445,7 @@ mod tests {
                 .zip(elements)
                 .map(|(t, e)| ref_stub(t, e))
                 .collect(),
+            ..Around::default()
         };
         let doc = compile_block(&mut world, &around, "See @sec:two, @eq, @lem and @gone.");
         let mut text = String::new();

@@ -1904,6 +1904,7 @@ impl SemEditor {
             jobs::stale_blocks_editing(
                 &ed.doc().blocks,
                 &ed.doc().header,
+                &ed.doc().files,
                 self.show_code.get(),
                 &submitted,
                 self.editing.get(),
@@ -1998,6 +1999,7 @@ impl SemEditor {
                     };
                     let around = Around {
                         header: view.around.header.clone(),
+                        files: view.around.files.clone(),
                         ..Around::default()
                     };
                     (around, snippet, SpanMap::default())

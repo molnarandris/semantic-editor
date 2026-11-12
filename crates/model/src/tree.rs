@@ -867,6 +867,10 @@ pub struct Document {
     /// set/show rules, imports, definitions. Should not produce content.
     pub header: String,
     pub blocks: Vec<BlockNode>,
+    /// The project's other files (pictures, bibliography files), stored
+    /// beside the document in the project file.
+    #[serde(skip)]
+    pub files: crate::Files,
     #[serde(skip)]
     next_id: u64,
 }
@@ -892,6 +896,7 @@ impl Document {
         Self {
             header: String::new(),
             blocks: vec![],
+            files: crate::Files::default(),
             next_id: 1,
         }
     }

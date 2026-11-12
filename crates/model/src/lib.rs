@@ -3,6 +3,7 @@
 
 mod cursor;
 mod editor;
+mod files;
 mod history;
 mod ops;
 mod selection;
@@ -14,6 +15,7 @@ pub use editor::{
     CallResolver, CallShape, DIAGRAM_TEMPLATE, Editor, INLINE_DIAGRAM_TEMPLATE, MathCallResolver,
     MathCallShape, NewBlock, Selected, SymbolResolver,
 };
+pub use files::Files;
 pub use history::History;
 pub use ops::{Items, Op, OpError, Seq};
 pub use selection::{Fragment, SelRange, Selection};

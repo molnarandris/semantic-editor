@@ -146,7 +146,8 @@ mod tests {
 
     #[test]
     fn exported_typst_compiles_to_pdf() {
-        let pdf = compile_pdf(&serialize_document(&sample::document())).unwrap();
+        let doc = sample::document();
+        let pdf = compile_pdf(&serialize_document(&doc), doc.files.clone()).unwrap();
         assert!(pdf.starts_with(b"%PDF-"));
     }
 

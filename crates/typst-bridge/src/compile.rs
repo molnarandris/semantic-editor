@@ -22,6 +22,8 @@ pub struct Around {
     pub prefix: String,
     /// Right after the snippet (e.g. reporting counters).
     pub suffix: String,
+    /// The project's files (pictures, bibliography files).
+    pub files: model::Files,
 }
 
 /// Build the standalone document for one block whose content is `width_pt`
@@ -133,10 +135,12 @@ pub fn render_page(page: &Page, pixel_per_pt: f64) -> Raster {
     }
 }
 
-/// Compile a whole document (e.g. from `serialize_document`) and export it as
-/// PDF. Uses its own world, so it can run on any thread.
-pub fn compile_pdf(source: &str) -> Result<Vec<u8>, Vec<String>> {
+/// Compile a whole document (e.g. from `serialize_document`) with the
+/// project's `files` and export it as PDF. Uses its own world, so it can
+/// run on any thread.
+pub fn compile_pdf(source: &str, files: model::Files) -> Result<Vec<u8>, Vec<String>> {
     let mut world = BridgeWorld::new();
+    world.set_files(files);
     let doc = compile(&mut world, source)?;
     typst_pdf::pdf(&doc, &typst_pdf::PdfOptions::default())
         .map_err(|errors| errors.iter().map(|e| e.message.to_string()).collect())
@@ -195,7 +199,7 @@ mod tests {
             let around = Around {
                 header: header.into(),
                 prefix: format!("{prefix}{}", outline_entry_rule("rgb(\"#202020\")")),
-                suffix: String::new(),
+                ..Around::default()
             };
             let doc =
                 compile(&mut world, &block_document(&around, snippet, 200.0).0).expect("compiles");
@@ -251,6 +255,27 @@ mod tests {
             "== The $x$ map",
         );
         assert!(later.0 > early.0, "{later:?} {early:?}");
+    }
+
+    /// The project's files are found by their path, as `image` names them.
+    #[test]
+    fn project_files() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10"/></svg>"#;
+        let mut files = model::Files::default();
+        files.insert("images/box.svg", svg.as_bytes().to_vec());
+        let snippet = "#image(\"images/box.svg\", width: 2cm)";
+        let mut world = BridgeWorld::new();
+        let src = block_document(&Around::default(), snippet, 200.0).0;
+        assert!(compile(&mut world, &src).is_err(), "no such file yet");
+        world.set_files(files);
+        let doc = compile(&mut world, &src).expect("compiles");
+        let raster = render_page(&doc.pages()[0], 1.0);
+        let (_, _, w, h) = raster.ink_bounds().expect("ink");
+        // 2cm wide, half as high.
+        assert!(
+            (w as f64 - 56.7).abs() < 2.0 && (h as f64 - 28.3).abs() < 2.0,
+            "{w}x{h}"
+        );
     }
 
     #[test]

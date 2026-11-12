@@ -294,7 +294,8 @@ pub fn stale_blocks(
     show_code: bool,
     submitted: &[Submitted],
 ) -> Vec<Job> {
-    stale_blocks_editing(blocks, header, show_code, submitted, None)
+    let files = model::Files::default();
+    stale_blocks_editing(blocks, header, &files, show_code, submitted, None)
 }
 
 /// Typst code making a paragraph break its lines greedily, as word
@@ -303,11 +304,13 @@ pub fn stale_blocks(
 /// every line of the paragraph at each keystroke, the caret with them.
 pub const GREEDY_LINES: &str = "#set par(linebreaks: \"simple\")\n";
 
-/// [`stale_blocks`], with `editing` the top-level block being typed in: its
-/// lines are broken greedily ([`GREEDY_LINES`]) until the caret leaves it.
+/// [`stale_blocks`], with the project's `files`, and `editing` the
+/// top-level block being typed in: its lines are broken greedily
+/// ([`GREEDY_LINES`]) until the caret leaves it.
 pub fn stale_blocks_editing(
     blocks: &[BlockNode],
     header: &str,
+    files: &model::Files,
     show_code: bool,
     submitted: &[Submitted],
     editing: Option<NodeId>,
@@ -388,6 +391,7 @@ pub fn stale_blocks_editing(
         let sensitive = code[index].is_none() && counter_sensitive(block);
         let mut around = Around {
             header: context.clone(),
+            files: files.clone(),
             ..Around::default()
         };
         if let Some(source) = code[index] {
@@ -1198,7 +1202,7 @@ mod tests {
         e.insert_text("Second.");
         let d = e.doc().clone();
         let (first, second) = (d.blocks[0].id, d.blocks[1].id);
-        let jobs = stale_blocks_editing(&d.blocks, "", false, &[], Some(second));
+        let jobs = stale_blocks_editing(&d.blocks, "", &d.files, false, &[], Some(second));
         let around = |i: usize| &jobs.iter().find(|j| j.index == i).unwrap().around;
         assert!(!around(0).prefix.contains(GREEDY_LINES));
         assert!(around(1).prefix.contains(GREEDY_LINES));
@@ -1209,7 +1213,14 @@ mod tests {
             views[job.index].snippet = job.snippet.clone();
             views[job.index].map = job.map.clone();
         }
-        let again = stale_blocks_editing(&d.blocks, "", false, &submitted(&views), Some(first));
+        let again = stale_blocks_editing(
+            &d.blocks,
+            "",
+            &d.files,
+            false,
+            &submitted(&views),
+            Some(first),
+        );
         let indices: Vec<usize> = again.iter().map(|j| j.index).collect();
         assert_eq!(indices, [0, 1], "both change how they break");
     }
