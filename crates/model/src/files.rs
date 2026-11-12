@@ -15,6 +15,16 @@ struct File {
     hash: u64,
 }
 
+/// The folder of scratch files (scans of handwritten notes, draft
+/// figures): kept in the project, never versioned or exported.
+pub const SCRATCH_DIR: &str = "scratch";
+
+/// Whether `path` is a scratch file.
+pub fn is_scratch(path: &str) -> bool {
+    path.strip_prefix(SCRATCH_DIR)
+        .is_some_and(|rest| rest.starts_with('/'))
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Files(Arc<BTreeMap<String, Arc<File>>>);
 

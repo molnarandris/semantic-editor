@@ -148,12 +148,35 @@ impl SemEditor {
     }
 
     /// Insert a figure of the picture `bytes` (file name `name`), stored in
-    /// the project; the caret goes into its caption.
-    pub fn insert_picture(&self, name: &str, bytes: Vec<u8>) {
+    /// the project (with `scratch`: as a scratch file, not versioned); the
+    /// caret goes into its caption.
+    pub fn insert_picture(&self, name: &str, bytes: Vec<u8>, scratch: bool) {
         let imp = self.imp();
-        if imp.editor.borrow_mut().insert_picture(name, bytes) {
+        if imp.editor.borrow_mut().insert_picture(name, bytes, scratch) {
             imp.after_command(true);
         }
+    }
+
+    /// Put scratch file `path` under version control (see
+    /// `Editor::keep_file`).
+    pub fn keep_file(&self, path: &str) {
+        let imp = self.imp();
+        if imp.editor.borrow_mut().keep_file(path) {
+            imp.after_command(false);
+        }
+    }
+
+    /// Remove project file `path` if the document does not use it.
+    pub fn delete_file(&self, path: &str) {
+        let imp = self.imp();
+        if imp.editor.borrow_mut().delete_file(path) {
+            imp.after_command(false);
+        }
+    }
+
+    /// Whether the document uses project file `path`.
+    pub fn file_used(&self, path: &str) -> bool {
+        self.imp().editor.borrow().file_used(path)
     }
 
     /// Start an environment: a paragraph with `#` for its name (`lemma`,

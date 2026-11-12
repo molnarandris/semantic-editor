@@ -443,7 +443,7 @@ fn typed_section(doc: Document) -> Document {
     // a figure, the caret in its caption; a label; the width in the
     // picture's options tab (↑ beside it).
     let png = include_bytes!("../../../data/sample/correlations.png");
-    e.insert_picture("correlations.png", png.to_vec());
+    e.insert_picture("correlations.png", png.to_vec(), false);
     e.insert_text("Correlations in a matrix product state decay exponentially.");
     e.enter_label();
     e.insert_text("fig:correlations");

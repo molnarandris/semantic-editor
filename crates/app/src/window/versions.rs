@@ -12,6 +12,7 @@ use gtk::glib;
 use crate::history::Version;
 
 type Callback = Rc<RefCell<Option<Box<dyn Fn(Oid)>>>>;
+type FileCallback = Rc<RefCell<Option<Box<dyn Fn(&str)>>>>;
 
 pub struct VersionsPane {
     pub widget: gtk::ScrolledWindow,
@@ -21,6 +22,13 @@ pub struct VersionsPane {
     empty: gtk::Label,
     /// Called with a version picked in the list.
     on_pick: Callback,
+    scratch_title: gtk::Label,
+    scratch_hint: gtk::Label,
+    scratch: gtk::ListBox,
+    /// The scratch files shown (path, used).
+    shown_scratch: RefCell<Vec<(String, bool)>>,
+    on_keep: FileCallback,
+    on_delete: FileCallback,
 }
 
 impl VersionsPane {
@@ -64,6 +72,19 @@ impl VersionsPane {
         column.append(&title("Saves"));
         column.append(&saves);
         column.append(&empty);
+        let scratch_title = title("Scratch Files");
+        let scratch_hint = gtk::Label::builder()
+            .label("Kept with the document, not in its versions. Keep one to version it.")
+            .wrap(true)
+            .xalign(0.0)
+            .css_classes(["dim-label", "caption"])
+            .margin_start(12)
+            .margin_end(12)
+            .build();
+        let scratch = list();
+        column.append(&scratch_title);
+        column.append(&scratch_hint);
+        column.append(&scratch);
         let widget = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .child(&column)
@@ -77,13 +98,82 @@ impl VersionsPane {
                 }
             });
         }
-        Self {
+        let this = Self {
             widget,
             named,
             saves,
             named_title,
             empty,
             on_pick,
+            scratch_title,
+            scratch_hint,
+            scratch,
+            shown_scratch: RefCell::default(),
+            on_keep: Rc::default(),
+            on_delete: Rc::default(),
+        };
+        this.update_scratch(&[]);
+        this
+    }
+
+    /// Call `f` with a scratch file to keep (version).
+    pub fn connect_keep(&self, f: impl Fn(&str) + 'static) {
+        *self.on_keep.borrow_mut() = Some(Box::new(f));
+    }
+
+    /// Call `f` with an unused scratch file to delete.
+    pub fn connect_delete(&self, f: impl Fn(&str) + 'static) {
+        *self.on_delete.borrow_mut() = Some(Box::new(f));
+    }
+
+    /// Show the scratch files (path, whether the document uses it); the
+    /// section hides when there are none.
+    pub fn update_scratch(&self, files: &[(String, bool)]) {
+        if *self.shown_scratch.borrow() == files && !files.is_empty() {
+            return;
+        }
+        *self.shown_scratch.borrow_mut() = files.to_vec();
+        self.scratch.remove_all();
+        for w in [
+            self.scratch_title.upcast_ref::<gtk::Widget>(),
+            self.scratch_hint.upcast_ref(),
+            self.scratch.upcast_ref(),
+        ] {
+            w.set_visible(!files.is_empty());
+        }
+        for (path, used) in files {
+            let name = path.split_once('/').map_or(path.as_str(), |(_, n)| n);
+            let row = adw::ActionRow::builder()
+                .title(glib::markup_escape_text(name))
+                .subtitle(if *used {
+                    "In the document"
+                } else {
+                    "Not in the document"
+                })
+                .build();
+            let keep = gtk::Button::builder()
+                .label("Keep")
+                .tooltip_text("Version it: move it to the document’s pictures")
+                .valign(gtk::Align::Center)
+                .build();
+            let delete = gtk::Button::builder()
+                .icon_name("user-trash-symbolic")
+                .tooltip_text("Delete (only when not in the document)")
+                .valign(gtk::Align::Center)
+                .sensitive(!*used)
+                .css_classes(["flat"])
+                .build();
+            for (button, callback) in [(&keep, &self.on_keep), (&delete, &self.on_delete)] {
+                let (callback, path) = (callback.clone(), path.clone());
+                button.connect_clicked(move |_| {
+                    if let Some(f) = callback.borrow().as_ref() {
+                        f(&path);
+                    }
+                });
+            }
+            row.add_suffix(&keep);
+            row.add_suffix(&delete);
+            self.scratch.append(&row);
         }
     }
 

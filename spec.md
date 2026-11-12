@@ -669,7 +669,9 @@ version, and comparing versions later. Decisions (user, 2026-11-12):
   it the current one (as a new version: nothing is lost).
 - **Scratch files** (scans of handwritten notes, draft figures): a `scratch/` folder,
   kept in the `.sem`, never committed, never exported; moving a file out of it puts
-  it under version control.
+  it under version control. (Built: "Insert Scratch Picture…"; a Scratch Files list
+  on the Versions page with Keep and, for unused files, Delete; a draft PDF shows
+  the scratch pictures the document uses.)
 - **Later**: parallel versions (branches), comparing versions, saving a copy
   without history.
 - Steps: A history and a commit per save; B the Versions tab and tags; C opening and

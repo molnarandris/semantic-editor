@@ -201,6 +201,7 @@ impl Window {
                 this.update_title();
                 this.sync_block_editor();
                 this.outline.update(&this.editor);
+                this.update_scratch();
             }
         });
         let weak = Rc::downgrade(self);
@@ -213,6 +214,18 @@ impl Window {
         self.versions.connect_pick(move |id| {
             if let Some(this) = weak.upgrade() {
                 this.open_version(id);
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.versions.connect_keep(move |path| {
+            if let Some(this) = weak.upgrade() {
+                this.editor.keep_file(path);
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.versions.connect_delete(move |path| {
+            if let Some(this) = weak.upgrade() {
+                this.editor.delete_file(path);
             }
         });
         let weak = Rc::downgrade(self);
@@ -268,7 +281,7 @@ impl Window {
 
     fn add_actions(self: &Rc<Self>) {
         type Handler = fn(Rc<Window>);
-        let actions: [(&str, Handler); 19] = [
+        let actions: [(&str, Handler); 20] = [
             ("insert-env", |w| {
                 w.editor.start_env();
                 w.editor.grab_focus();
@@ -278,7 +291,10 @@ impl Window {
             }),
             ("insert-diagram", |w| w.insert_block(NewBlock::Diagram)),
             ("insert-picture", |w| {
-                spawn(async move { w.insert_picture().await })
+                spawn(async move { w.insert_picture(false).await })
+            }),
+            ("insert-scratch-picture", |w| {
+                spawn(async move { w.insert_picture(true).await })
             }),
             ("insert-raw", |w| w.insert_block(NewBlock::RawTypst)),
             ("insert-bibliography", |w| {
@@ -360,6 +376,26 @@ impl Window {
         // Emits caret-moved, which updates the title and status bar.
         self.editor.set_document(doc);
         self.update_versions();
+    }
+
+    /// Show the scratch files in the sidebar, with whether they are used.
+    fn update_scratch(&self) {
+        let paths: Vec<String> = {
+            let doc = self.editor.document();
+            doc.files
+                .iter()
+                .filter(|(p, _)| model::is_scratch(p))
+                .map(|(p, _)| p.to_string())
+                .collect()
+        };
+        let files: Vec<(String, bool)> = paths
+            .into_iter()
+            .map(|p| {
+                let used = self.editor.file_used(&p);
+                (p, used)
+            })
+            .collect();
+        self.versions.update_scratch(&files);
     }
 
     /// Show the history's versions in the sidebar.
@@ -523,6 +559,10 @@ fn main_menu() -> gio::Menu {
     insert.append(Some("Document _Title…"), Some("win.insert-title"));
     insert.append(Some("Insert _Environment"), Some("win.insert-env"));
     insert.append(Some("Insert _Picture…"), Some("win.insert-picture"));
+    insert.append(
+        Some("Insert _Scratch Picture…"),
+        Some("win.insert-scratch-picture"),
+    );
     insert.append(Some("Insert _Diagram"), Some("win.insert-diagram"));
     insert.append(Some("Insert _Raw Typst"), Some("win.insert-raw"));
     insert.append(

@@ -1436,3 +1436,21 @@ reported targets, so only those are still listed. On the paper: no problems left
   read-only window closes. Undo cannot take a restore back (the document is
   replaced), but every earlier version stays in the history.
 - "Name Current Version…" in an old version's window names that version.
+
+## History, step D: scratch files (2026-11-12)
+
+- `model::is_scratch` / `SCRATCH_DIR`: files under `scratch/`. The zip
+  keeps them all; `typst_project` (versions, Typst export) leaves them out;
+  `project_files` (PDF) adds the ones `main.typ` names, so a draft PDF shows
+  draft figures. Restoring an old version keeps the current scratch files.
+- `Op::SetFile` puts or removes a project file (inverse: what was there), so
+  file changes are undoable: Insert Picture's file goes with undo now.
+  `insert_picture(name, bytes, scratch)`; `keep_file(path)` moves a scratch
+  file to `images/` and repoints its pictures (an image block's path is now
+  a text sequence for ops), one undo step; `delete_file` only for unused
+  files (`file_used`: a picture shows it, or raw Typst, a diagram or the
+  header names it). Tests `scratch_files`, `inserting_pictures`.
+- UI: "Insert Scratch Picture…"; the Versions page ends with Scratch Files
+  (hidden when there are none): name, "In the document" or not, Keep, and
+  Delete when unused. Refreshed after every command (rebuilt only when it
+  changed).

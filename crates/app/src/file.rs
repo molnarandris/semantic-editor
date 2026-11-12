@@ -86,7 +86,7 @@ pub fn typst_project(doc: &Document) -> Vec<(String, Vec<u8>)> {
     let files = doc
         .files
         .iter()
-        .filter(|(p, _)| main.contains(p) && safe_path(p) && *p != bib)
+        .filter(|(p, _)| main.contains(p) && safe_path(p) && *p != bib && !model::is_scratch(p))
         .map(|(p, b)| (p.to_string(), b.to_vec()));
     std::iter::once((MAIN.to_string(), main.clone().into_bytes()))
         .chain(source.map(|s| (bib.to_string(), s.into_bytes())))
@@ -94,11 +94,20 @@ pub fn typst_project(doc: &Document) -> Vec<(String, Vec<u8>)> {
         .collect()
 }
 
-/// The files `main.typ` reads (see [`typst_project`]), to compile it.
+/// The files `main.typ` reads (see [`typst_project`]), and the scratch
+/// files it names, to compile it (a draft PDF shows draft figures).
 pub fn project_files(doc: &Document) -> model::Files {
+    let mut project = typst_project(doc).into_iter();
+    let main = project.next().map(|(_, m)| m).unwrap_or_default();
+    let main = String::from_utf8_lossy(&main);
     let mut files = model::Files::default();
-    for (path, bytes) in typst_project(doc).into_iter().skip(1) {
+    for (path, bytes) in project {
         files.insert(path, bytes);
+    }
+    for (path, bytes) in doc.files.iter() {
+        if model::is_scratch(path) && main.contains(path) {
+            files.insert(path, bytes.to_vec());
+        }
     }
     files
 }
@@ -138,6 +147,12 @@ pub fn to_zip(doc: &Document, history: Option<&History>) -> Result<Vec<u8>, Stri
     let written = (|| {
         for (path, bytes) in snapshot(doc) {
             add(&path, &bytes)?;
+        }
+        // Scratch files: kept, not versioned.
+        for (path, bytes) in doc.files.iter() {
+            if model::is_scratch(path) && safe_path(path) {
+                add(path, bytes)?;
+            }
         }
         for (path, bytes) in &git {
             add(&format!("{GIT_DIR}{path}"), bytes)?;
@@ -331,6 +346,7 @@ mod tests {
         let mut doc = sample::document();
         let files = project_files(&doc);
         doc.files.insert("images/unused.svg", b"<svg/>".to_vec());
+        doc.files.insert("scratch/scan.png", vec![1, 2]);
         let history = History::new().unwrap();
         history.commit(&snapshot(&doc), "Ada", "Saved").unwrap();
         let zip = to_zip(&doc, Some(&history)).unwrap();
@@ -342,11 +358,23 @@ mod tests {
         let version = back_history.versions().unwrap()[0].id;
         let old = from_snapshot(back_history.files_at(version).unwrap()).unwrap();
         assert_eq!(to_json(&old), to_json(&doc));
-        assert_eq!(old.files, files);
+        assert_eq!(old.files, files, "no scratch file in a version");
+        // Scratch files are kept in the zip, not exported.
+        assert_eq!(back.files.get("scratch/scan.png"), Some(&[1u8, 2][..]));
+        assert!(
+            typst_project(&back)
+                .iter()
+                .all(|(p, _)| !p.starts_with("scratch/"))
+        );
         assert_eq!(to_json(&back), to_json(&doc));
         let paths: Vec<&str> = files.iter().map(|(p, _)| p).collect();
         assert_eq!(paths, ["images/correlations.png", "refs.bib"]);
-        assert_eq!(back.files, files, "only the files the document reads");
+        let mut kept = files.clone();
+        kept.insert("scratch/scan.png", vec![1, 2]);
+        assert_eq!(
+            back.files, kept,
+            "the files the document reads, and scratch files"
+        );
         let mut archive = zip::ZipArchive::new(Cursor::new(&zip[..])).unwrap();
         let mut main = String::new();
         archive

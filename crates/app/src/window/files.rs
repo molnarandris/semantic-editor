@@ -197,10 +197,15 @@ impl Window {
     }
 
     /// Choose a picture and insert a figure of it, the file copied into the
-    /// project.
-    pub(super) async fn insert_picture(self: Rc<Self>) {
+    /// project (with `scratch`: as a scratch file, not versioned).
+    pub(super) async fn insert_picture(self: Rc<Self>, scratch: bool) {
+        let title = if scratch {
+            "Insert Scratch Picture"
+        } else {
+            "Insert Picture"
+        };
         let dialog = gtk::FileDialog::builder()
-            .title("Insert Picture")
+            .title(title)
             .filters(&filters("Pictures", PICTURE_EXTENSIONS))
             .build();
         let Ok(file) = dialog.open_future(Some(&self.window)).await else {
@@ -211,7 +216,7 @@ impl Window {
             .map_or_else(|| "picture".into(), |p| p.to_string_lossy().into_owned());
         match file.load_contents_future().await {
             Ok((bytes, _)) => {
-                self.editor.insert_picture(&name, bytes.to_vec());
+                self.editor.insert_picture(&name, bytes.to_vec(), scratch);
                 self.editor.grab_focus();
             }
             Err(e) => self.toast(&format!("Could not read the picture: {e}")),

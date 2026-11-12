@@ -424,9 +424,10 @@ impl Editor {
 
     /// Insert a figure of a picture after the caret's block (in place of
     /// it, if that is an empty paragraph): the picture is `bytes`, stored in
-    /// the project as `images/<name>` (or a free name like it). The caret
-    /// goes into the figure's empty caption.
-    pub fn insert_picture(&mut self, name: &str, bytes: Vec<u8>) -> bool {
+    /// the project as `images/<name>` (or a free name like it), or with
+    /// `scratch` as `scratch/<name>` (kept, not versioned). The caret goes
+    /// into the figure's empty caption. Undo takes the file away too.
+    pub fn insert_picture(&mut self, name: &str, bytes: Vec<u8>, scratch: bool) -> bool {
         if self.read_only {
             return false;
         }
@@ -437,8 +438,16 @@ impl Editor {
         let Some(place) = self.doc.place(after_block) else {
             return false;
         };
-        let path = self.doc.files.free_path("images", name);
-        self.doc.files.insert(path.clone(), bytes);
+        let dir = if scratch {
+            crate::SCRATCH_DIR
+        } else {
+            "images"
+        };
+        let path = self.doc.files.free_path(dir, name);
+        let file = Op::SetFile {
+            path: path.clone(),
+            bytes: Some(bytes),
+        };
         let picture = self.doc.image(&path);
         let caption = self.doc.caption(vec![]);
         let after = self.doc.start_of(&caption);
@@ -450,6 +459,85 @@ impl Editor {
             count: usize::from(replace),
             items: Items::Blocks(vec![figure]),
         };
+        self.commit(vec![file, op], after, Last::Other)
+    }
+
+    /// The pictures showing project file `path`.
+    fn pictures_of(&self, path: &str) -> Vec<NodeId> {
+        fn walk(blocks: &[BlockNode], path: &str, out: &mut Vec<NodeId>) {
+            for b in blocks {
+                match &b.kind {
+                    Block::Image { path: p, .. } if p == path => out.push(b.id),
+                    _ => {}
+                }
+                if let Some(body) = b.kind.body() {
+                    walk(body, path, out);
+                }
+            }
+        }
+        let mut out = vec![];
+        walk(&self.doc.blocks, path, &mut out);
+        out
+    }
+
+    /// Whether the document uses project file `path`: a picture shows it,
+    /// or raw Typst, a diagram or the header names it.
+    pub fn file_used(&self, path: &str) -> bool {
+        fn named(blocks: &[BlockNode], path: &str) -> bool {
+            blocks.iter().any(|b| match &b.kind {
+                Block::RawTypst(s) | Block::Diagram(s) => s.contains(path),
+                _ => b.kind.body().is_some_and(|body| named(body, path)),
+            })
+        }
+        !self.pictures_of(path).is_empty()
+            || self.doc.header.contains(path)
+            || named(&self.doc.blocks, path)
+    }
+
+    /// Put scratch file `path` under version control: it moves to
+    /// `images/` (a free name), and the pictures showing it follow. One
+    /// undo step.
+    pub fn keep_file(&mut self, path: &str) -> bool {
+        let Some(bytes) = self.doc.files.get(path).map(<[u8]>::to_vec) else {
+            return false;
+        };
+        if !crate::is_scratch(path) {
+            return false;
+        }
+        let name = path.rsplit('/').next().unwrap_or(path);
+        let new = self.doc.files.free_path("images", name);
+        let mut ops = vec![
+            Op::SetFile {
+                path: new.clone(),
+                bytes: Some(bytes),
+            },
+            Op::SetFile {
+                path: path.into(),
+                bytes: None,
+            },
+        ];
+        for id in self.pictures_of(path) {
+            ops.push(Op::Replace {
+                seq: Seq::Text(id),
+                index: 0,
+                count: path.chars().count(),
+                items: Items::Text(new.clone()),
+            });
+        }
+        let after = self.caret.clone();
+        self.commit(ops, after, Last::Other)
+    }
+
+    /// Remove project file `path`, unless the document uses it.
+    pub fn delete_file(&mut self, path: &str) -> bool {
+        if self.file_used(path) || self.doc.files.get(path).is_none() {
+            return false;
+        }
+        let op = Op::SetFile {
+            path: path.into(),
+            bytes: None,
+        };
+        let after = self.caret.clone();
         self.commit(vec![op], after, Last::Other)
     }
 

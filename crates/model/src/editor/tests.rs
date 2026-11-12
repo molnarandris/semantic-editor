@@ -1353,7 +1353,7 @@ fn read_only() {
     e.backspace();
     e.enter();
     assert!(!e.undo());
-    assert!(!e.insert_picture("a.png", vec![1]));
+    assert!(!e.insert_picture("a.png", vec![1], false));
     assert!(!e.set_header("#set text(red)"));
     e.paste(Fragment::Plain("pasted".into()));
     assert_eq!(texts(&e), before);
@@ -1368,11 +1368,11 @@ fn read_only() {
 #[test]
 fn inserting_pictures() {
     let mut e = Editor::default();
-    assert!(e.insert_picture("a.png", vec![1]));
+    assert!(e.insert_picture("a.png", vec![1], false));
     assert_eq!(texts(&e), ["#figure[img(images/a.png;)|cap()]"]);
     assert!(e.caption_of_caret().is_some());
     e.insert_text("A.");
-    assert!(e.insert_picture("a.png", vec![2]));
+    assert!(e.insert_picture("a.png", vec![2], false));
     assert_eq!(
         texts(&e),
         [
@@ -1383,6 +1383,36 @@ fn inserting_pictures() {
     assert_eq!(e.doc().files.get("images/a-2.png"), Some(&[2u8][..]));
     while e.undo() {}
     assert_eq!(texts(&e), [""]);
+    assert!(e.doc().files.is_empty(), "undo takes the files away too");
+}
+
+/// Scratch files: a picture in `scratch/`; keeping it moves the file to
+/// `images/` and the picture follows (one undo step); only unused files
+/// can be deleted.
+#[test]
+fn scratch_files() {
+    let mut e = Editor::default();
+    assert!(e.insert_picture("scan.png", vec![7], true));
+    assert_eq!(texts(&e), ["#figure[img(scratch/scan.png;)|cap()]"]);
+    assert!(!e.delete_file("scratch/scan.png"), "in use");
+    assert!(e.keep_file("scratch/scan.png"));
+    assert_eq!(texts(&e), ["#figure[img(images/scan.png;)|cap()]"]);
+    assert_eq!(e.doc().files.get("images/scan.png"), Some(&[7u8][..]));
+    assert!(e.doc().files.get("scratch/scan.png").is_none());
+    assert!(e.undo());
+    assert_eq!(texts(&e), ["#figure[img(scratch/scan.png;)|cap()]"]);
+    assert!(e.doc().files.get("images/scan.png").is_none());
+    assert!(e.redo());
+    assert!(!e.keep_file("images/scan.png"), "not a scratch file");
+    // An unused file goes, and undo brings it back.
+    let mut d = Document::new();
+    d.files.insert("scratch/note.png", vec![8]);
+    let mut e = Editor::new(d);
+    assert!(!e.file_used("scratch/note.png"));
+    assert!(e.delete_file("scratch/note.png"));
+    assert!(e.doc().files.is_empty());
+    assert!(e.undo());
+    assert_eq!(e.doc().files.get("scratch/note.png"), Some(&[8u8][..]));
 }
 
 /// ←/→ pass a footnote's marker in one step; its text comes after the rest

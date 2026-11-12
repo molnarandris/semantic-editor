@@ -23,7 +23,7 @@ pub struct OldVersion {
 }
 
 /// Window actions an old version has no use for.
-const EDITING_ACTIONS: [&str; 11] = [
+const EDITING_ACTIONS: [&str; 12] = [
     "save",
     "save-as",
     "open",
@@ -31,6 +31,7 @@ const EDITING_ACTIONS: [&str; 11] = [
     "edit-header",
     "insert-env",
     "insert-picture",
+    "insert-scratch-picture",
     "insert-diagram",
     "insert-raw",
     "insert-bibliography",
@@ -100,7 +101,13 @@ impl Window {
         if origin.is_dirty() && !origin.save().await {
             return;
         }
-        let doc = self.editor.document().clone();
+        let mut doc = self.editor.document().clone();
+        // Scratch files are not in versions: the current ones stay.
+        for (path, bytes) in origin.editor.document().files.iter() {
+            if model::is_scratch(path) {
+                doc.files.insert(path, bytes.to_vec());
+            }
+        }
         origin.editor.set_document(doc);
         *origin.commit_message.borrow_mut() =
             Some(format!("Restored the version of {}", old.label));

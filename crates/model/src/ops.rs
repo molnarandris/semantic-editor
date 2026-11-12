@@ -102,6 +102,12 @@ pub enum Op {
         index: usize,
         slot: Step,
     },
+    /// Put a project file at `path`, or remove it (`None`). The inverse
+    /// puts back what was there.
+    SetFile {
+        path: String,
+        bytes: Option<Vec<u8>>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -188,9 +194,11 @@ impl SeqMut<'_> {
 fn text_in(doc: &mut Document, id: NodeId) -> Result<SeqMut<'_>, OpError> {
     if doc.block(id).is_some() {
         return match &mut doc.block_mut(id).expect("found").kind {
-            Block::RawTypst(s) | Block::Diagram(s) | Block::Bibliography(s) | Block::Title(s) => {
-                Ok(SeqMut::Text(s))
-            }
+            Block::RawTypst(s)
+            | Block::Diagram(s)
+            | Block::Bibliography(s)
+            | Block::Title(s)
+            | Block::Image { path: s, .. } => Ok(SeqMut::Text(s)),
             _ => Err(OpError::KindMismatch),
         };
     }
@@ -252,6 +260,14 @@ impl Document {
     /// Apply `op` and return its inverse. On error the document is unchanged.
     pub fn apply(&mut self, op: Op) -> Result<Op, OpError> {
         match op {
+            Op::SetFile { path, bytes } => {
+                let old = self.files.get(&path).map(<[u8]>::to_vec);
+                match bytes {
+                    Some(bytes) => self.files.insert(path.clone(), bytes),
+                    None => self.files.remove(&path),
+                }
+                Ok(Op::SetFile { path, bytes: old })
+            }
             Op::Insert { seq, index, items } => {
                 let count = items.len();
                 self.seq_mut(&seq)?.splice(index, 0, items)?;
