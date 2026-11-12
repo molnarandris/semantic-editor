@@ -1253,3 +1253,15 @@ reported targets, so only those are still listed. On the paper: no problems left
   view, clamped to the scroll range (near the document's ends it cannot), and
   waits for the target block's render like the plain reveal. Other moves keep
   the minimal scroll.
+
+## Outline rows: centred, even spacing (2026-11-12)
+
+- User: the selected entry's text sat high in its highlight; a wrapped entry
+  had no gap to the next one; the gaps were as high as a line. The sidebar's
+  rows have a minimum height, so one-line entries got more space than wrapped
+  ones, and the render was drawn at the top. Now rows are as high as their
+  entry plus 4px above and below (CSS `.outline-pane > row`), the render is
+  centred in its row, and entries are cropped to their line box, not to their
+  ink: the entry rule sets the text's edges to ascender/descender (every line
+  the same height, descenders or not; wrapped lines with 0.25em leading), the
+  crop keeps the page's content box widened to any ink outside it.

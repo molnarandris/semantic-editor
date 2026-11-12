@@ -2096,14 +2096,16 @@ impl SemEditor {
             if result.generation != entry.generation {
                 return;
             }
-            // From the page's left margin (entries align), to the ink's end.
+            // The page's content box (entries align, all lines the same
+            // height), widened to the ink, to the ink's right end.
             let raster = rendered.raster;
             let pad = (BLOCK_PAD_PT * rendered.pixel_per_pt) as u32;
             let Some((x, y, w, h)) = raster.ink_bounds() else {
                 return;
             };
-            let left = pad.min(x);
-            let cropped = raster.crop((left, y, x + w - left, h));
+            let (left, top) = (pad.min(x), pad.min(y));
+            let bottom = (raster.height.saturating_sub(pad)).max(y + h);
+            let cropped = raster.crop((left, top, x + w - left, bottom - top));
             let scale = rendered.pixel_per_pt / OUTLINE_PX_PER_PT;
             entry.texture = Some((texture(Arc::new(cropped)), scale));
         }

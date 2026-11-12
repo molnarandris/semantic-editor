@@ -44,12 +44,14 @@ pub fn block_document(around: &Around, snippet: &str, width_pt: f64) -> (String,
 /// Typst code drawing a heading as an entry of an outline (the editor's
 /// outline pane): its number and title, indented by level, level 1 bold,
 /// at a fixed size (whatever the header makes of headings) and in `color`
-/// (Typst code, `rgb("#202020")`).
+/// (Typst code, `rgb("#202020")`). Lines span ascender to descender, so
+/// every entry's line box has the same height and the page holds its ink.
 pub fn outline_entry_rule(color: &str) -> String {
     format!(
         "#show heading: it => pad(left: (it.level - 1) * 1em, {{
-  set text(size: 11pt, fill: {color}, weight: if it.level == 1 {{ \"bold\" }} else {{ \"regular\" }})
-  set par(justify: false)
+  set text(size: 11pt, fill: {color}, weight: if it.level == 1 {{ \"bold\" }} else {{ \"regular\" }},
+    top-edge: \"ascender\", bottom-edge: \"descender\")
+  set par(justify: false, leading: 0.25em)
   if it.numbering != none {{ context counter(heading).display(it.numbering); h(0.5em) }}
   it.body
 }})
@@ -203,6 +205,18 @@ mod tests {
         let big = ink("#show heading: set text(size: 30pt)", "", "= The $x$ map");
         assert_eq!(plain, big);
         let first = ink(numbered, "", "= The $x$ map");
+        // The page is the line box: as high with descenders as without.
+        let page = |snippet: &str| {
+            let mut world = BridgeWorld::new();
+            let around = Around {
+                prefix: outline_entry_rule("black"),
+                ..Around::default()
+            };
+            let doc =
+                compile(&mut world, &block_document(&around, snippet, 200.0).0).expect("compiles");
+            doc.pages()[0].frame.height().to_pt()
+        };
+        assert!((page("= Name") - page("= Typing")).abs() < 0.01);
         assert!(first.0 > plain.0 + 10, "{first:?} {plain:?}");
         // The counters before it: 1.1 is narrower than 12.1.
         let later = ink(

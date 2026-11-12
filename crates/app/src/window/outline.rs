@@ -33,8 +33,9 @@ impl Outline {
     pub fn new() -> Self {
         let list = gtk::ListBox::builder()
             .selection_mode(gtk::SelectionMode::Single)
-            .css_classes(["navigation-sidebar"])
+            .css_classes(["navigation-sidebar", "outline-pane"])
             .build();
+        load_css();
         let empty = gtk::Label::builder()
             .label("No headings")
             .css_classes(["dim-label"])
@@ -103,6 +104,28 @@ impl Outline {
             row.set_child(Some(&content(&entries[i], editor.outline_entry(id))));
         }
     }
+}
+
+/// Rows as high as their entry plus a little padding (the sidebar's rows
+/// have a minimum height, which spaced one-line entries more than wrapped
+/// ones).
+fn load_css() {
+    thread_local!(static LOADED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
+    if LOADED.replace(true) {
+        return;
+    }
+    let Some(display) = gdk::Display::default() else {
+        return;
+    };
+    let css = gtk::CssProvider::new();
+    css.load_from_string(
+        ".outline-pane > row { min-height: 0; padding-top: 4px; padding-bottom: 4px; }",
+    );
+    gtk::style_context_add_provider_for_display(
+        &display,
+        &css,
+        gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
 }
 
 /// A row's content: the entry's render, or its plain title.
@@ -258,6 +281,7 @@ mod render {
             self.imp().scale.set(scale);
             self.set_tooltip_text(Some(title));
             self.set_halign(gtk::Align::Start);
+            self.set_valign(gtk::Align::Center);
             self.queue_resize();
         }
     }
