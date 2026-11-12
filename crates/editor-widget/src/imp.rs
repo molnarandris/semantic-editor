@@ -11,7 +11,7 @@ use gtk::{gdk, glib, graphene, gsk};
 use model::{Block, BlockNode, CursorPath, Document, Editor, NodeId};
 use typst_bridge::{
     Around, BLOCK_PAD_PT, BlockLayout, CompileJob, CompileResult, CounterState, HEADER_SPECIMEN,
-    LabelTarget, Raster, SpanMap, Worker, serialize_block, serialize_math_node,
+    LabelTarget, Raster, SpanMap, Worker, outline_entry_rule, serialize_block, serialize_math_node,
 };
 
 use crate::caret::{self, Stop};
@@ -101,6 +101,22 @@ const PREVIEW_ID: NodeId = NodeId(u64::MAX);
 /// Largest device pixels per point a preview is rendered at.
 const MAX_PREVIEW_PPP: f64 = 12.0;
 
+/// Job ids of outline entries: the heading's id with this bit set.
+const OUTLINE_BIT: u64 = 1 << 62;
+/// Outline entries: their page width in pt, and logical pixels per pt.
+const OUTLINE_WIDTH_PT: f64 = 180.0;
+const OUTLINE_PX_PER_PT: f64 = 1.25;
+
+/// A heading rendered as an outline entry (`outline_entry_rule`).
+#[derive(Default)]
+struct OutlineEntry {
+    /// Code around, snippet and pixels per point of the last submitted job.
+    submitted: Option<(Around, String, f64)>,
+    generation: u64,
+    /// Cropped to the ink, with the device pixels per logical pixel.
+    texture: Option<(gdk::Texture, f64)>,
+}
+
 /// The math call whose options tab shows (see `SemEditor::tab_call`).
 type TabCall = (Rc<[Stop]>, f64, NodeId, Vec<model::Step>);
 
@@ -124,6 +140,7 @@ pub struct SemEditor {
     pub(crate) editor: RefCell<Editor>,
     views: RefCell<Vec<BlockView>>,
     preview: RefCell<Preview>,
+    outline: RefCell<HashMap<NodeId, OutlineEntry>>,
     worker: OnceCell<Worker>,
     generation: Cell<u64>,
     /// Page width and pixels per point the current renders were requested at.
@@ -203,6 +220,10 @@ impl ObjectImpl for SemEditor {
                     .build(),
                 // The preview render (see `set_preview`) changed.
                 Signal::builder("preview-rendered").build(),
+                // A heading's outline entry was rendered. Param: its id.
+                Signal::builder("outline-rendered")
+                    .param_types([u64::static_type()])
+                    .build(),
             ]
         })
     }
@@ -1999,6 +2020,87 @@ impl SemEditor {
         });
     }
 
+    /// Render heading `id` as an outline entry: its last job (header,
+    /// counters before it, its snippet) with `outline_entry_rule`, in the
+    /// widget's text colour.
+    fn submit_outline_entry(&self, id: NodeId) {
+        let (around, snippet) = {
+            let views = self.views.borrow();
+            let Some(view) = views.iter().find(|v| v.id == id) else {
+                return;
+            };
+            (view.around.clone(), view.snippet.clone())
+        };
+        let c = self.obj().color();
+        let hex = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        let color = format!(
+            "rgb(\"#{:02x}{:02x}{:02x}\")",
+            hex(c.red()),
+            hex(c.green()),
+            hex(c.blue())
+        );
+        let mut around = around;
+        around.prefix.push_str(&outline_entry_rule(&color));
+        let ppp = OUTLINE_PX_PER_PT * self.obj().scale_factor() as f64;
+        let key = (around.clone(), snippet.clone(), ppp);
+        let generation = {
+            let mut outline = self.outline.borrow_mut();
+            let entry = outline.entry(id).or_default();
+            if entry.submitted.as_ref() == Some(&key) {
+                return;
+            }
+            let generation = self.generation.get() + 1;
+            self.generation.set(generation);
+            entry.generation = generation;
+            entry.submitted = Some(key);
+            generation
+        };
+        self.worker.get().expect("worker").submit(CompileJob {
+            block: NodeId(id.0 | OUTLINE_BIT),
+            generation,
+            around,
+            snippet,
+            map: SpanMap::default(),
+            width_pt: OUTLINE_WIDTH_PT,
+            pixel_per_pt: ppp,
+            persist: false,
+            transient: false,
+        });
+    }
+
+    fn on_outline_result(&self, result: CompileResult) {
+        let id = NodeId(result.block.0 & !OUTLINE_BIT);
+        {
+            let mut outline = self.outline.borrow_mut();
+            let Some(entry) = outline.get_mut(&id) else {
+                return;
+            };
+            let Ok(rendered) = result.outcome else {
+                return; // The last good render stays.
+            };
+            if result.generation != entry.generation {
+                return;
+            }
+            // From the page's left margin (entries align), to the ink's end.
+            let raster = rendered.raster;
+            let pad = (BLOCK_PAD_PT * rendered.pixel_per_pt) as u32;
+            let Some((x, y, w, h)) = raster.ink_bounds() else {
+                return;
+            };
+            let left = pad.min(x);
+            let cropped = raster.crop((left, y, x + w - left, h));
+            let scale = rendered.pixel_per_pt / OUTLINE_PX_PER_PT;
+            entry.texture = Some((texture(Arc::new(cropped)), scale));
+        }
+        self.obj().emit_by_name::<()>("outline-rendered", &[&id.0]);
+    }
+
+    /// The outline entry of heading `id` (see `submit_outline_entry`) and
+    /// its device pixels per logical pixel, once rendered.
+    pub(crate) fn outline_entry(&self, id: NodeId) -> Option<(gdk::Texture, f64)> {
+        self.outline.borrow().get(&id)?.texture.clone()
+    }
+
     fn on_preview_result(&self, result: CompileResult) {
         {
             let mut preview = self.preview.borrow_mut();
@@ -2030,6 +2132,18 @@ impl SemEditor {
             self.on_preview_result(result);
             return;
         }
+        if result.block.0 & OUTLINE_BIT != 0 {
+            self.on_outline_result(result);
+            return;
+        }
+        let heading = matches!(
+            self.editor
+                .borrow()
+                .doc()
+                .block(result.block)
+                .map(|b| &b.kind),
+            Some(Block::Heading { .. })
+        );
         let chained = {
             let mut views = self.views.borrow_mut();
             let Some(view) = views.iter_mut().find(|v| v.id == result.block) else {
@@ -2068,6 +2182,9 @@ impl SemEditor {
             }
             current || retargeted
         };
+        if heading {
+            self.submit_outline_entry(result.block);
+        }
         if chained {
             // The next counter-sensitive block can go now.
             self.submit_blocks(false);

@@ -144,9 +144,10 @@ An `adw::Application` with one `adw::ApplicationWindow`, matching the notes.sem 
 
 - **Header bar:** new,  title `<file> — Semantic editor`, main menu (open, save, save as, export .typ, export PDF).
 - **Outline pane** (user, 2026-11-12): left of the editor (`adw::OverlaySplitView`),
-  shown or hidden by a header-bar button: the document's headings, indented by
-  level, the one the caret is under selected; a click (or Enter) goes to it.
-  Independent of an `#outline()` in the document.
+  shown or hidden by a header-bar button: the document's headings as Typst renders
+  them as outline entries (number and title, formulas included, indented by level;
+  user 2026-11-12), the one the caret is under selected; a click (or Enter) goes to
+  it. Independent of an `#outline()` in the document.
 - **Body:** `SemEditor` in a `GtkScrolledWindow`; optional right pane with a read-only `sourceview5::View` showing the serialized Typst, current node highlighted.
 - **Status bar:** breadcrumb of the cursor path (clickable to select that structure) and a hint like "Tab → next slot".
 - **File format `.sem`:** JSON `{ "version": 1, "typst": "<pinned version>", "blocks": [...] }` via serde; NodeIds regenerated on load.

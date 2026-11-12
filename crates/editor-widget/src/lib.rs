@@ -121,6 +121,13 @@ impl SemEditor {
         self.imp().go_to_block(id);
     }
 
+    /// Heading `id` rendered by Typst as an outline entry (number and
+    /// title), with its device pixels per logical pixel; `None` until its
+    /// first render. See `connect_outline_rendered`.
+    pub fn outline_entry(&self, id: NodeId) -> Option<(gtk::gdk::Texture, f64)> {
+        self.imp().outline_entry(id)
+    }
+
     /// Select the structure a breadcrumb entry stands for.
     pub fn select_crumb(&self, crumb: &Crumb) {
         self.imp().select_crumb(crumb.path_len);
@@ -209,6 +216,18 @@ impl SemEditor {
         self.connect_local("preview-rendered", false, move |args| {
             let obj = args[0].get::<Self>().expect("SemEditor");
             f(&obj);
+            None
+        })
+    }
+
+    /// A heading's outline entry was rendered (param: the heading).
+    pub fn connect_outline_rendered<F: Fn(&Self, NodeId) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
+        self.connect_local("outline-rendered", false, move |args| {
+            let obj = args[0].get::<Self>().expect("SemEditor");
+            f(&obj, NodeId(args[1].get::<u64>().expect("heading id")));
             None
         })
     }

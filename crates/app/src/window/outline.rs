@@ -1,14 +1,18 @@
-//! The outline pane: the document's headings, indented by level, the one
-//! the caret is under selected. Activating one (click, or Enter) goes to
-//! it. Independent of an `#outline()` in the document.
+//! The outline pane: the document's headings, the one the caret is under
+//! selected. Activating one (click, or Enter) goes to it. Independent of
+//! an `#outline()` in the document. Each heading shows as Typst renders it
+//! as an outline entry (number, title with its formulas; see
+//! `SemEditor::outline_entry`), as plain text until that render arrives.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use adw::prelude::*;
+use editor_widget::SemEditor;
+use gtk::gdk;
 use model::{Block, Document, Fragment, Inline, InlineNode, NodeId};
 
-/// Indent per heading level, in px.
+/// Indent per heading level of the plain-text stand-in, in px.
 const INDENT_PX: i32 = 14;
 
 #[derive(Clone, PartialEq)]
@@ -59,16 +63,20 @@ impl Outline {
         });
     }
 
-    /// Show the headings of `doc` (rebuilding the rows only if they
-    /// changed) and select the one the caret's block `at` is under.
-    pub fn update(&self, doc: &Document, at: NodeId) {
-        let entries = headings(doc);
+    /// Show the headings of the editor's document (rebuilding the rows only
+    /// if they changed) and select the one the caret is under.
+    pub fn update(&self, editor: &SemEditor) {
+        let doc = editor.document();
+        let at = editor.caret().block;
+        let entries = headings(&doc);
         if *self.entries.borrow() != entries {
             while let Some(row) = self.list.row_at_index(0) {
                 self.list.remove(&row);
             }
             for e in &entries {
-                self.list.append(&row(e));
+                let row = gtk::ListBoxRow::new();
+                row.set_child(Some(&content(e, editor.outline_entry(e.id))));
+                self.list.append(&row);
             }
             *self.entries.borrow_mut() = entries;
         }
@@ -84,9 +92,32 @@ impl Outline {
             None => self.list.unselect_all(),
         }
     }
+
+    /// Show the new render of heading `id`'s entry.
+    pub fn show_render(&self, editor: &SemEditor, id: NodeId) {
+        let entries = self.entries.borrow();
+        let Some(i) = entries.iter().position(|e| e.id == id) else {
+            return;
+        };
+        if let Some(row) = self.list.row_at_index(i as i32) {
+            row.set_child(Some(&content(&entries[i], editor.outline_entry(id))));
+        }
+    }
 }
 
-fn row(e: &Entry) -> gtk::ListBoxRow {
+/// A row's content: the entry's render, or its plain title.
+fn content(e: &Entry, render: Option<(gdk::Texture, f64)>) -> gtk::Widget {
+    match render {
+        Some((texture, scale)) => {
+            let picture = Render::default();
+            picture.set(texture, scale, &e.title);
+            picture.upcast()
+        }
+        None => plain_row(e).upcast(),
+    }
+}
+
+fn plain_row(e: &Entry) -> gtk::Label {
     let label = gtk::Label::builder()
         .label(&e.title)
         .xalign(0.0)
@@ -97,7 +128,7 @@ fn row(e: &Entry) -> gtk::ListBoxRow {
     if e.level <= 1 {
         label.add_css_class("heading");
     }
-    gtk::ListBoxRow::builder().child(&label).build()
+    label
 }
 
 /// The top-level headings of `doc`, in order.
@@ -141,6 +172,98 @@ fn plain(inlines: &[InlineNode]) -> String {
         title
     }
 }
+
+/// A texture drawn at its logical size (device pixels / scale), so a
+/// render for a HiDPI screen is not shown twice as large.
+mod render {
+    use std::cell::{Cell, RefCell};
+
+    use gtk::subclass::prelude::*;
+    use gtk::{gdk, glib, graphene, prelude::*};
+
+    mod imp {
+        use super::*;
+
+        #[derive(Default)]
+        pub struct Render {
+            pub texture: RefCell<Option<gdk::Texture>>,
+            /// Device pixels per logical pixel of the texture.
+            pub scale: Cell<f64>,
+        }
+
+        #[glib::object_subclass]
+        impl ObjectSubclass for Render {
+            const NAME: &'static str = "SemOutlineRender";
+            type Type = super::Render;
+            type ParentType = gtk::Widget;
+        }
+
+        impl ObjectImpl for Render {}
+
+        impl WidgetImpl for Render {
+            fn measure(
+                &self,
+                orientation: gtk::Orientation,
+                _for_size: i32,
+            ) -> (i32, i32, i32, i32) {
+                let (w, h) = self.size();
+                let size = match orientation {
+                    gtk::Orientation::Horizontal => w,
+                    _ => h,
+                };
+                (size, size, -1, -1)
+            }
+
+            fn snapshot(&self, snapshot: &gtk::Snapshot) {
+                let Some(texture) = self.texture.borrow().clone() else {
+                    return;
+                };
+                let (w, h) = self.size();
+                snapshot
+                    .append_texture(&texture, &graphene::Rect::new(0.0, 0.0, w as f32, h as f32));
+            }
+        }
+
+        impl Render {
+            /// Logical size, in px.
+            fn size(&self) -> (i32, i32) {
+                let scale = self.scale.get().max(0.1);
+                self.texture.borrow().as_ref().map_or((0, 0), |t| {
+                    (
+                        (t.width() as f64 / scale).ceil() as i32,
+                        (t.height() as f64 / scale).ceil() as i32,
+                    )
+                })
+            }
+        }
+    }
+
+    glib::wrapper! {
+        pub struct Render(ObjectSubclass<imp::Render>)
+            @extends gtk::Widget,
+            @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+    }
+
+    impl Default for Render {
+        fn default() -> Self {
+            glib::Object::new()
+        }
+    }
+
+    impl Render {
+        /// Show `texture` (`scale` device pixels per logical pixel), with
+        /// `title` as its tooltip.
+        pub fn set(&self, texture: gdk::Texture, scale: f64, title: &str) {
+            self.imp().texture.replace(Some(texture));
+            self.imp().scale.set(scale);
+            self.set_tooltip_text(Some(title));
+            self.set_halign(gtk::Align::Start);
+            self.queue_resize();
+        }
+    }
+}
+
+use render::Render;
 
 #[cfg(test)]
 mod tests {

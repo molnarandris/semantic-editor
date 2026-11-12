@@ -41,6 +41,22 @@ pub fn block_document(around: &Around, snippet: &str, width_pt: f64) -> (String,
     (src, offset)
 }
 
+/// Typst code drawing a heading as an entry of an outline (the editor's
+/// outline pane): its number and title, indented by level, level 1 bold,
+/// at a fixed size (whatever the header makes of headings) and in `color`
+/// (Typst code, `rgb("#202020")`).
+pub fn outline_entry_rule(color: &str) -> String {
+    format!(
+        "#show heading: it => pad(left: (it.level - 1) * 1em, {{
+  set text(size: 11pt, fill: {color}, weight: if it.level == 1 {{ \"bold\" }} else {{ \"regular\" }})
+  set par(justify: false)
+  if it.numbering != none {{ context counter(heading).display(it.numbering); h(0.5em) }}
+  it.body
+}})
+"
+    )
+}
+
 /// Compile a complete Typst document. Errors are returned as messages.
 pub fn compile(world: &mut BridgeWorld, text: &str) -> Result<PagedDocument, Vec<String>> {
     world.set_main_text(text);
@@ -163,6 +179,43 @@ mod tests {
         assert_eq!(raster.width, (2.0 * (300.0 + 2.0 * BLOCK_PAD_PT)) as u32);
         let dark = raster.data.chunks(4).filter(|px| px[0] < 128).count();
         assert!(dark > 200, "only {dark} dark pixels");
+    }
+
+    /// An outline entry: the number (from the counters before it), the
+    /// title, its own size whatever the header sets for headings.
+    #[test]
+    fn outline_entries() {
+        let ink = |header: &str, prefix: &str, snippet: &str| {
+            let mut world = BridgeWorld::new();
+            let around = Around {
+                header: header.into(),
+                prefix: format!("{prefix}{}", outline_entry_rule("rgb(\"#202020\")")),
+                suffix: String::new(),
+            };
+            let doc =
+                compile(&mut world, &block_document(&around, snippet, 200.0).0).expect("compiles");
+            let raster = render_page(&doc.pages()[0], 2.0);
+            let (_, _, w, h) = raster.ink_bounds().expect("ink");
+            (w, h)
+        };
+        let numbered = "#set heading(numbering: \"1.1\")";
+        let plain = ink("", "", "= The $x$ map");
+        let big = ink("#show heading: set text(size: 30pt)", "", "= The $x$ map");
+        assert_eq!(plain, big);
+        let first = ink(numbered, "", "= The $x$ map");
+        assert!(first.0 > plain.0 + 10, "{first:?} {plain:?}");
+        // The counters before it: 1.1 is narrower than 12.1.
+        let later = ink(
+            numbered,
+            "#counter(heading).update((12,))\n",
+            "== The $x$ map",
+        );
+        let early = ink(
+            numbered,
+            "#counter(heading).update((1,))\n",
+            "== The $x$ map",
+        );
+        assert!(later.0 > early.0, "{later:?} {early:?}");
     }
 
     #[test]

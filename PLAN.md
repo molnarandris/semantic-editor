@@ -1223,5 +1223,23 @@ reported targets, so only those are still listed. On the paper: no problems left
   a header-bar toggle hides it. Updated on `caret-moved` (rows rebuilt only
   when the headings changed); the heading the caret is under is selected.
   Activating a row: `SemEditor::go_to_block`, focus back to the editor.
-- Not yet: heading numbers (Typst draws them; the numbering is the header's),
-  headings inside environments, remembering whether the pane is shown.
+- Not yet: headings inside environments, remembering whether the pane is
+  shown. (Heading numbers: see the next section.)
+
+## Outline entries rendered by Typst (2026-11-12)
+
+- User: headings hold formulas, so the outline should be Typst's rendering,
+  with the heading numbers. Each heading, once its own render arrives, is
+  compiled again as an outline entry: its last job (header, counters before
+  it, snippet) with `typst_bridge::outline_entry_rule` in the prefix, a show
+  rule drawing the number (`counter(heading).display(it.numbering)`) and the
+  title at 11pt, level 1 bold, indented 1em per level, in the widget's text
+  colour (dark mode). 180pt wide at 1.25 px/pt; cropped from the page margin
+  to the ink. The jobs go to the same worker with the heading's id plus
+  `OUTLINE_BIT`; `SemEditor::outline_entry`, signal `outline-rendered`.
+- The pane shows the render (`Render`, a texture at its logical size), the
+  plain title until it arrives or if it fails. Test `outline_entries`
+  (numbers from the counters before, size independent of the header's
+  heading styles).
+- Not yet: headings inside environments; a theme switch re-renders entries
+  only when their heading is compiled again.

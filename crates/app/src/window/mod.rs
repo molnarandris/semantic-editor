@@ -155,8 +155,13 @@ impl Window {
             if let Some(this) = weak.upgrade() {
                 this.update_title();
                 this.sync_block_editor();
-                this.outline
-                    .update(&this.editor.document(), this.editor.caret().block);
+                this.outline.update(&this.editor);
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.editor.connect_outline_rendered(move |editor, id| {
+            if let Some(this) = weak.upgrade() {
+                this.outline.show_render(editor, id);
             }
         });
         let weak = Rc::downgrade(self);
