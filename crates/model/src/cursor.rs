@@ -16,8 +16,8 @@
 //!   `i`, addressed like a paragraph's inlines (`[Index(1), Body, Index(0)]`
 //!   is the first text of the paragraph's first call).
 //! - Label: `[Label]` in a labelable block, `offset` counts chars of its
-//!   label (the pill beside the page). Its positions come after the block's
-//!   own (an environment's: before the position just after it).
+//!   label (the pill beside the page). Not in the ←/→ order: a click on
+//!   the pill enters it.
 //! - Row path: pairs `Index(k), <child>` descending into node `k`'s child row
 //!   (`Num`, `Den`, `Base`, `Sup`, `Sub`, `Arg(i)`); `offset` is a position `0..=len`
 //!   between the row's nodes.
@@ -384,22 +384,15 @@ impl Document {
         let inline_positions = |inlines: &[InlineNode], out: &mut Vec<CursorPath>| {
             inline_positions(block.id, &[], inlines, out)
         };
-        let label = |out: &mut Vec<CursorPath>| {
-            for k in 0..=block.label.chars().count() {
-                out.push(at(vec![Step::Label], k));
-            }
-        };
         match &block.kind {
             Block::Paragraph(inlines) | Block::Caption(inlines) => {
                 inline_positions(inlines, &mut out)
             }
             Block::Heading { inlines, .. } => {
                 inline_positions(inlines, &mut out);
-                label(&mut out);
             }
             Block::DisplayMath(row) => {
                 row_positions(block.id, vec![], row, &mut out);
-                label(&mut out);
             }
             Block::RawTypst(s) | Block::Diagram(s) | Block::Bibliography(s) | Block::Title(s) => {
                 out.push(at(vec![], 0));
@@ -411,7 +404,6 @@ impl Document {
                 for child in body {
                     out.extend(self.positions(child));
                 }
-                label(&mut out);
                 out.push(at(vec![], 1));
             }
             Block::Item { term, body, .. } => {

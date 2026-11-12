@@ -530,20 +530,33 @@ impl Editor {
         self.commit(vec![op], after, Last::Typing { space: false })
     }
 
-    /// Leave the label the caret is in: on to the position after it (a new
-    /// paragraph at the end of the document).
+    /// Put the caret at the end of the label of the block it is in (or of
+    /// the environment around it), as a click on the label's pill does.
+    pub fn enter_label(&mut self) -> bool {
+        let Some(block) = self.label_focus() else {
+            return false;
+        };
+        let len = self.doc.block(block).map_or(0, |b| b.label.chars().count());
+        self.jump(cursor(block, vec![Step::Label], len))
+    }
+
+    /// Leave the label the caret is in: to the end of its block (an
+    /// environment's: just after it).
     pub(super) fn leave_label(&mut self) -> bool {
-        let Some((block, _, len)) = self.label_pos() else {
-            return false;
-        };
-        self.caret.offset = len;
-        if let Some(next) = self.neighbour(false) {
-            return self.jump(next);
+        self.label_pos().is_some() && self.jump(self.label_exit())
+    }
+
+    /// Where the caret goes from the label it is in: the last position of
+    /// its block, or just after it for an environment.
+    pub(super) fn label_exit(&self) -> CursorPath {
+        let c = &self.caret;
+        if self.doc.is_env(c.block) {
+            return cursor(c.block, vec![], 1);
         }
-        let Some(place) = self.doc.place(block) else {
-            return false;
-        };
-        self.paragraph_after(place)
+        match self.doc.block(c.block) {
+            Some(block) => self.doc.end_of(block),
+            None => c.clone(),
+        }
     }
 
     /// Typing in a math call's options tab: every char is kept as typed

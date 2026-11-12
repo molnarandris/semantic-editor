@@ -1179,3 +1179,16 @@ reported targets, so only those are still listed. On the paper: no problems left
   replace an empty paragraph, go before/after the caret's block at its start/
   end, or the paragraph is split (Enter) and they go between; at an
   environment's edge before/after it. Tests `pasting`, `pasted_typst`.
+
+## Labels only by click (2026-11-12)
+
+- User: the arrows should not enter a label; only a click on its pill does.
+  `Document::positions` has no label positions, so ←/→ pass it by, and the
+  widget's line moves and Home/End never pick label stops (`reachable`,
+  `line_edge`); a click finds the pill first (`caret::label_hit`).
+- In the label ←/→ and Home/End stay in its text (`Editor::field_pos`, shared
+  with the options tab); space, Enter, Esc, ↑ and ↓ leave it to the end of its
+  block, an environment's to just after it (`Editor::label_exit`).
+- `Editor::enter_label` does what the click does (the sample and tests use it).
+- Open: a keyboard way into the label (and the options tab), proposed to the
+  user, not yet chosen.

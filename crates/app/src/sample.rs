@@ -413,10 +413,12 @@ fn typed_section(doc: Document) -> Document {
     let end = e.doc().doc_end();
     e.set_caret(end);
 
-    // A heading with a label: → at its end goes onto the label's pill.
+    // A heading with a label: into the label's pill (as a click on it
+    // does), Enter back to the heading's end, Enter on.
     e.insert_text("= Notation and markup");
-    e.move_right();
+    e.enter_label();
     e.insert_text("sec:notation");
+    e.enter();
     e.enter();
 
     // Markup in text.
@@ -437,13 +439,14 @@ fn typed_section(doc: Document) -> Document {
     e.insert_text("$.");
     e.enter();
 
-    // Labelled display formulas: `$$`, the formula, → onto the label.
+    // Labelled display formulas: `$$`, the formula, its label.
     // Enter in `cases` starts the next case.
     e.insert_text("$$|x| = cases(x \"if\" x >= 0");
     e.enter();
     e.insert_text("-x \"otherwise\")");
-    e.move_right();
+    e.enter_label();
     e.insert_text("eq:abs");
+    e.enter();
     e.enter();
     e.insert_text("Aligned equations put `&` where lines align and `\\` between them:");
     e.enter();
@@ -454,8 +457,9 @@ fn typed_section(doc: Document) -> Document {
     e.escape();
     e.insert_text(" + 2 b c + c^2");
     e.escape();
-    e.move_right();
+    e.enter_label();
     e.insert_text("eq:square");
+    e.enter();
     e.enter();
 
     // A term list: `/ `, the term, `:` on to its description. Enter starts

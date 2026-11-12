@@ -9,7 +9,7 @@ impl Editor {
     /// Move the caret one position left, entering and leaving structures.
     pub fn move_left(&mut self) -> bool {
         self.finish_word();
-        if let Some((_, offset, _)) = self.opts_pos() {
+        if let Some((offset, _)) = self.field_pos() {
             return offset > 0 && self.tab_to(offset - 1);
         }
         let next = self.neighbour(true);
@@ -18,22 +18,29 @@ impl Editor {
 
     pub fn move_right(&mut self) -> bool {
         self.finish_word();
-        if let Some((_, offset, len)) = self.opts_pos() {
+        if let Some((offset, len)) = self.field_pos() {
             return offset < len && self.tab_to(offset + 1);
         }
         let next = self.neighbour(false);
         next.is_some_and(|c| self.jump(c))
     }
 
-    /// Home/End in an options tab: the start or end of its text.
+    /// The offset and length of the options tab or label the caret is in:
+    /// fields beside the content, which ←/→ do not enter or leave.
+    fn field_pos(&self) -> Option<(usize, usize)> {
+        let (_, offset, len) = self.opts_pos().or_else(|| self.label_pos())?;
+        Some((offset, len))
+    }
+
+    /// Home/End in an options tab or label: the start or end of its text.
     pub fn tab_edge(&self, end: bool) -> Option<CursorPath> {
-        let (_, _, len) = self.opts_pos()?;
+        let (_, len) = self.field_pos()?;
         let mut c = self.caret.clone();
         c.offset = if end { len } else { 0 };
         Some(c)
     }
 
-    /// ←/→ in an options tab: through its text, never out of it.
+    /// ←/→ in an options tab or label: through its text, never out of it.
     fn tab_to(&mut self, offset: usize) -> bool {
         let mut c = self.caret.clone();
         c.offset = offset;
@@ -91,6 +98,10 @@ impl Editor {
     /// the column. `None` means
     /// move by lines.
     pub fn vertical_target(&self, down: bool) -> Option<CursorPath> {
+        // In a label: back to the end of its block.
+        if self.label_pos().is_some() {
+            return Some(self.label_exit());
+        }
         // In an options tab: ↓ into the call, ↑ stays.
         if self.opts_pos().is_some() {
             if !down {

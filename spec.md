@@ -396,8 +396,8 @@ Titles decided 2026-11-08: optional, never added by default; positional
   right margin, not part of the Typst render). `<` inside math is "less than", so
   labels get a visible slot instead of a shortcut: while the caret is in a labelable
   block, a faint "+ label" pill shows in the right margin (where the equation number
-  goes). → at the last position of the block moves the caret onto the pill; typing
-  there edits the label in place, → / Enter leave it. Clicking the pill works too.
+  goes). Clicking the pill puts the caret in it (the arrows pass it by, user
+  2026-11-12); typing there edits the label in place, Enter / Esc / ↑ / ↓ leave it.
   Existing labels always show as pills.
 - **References**: `@` in text opens a completion popover at the caret listing labels
   (with their kind and number), filtered as you type. New inline node `Ref(label)`,
@@ -411,8 +411,8 @@ Titles decided 2026-11-08: optional, never added by default; positional
 - M15a decisions (2026-11-09): the label is a field of every block (`label`, empty for
   none), used on headings, display formulas and environments; written `<label>` after
   the block as in Typst. Typing in the pill keeps only the chars Typst allows in a
-  label (letters, digits, `-`, `_`, `.`, `:`); space, Enter, → at its end or Esc leave
-  it. The pill is drawn beside the page, right of the block's first line (a display
+  label (letters, digits, `-`, `_`, `.`, `:`); space, Enter or Esc leave
+  it (2026-11-12: ←/→ stay in it, and only a click enters it). The pill is drawn beside the page, right of the block's first line (a display
   formula's line), in a monospace font so every char has its caret place. Numbering
   stays Typst's: equations are numbered if the header numbers them (labelling does
   not number an equation by itself, which would need inventing formatting; a header

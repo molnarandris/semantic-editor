@@ -837,26 +837,34 @@ pub fn lines(stops: &[Stop]) -> Vec<Vec<usize>> {
 const DEPTH_PT: f64 = 0.5;
 const CLICK_DEPTH_PT: f64 = 0.01;
 
-/// Whether a stop of `line` can be reached at `x`: label stops only right
-/// of the page (from where their pill starts), tab stops never.
-fn reachable<'a>(stops: &'a [Stop], line: &[usize], x: f64) -> Vec<&'a Stop> {
-    let pill = line
-        .iter()
-        .filter(|&&i| stops[i].label)
-        .map(|&i| stops[i].x)
-        .fold(f64::INFINITY, f64::min);
-    let others = line.iter().any(|&i| !stops[i].label);
+/// The stops of `line` that line moves and clicks reach: not those of a
+/// label pill or an options tab (clicks on those are found first).
+fn reachable<'a>(stops: &'a [Stop], line: &[usize]) -> Vec<&'a Stop> {
     line.iter()
         .map(|&i| &stops[i])
-        .filter(|s| !s.tab)
-        .filter(|s| !s.label || !others || x >= pill - PILL_PAD_PT - 2.0)
+        .filter(|s| !s.tab && !s.label)
         .collect()
+}
+
+/// The position in a label pill for a click at `(x, y)`: from where the
+/// pill starts on to the right, at the pill's height.
+fn label_hit(stops: &[Stop], x: f64, y: f64) -> Option<&Stop> {
+    let pill: Vec<&Stop> = stops
+        .iter()
+        .filter(|s| s.label && y >= s.top - 1.0 && y <= s.bottom + 1.0)
+        .collect();
+    let start = pill.iter().map(|s| s.x).fold(f64::INFINITY, f64::min);
+    if x < start - PILL_PAD_PT - 2.0 {
+        return None;
+    }
+    pill.into_iter()
+        .min_by(|a, b| (a.x - x).abs().total_cmp(&(b.x - x).abs()))
 }
 
 /// The stop of `line` closest to `x` (preferring shallower positions).
 pub fn nearest_in_line<'a>(stops: &'a [Stop], line: &[usize], x: f64) -> Option<&'a Stop> {
     let dist = |s: &Stop| (s.x - x).abs() + DEPTH_PT * s.depth as f64;
-    reachable(stops, line, x)
+    reachable(stops, line)
         .into_iter()
         .min_by(|a, b| dist(a).total_cmp(&dist(b)))
 }
@@ -869,7 +877,7 @@ pub fn line_edge<'a>(stops: &'a [Stop], line: &[usize], end: bool) -> Option<&'a
     let stops = line
         .iter()
         .map(|&i| &stops[i])
-        .filter(|s| !s.tab && !(inside && (s.edge || s.label)));
+        .filter(|s| !s.tab && !s.label && !(inside && s.edge));
     if end {
         stops.max_by(|a, b| a.x.total_cmp(&b.x))
     } else {
@@ -880,6 +888,9 @@ pub fn line_edge<'a>(stops: &'a [Stop], line: &[usize], end: bool) -> Option<&'a
 /// The caret position for a click at `(x, y)` in block coordinates: the
 /// nearest line vertically, then the nearest position on it.
 pub fn hit(stops: &[Stop], x: f64, y: f64) -> Option<&Stop> {
+    if let Some(s) = label_hit(stops, x, y) {
+        return Some(s);
+    }
     let lines = lines(stops);
     let line = lines.iter().min_by(|a, b| {
         let key = |line: &Vec<usize>| {
@@ -903,7 +914,7 @@ pub fn hit(stops: &[Stop], x: f64, y: f64) -> Option<&Stop> {
         let dy = (s.top - y).max(y - s.bottom).max(0.0);
         (s.x - x).abs() + 2.0 * dy + CLICK_DEPTH_PT * s.depth as f64
     };
-    reachable(stops, line, x)
+    reachable(stops, line)
         .into_iter()
         .min_by(|a, b| dist(a).total_cmp(&dist(b)))
 }
@@ -949,13 +960,10 @@ mod tests {
     fn label_pills() {
         let mut e = model::Editor::new(Document::new());
         e.insert_text("= Intro");
-        e.move_right();
-        e.insert_text("sec");
+        into_label(&mut e, "sec");
         let block = e.doc().blocks[0].clone();
         let l = layout_of(&block, 300.0);
         let s = super::stops(&block, Some(&l));
-        let got: Vec<_> = s.iter().map(|s| s.cursor.clone()).collect();
-        assert_eq!(got, e.doc().positions(&block));
         let label: Vec<&Stop> = s.iter().filter(|s| s.label).collect();
         assert_eq!(label.len(), 4);
         assert!(label[0].x > 300.0 && (label[3].x - label[0].x - 3.0 * PILL_CHAR_PT).abs() < 0.01);
@@ -964,9 +972,10 @@ mod tests {
         let y = s[0].line - 2.0;
         assert!(!hit(&s, 250.0, y).unwrap().label);
         assert_eq!(hit(&s, label[2].x + 0.5, y).unwrap().cursor.offset, 2);
-        // End stays in the text.
+        // End and line moves stay in the text: only a click enters a label.
         let lines = lines(&s);
         assert!(!line_edge(&s, &lines[0], true).unwrap().label);
+        assert!(!nearest_in_line(&s, &lines[0], 400.0).unwrap().label);
         // A figure: its caption's text has stops, under the body.
         let mut e = model::Editor::new(Document::new());
         e.insert_text("#figure Body");
@@ -975,7 +984,11 @@ mod tests {
         let block = e.doc().blocks[0].clone();
         let l = layout_of(&block, 300.0);
         let s = super::stops(&block, Some(&l));
-        let got: Vec<_> = s.iter().map(|s| s.cursor.clone()).collect();
+        let got: Vec<_> = s
+            .iter()
+            .filter(|s| !s.label)
+            .map(|s| s.cursor.clone())
+            .collect();
         assert_eq!(got, e.doc().positions(&block));
         let caption = block.kind.body().unwrap()[1].id;
         let body_line = s
@@ -993,8 +1006,19 @@ mod tests {
         let block = e.doc().blocks[0].clone();
         let l = layout_of(&block, 300.0);
         let s = super::stops(&block, Some(&l));
-        let got: Vec<_> = s.iter().map(|s| s.cursor.clone()).collect();
+        let got: Vec<_> = s
+            .iter()
+            .filter(|s| !s.label)
+            .map(|s| s.cursor.clone())
+            .collect();
         assert_eq!(got, e.doc().positions(&block));
+    }
+
+    /// Type `text` into the label of the caret's block, entered as a click
+    /// on its pill does.
+    fn into_label(e: &mut model::Editor, text: &str) {
+        assert!(e.enter_label());
+        e.insert_text(text);
     }
 
     fn layout_of(block: &BlockNode, width: f64) -> BlockLayout {
@@ -1052,7 +1076,7 @@ mod tests {
         let s = super::stops(&block, Some(&l));
         let got: Vec<_> = s
             .iter()
-            .filter(|s| !s.tab)
+            .filter(|s| !s.tab && !s.label)
             .map(|s| s.cursor.clone())
             .collect();
         assert_eq!(got, d.positions(&block));

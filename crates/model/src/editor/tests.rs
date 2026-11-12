@@ -284,10 +284,8 @@ fn environments() {
     assert!(e.move_right());
     assert_eq!(e.caret(), &e.doc().start_of(&body(&e)[0]));
 
-    // → at the end of the body: onto its label, then just after it.
+    // → at the end of the body: just after it (past its label).
     e.set_caret(e.doc().end_of(&body(&e)[1]));
-    assert!(e.move_right());
-    assert_eq!(e.caret().path, vec![Step::Label]);
     assert!(e.move_right());
     assert_eq!(e.caret(), &after);
 
@@ -945,19 +943,17 @@ fn arrows_enter_formulas_and_cross_blocks() {
         e.move_left();
     }
     assert_eq!((e.caret().path.clone(), e.caret().offset), (vec![i(0)], 3));
-    // Across blocks: end of "ef" → display row → its label → "gh".
+    // Across blocks: end of "ef" → display row → "gh" (not its label).
     caret_at(&mut e, 1, 0, 2);
     e.move_right();
     assert_eq!(e.caret().block, e.doc().blocks[2].id);
     assert_eq!(e.caret().offset, 0);
     e.move_right();
     e.move_right();
-    assert_eq!(e.caret().path, vec![Step::Label]);
-    e.move_right();
     assert_eq!(e.caret().block, e.doc().blocks[3].id);
     e.move_left();
     assert_eq!(e.caret().block, e.doc().blocks[2].id);
-    assert_eq!(e.caret().path, vec![Step::Label]);
+    assert_eq!(e.caret().path, vec![]);
 }
 
 #[test]
@@ -1554,26 +1550,30 @@ fn dashes_spaces_and_line_breaks() {
     assert_eq!(row.nodes[1].kind, MathKind::Linebreak);
 }
 
+/// Put the caret at the end of the label of the block it is in (or of the
+/// environment around it), as a click on the pill does.
+fn into_label(e: &mut Editor) {
+    assert!(e.enter_label());
+}
+
 #[test]
 fn block_labels() {
     let mut e = Editor::default();
     e.insert_text("= Intro");
-    // → at the end of the heading: onto its label.
-    assert!(e.move_right());
-    assert_eq!(e.caret().path, vec![Step::Label]);
+    // → at the end of the heading does not enter its label; a click does.
+    assert!(!e.move_right());
+    into_label(&mut e);
     e.insert_text("sec:<in>tro");
     let label = |e: &Editor, b: usize| e.doc().blocks[b].label.clone();
     assert_eq!(label(&e, 0), "sec:intro", "only label chars");
-    // Space leaves it (on to a new paragraph at the end of the document).
+    // ←/→ stay in it, Home/End go to its ends.
+    assert!(!e.move_right());
+    assert!(e.move_left());
+    assert_eq!(e.tab_edge(true).map(|c| c.offset), Some(9));
+    // Space leaves it, to the end of the heading.
     e.insert_text(" ");
-    assert_eq!(e.doc().blocks.len(), 2);
-    assert_eq!(e.caret().block, e.doc().blocks[1].id);
-    // ← from the next paragraph comes back to the label's end.
-    e.move_left();
-    assert_eq!(
-        (e.caret().path.clone(), e.caret().offset),
-        (vec![Step::Label], 9)
-    );
+    assert_eq!(e.caret(), &e.doc().end_of(&e.doc().blocks[0]));
+    into_label(&mut e);
     e.backspace();
     e.backspace();
     e.backspace();
@@ -1584,8 +1584,7 @@ fn block_labels() {
     // Enter leaves it too; a display formula and an environment have one.
     e.enter();
     e.insert_text("$$x");
-    e.move_right();
-    assert_eq!(e.caret().path, vec![Step::Label]);
+    into_label(&mut e);
     e.insert_text("eq");
     e.escape();
     let display = e
@@ -1599,15 +1598,14 @@ fn block_labels() {
     let mut e = Editor::default();
     e.insert_text("a");
     assert!(!e.move_right());
-    // An environment's label comes after its body, before the position
-    // just after it; the environment stays outlined.
+    // An environment's label: the environment stays outlined, and leaving
+    // goes just after it.
     let mut e = Editor::default();
     e.insert_text("#lemma x");
-    assert!(e.move_right());
-    assert_eq!(e.caret().path, vec![Step::Label]);
+    into_label(&mut e);
     assert_eq!(e.env_focus(), Some((e.caret().block, true)));
     e.insert_text("l1");
-    assert!(e.move_right());
+    assert!(e.escape());
     assert_eq!((e.caret().path.clone(), e.caret().offset), (vec![], 1));
     assert_eq!(texts(&e), ["#lemma[x]"]);
     assert_eq!(label(&e, 0), "l1");
@@ -1658,11 +1656,12 @@ fn references() {
 fn following_references() {
     let mut e = Editor::default();
     e.insert_text("= Intro");
-    e.move_right();
+    into_label(&mut e);
     e.insert_text("sec");
     e.enter();
+    e.enter();
     e.insert_text("#lemma x");
-    e.move_right();
+    into_label(&mut e);
     e.insert_text("lem");
     e.escape();
     e.insert_text("See @sec and @lem. ");
