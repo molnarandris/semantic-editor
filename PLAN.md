@@ -1454,3 +1454,15 @@ reported targets, so only those are still listed. On the paper: no problems left
   (hidden when there are none): name, "In the document" or not, Keep, and
   Delete when unused. Refreshed after every command (rebuilt only when it
   changed).
+
+## A formula in text wrapped onto the next line (2026-11-12)
+
+- User: in a formula in text that Typst wraps onto the next line, the caret
+  spanned both lines, and ↑ did not go to the line above. Every stop of the
+  formula had the height of its whole box (both lines) and one baseline.
+  `row_stops`: without `\\` in the row, a node starting left of the one
+  before it starts a new line; each line gets the height of its nodes and
+  its own baseline (`line_near`), the stops of nested rows too. Just
+  before and after the formula, the text's stops sit at its first and last
+  stop (after it: where it ends on the last line). Test
+  `wrapped_inline_formula`.

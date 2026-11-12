@@ -188,6 +188,34 @@ fn row_stops(
             )
         }
     };
+    // A formula in text that Typst wrapped onto the next line (no `\\`):
+    // each stop takes the height and baseline of its own line, not the
+    // whole formula's. A node starting left of the one before it starts a
+    // line.
+    let mut wrap_of = vec![0; row.nodes.len()];
+    let mut wraps: Vec<Rect> = vec![];
+    if lines.len() == 1 {
+        let mut prev: Option<Rect> = None;
+        for (k, node) in row.nodes.iter().enumerate() {
+            if let Some(b) = l.box_of(node.id) {
+                match (prev, wraps.last_mut()) {
+                    (Some(p), Some(w)) if b.x >= p.x - 1.0 => *w = w.union(&b),
+                    _ => wraps.push(b),
+                }
+                prev = Some(b);
+            }
+            wrap_of[k] = wraps.len().saturating_sub(1);
+        }
+    }
+    let wrapped = wraps.len() > 1;
+    let wrap_lines: Vec<f64> = wraps.iter().map(|r| line_near(l, *r)).collect();
+    let at_wrap = |path: Vec<Step>, offset, x, g: usize| {
+        let r = wraps[g];
+        Stop {
+            depth,
+            ..stop(block, path, offset, x, r.y, r.bottom(), wrap_lines[g])
+        }
+    };
     let mut i = 0;
     let mut right = rb.x;
     for (k, node) in row.nodes.iter().enumerate() {
@@ -197,6 +225,8 @@ fn row_stops(
         let x = r.map_or(right, |r| r.x);
         out.push(if lines.len() > 1 {
             at_line(path.clone(), k, x, i)
+        } else if wrapped {
+            at_wrap(path.clone(), k, x, wrap_of[k])
         } else {
             at(path.clone(), k, x)
         });
@@ -234,14 +264,21 @@ fn row_stops(
                 depth + 1,
             ));
         }
+        let child_line = if wrapped {
+            wrap_lines[wrap_of[k]]
+        } else {
+            line
+        };
         for (step, child) in node.children() {
             let mut p = path.clone();
             p.extend([Step::Index(k), step]);
-            row_stops(block, p, child, l, line, depth + 1, out);
+            row_stops(block, p, child, l, child_line, depth + 1, out);
         }
     }
     out.push(if lines.len() > 1 {
         at_line(path, row.nodes.len(), right, i)
+    } else if wrapped {
+        at_wrap(path, row.nodes.len(), right, wraps.len() - 1)
     } else {
         at(path, row.nodes.len(), right)
     });
@@ -614,15 +651,25 @@ fn list_stops(
                 if let Inline::Math(row) = &inline.kind {
                     row_stops(block, path.clone(), row, l, line, 1, &mut inner[i]);
                 }
+                // Just before and after it: where its first and last stops
+                // are (a formula wrapped onto the next line ends there).
+                let ends = |first: bool| {
+                    let mut own = inner[i].iter().filter(|s| s.cursor.path == path);
+                    let s = if first { own.next() } else { own.next_back() };
+                    s.map(|s| (s.x, s.top, s.bottom, s.line))
+                };
+                let (x0, top0, bottom0, line0) = ends(true).unwrap_or((r.x, r.y, r.bottom(), line));
+                let (x1, top1, bottom1, line1) =
+                    ends(false).unwrap_or((r.right(), r.y, r.bottom(), line));
                 if i > 0 {
                     let offset = per[i - 1].len().saturating_sub(1);
-                    let s = stop(block, at(i - 1), offset, r.x, r.y, r.bottom(), line);
+                    let s = stop(block, at(i - 1), offset, x0, top0, bottom0, line0);
                     if let Some(slot) = per[i - 1].last_mut() {
                         slot.get_or_insert(s);
                     }
                 }
                 if let Some(slot) = per.get_mut(i + 1).and_then(|v| v.first_mut()) {
-                    let s = stop(block, at(i + 1), 0, r.right(), r.y, r.bottom(), line);
+                    let s = stop(block, at(i + 1), 0, x1, top1, bottom1, line1);
                     slot.get_or_insert(s);
                 }
             }
@@ -1102,6 +1149,46 @@ mod tests {
         assert!((edges[0].x - r.x).abs() < 0.01 && (edges[1].x - r.right()).abs() < 0.01);
         assert_eq!(tab.len(), 1, "no options yet: one place");
         assert!(tab[0].bottom < r.y && tab[0].cursor.path == [Step::Opts]);
+    }
+
+    /// A formula in text that wraps onto the next line: every stop is one
+    /// line high, on its own line, so the caret keeps its size and ↑ from
+    /// the second line goes to the first; just after the formula is where
+    /// it ends.
+    #[test]
+    fn wrapped_inline_formula() {
+        let mut e = model::Editor::new(Document::new());
+        e.insert_text("Some words before $a + b + c + d + e + f + g + h + i + j + k$ after.");
+        let block = e.doc().blocks[0].clone();
+        let s = stops(&block, Some(&layout_of(&block, 150.0)));
+        let formula: Vec<&Stop> = s
+            .iter()
+            .filter(|s| s.cursor.path == [Step::Index(1)])
+            .collect();
+        assert!(
+            formula.iter().all(|s| s.bottom - s.top < 13.0),
+            "{formula:?}"
+        );
+        let mut baselines: Vec<f64> = formula.iter().map(|s| s.line).collect();
+        baselines.dedup_by(|a, b| (*a - *b).abs() < 0.5);
+        assert_eq!(baselines.len(), 2, "{baselines:?}");
+        // ↑ from the formula's second line: its first line.
+        let lines = lines(&s);
+        let at = |line: f64| {
+            lines
+                .iter()
+                .position(|l| (s[l[0]].line - line).abs() < 0.5)
+                .unwrap()
+        };
+        let up = nearest_in_line(&s, &lines[at(baselines[1]) - 1], 20.0).unwrap();
+        assert!((up.line - baselines[0]).abs() < 0.5, "{up:?}");
+        // After it: at its last stop.
+        let last = formula.last().unwrap();
+        let after = s
+            .iter()
+            .find(|s| s.cursor.path == [Step::Index(2)] && s.cursor.offset == 0)
+            .unwrap();
+        assert!((after.x - last.x).abs() < 0.01 && (after.line - last.line).abs() < 0.01);
     }
 
     /// A call over several lines gets one outline: the contour of its
