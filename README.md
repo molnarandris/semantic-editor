@@ -89,6 +89,13 @@ and their own file formats. This editor tries to give you both:
 - **Opening `.typ` files:** your existing Typst document becomes editable blocks, and
   the pictures and `.bib` files it uses are copied in. Header definitions, show rules and
   code are kept.
+- **Version history:** every save is a version, kept in a git repository inside the
+  `.sem` file. The *Versions* tab lists the saves by day, and you can give versions
+  names such as "arXiv submission". An old version opens read-only in its own window,
+  and *Restore this Version* brings it back as a new version, so nothing is lost.
+- **Scratch files:** scans of handwritten notes and draft figures can be inserted as
+  scratch pictures. They are kept with the document but stay out of its versions and
+  exports, until you choose *Keep*.
 - **Export:** a PDF, or a Typst project written into a folder.
 - **The document header** holds your `#set`, `#show` and `#let` lines and is edited in a
   dialog. A title block holds the title, authors and date.
@@ -118,7 +125,8 @@ and their own file formats. This editor tries to give you both:
 - Selecting precisely across paragraphs, highlighting matching brackets, and putting
   `lr(…)` around a selection.
 - A keyboard way into labels and options tabs (only a click today).
-- Version history inside the project (a git repository in the `.sem` file).
+- Comparing versions, parallel versions (branches), and saving a copy without its
+  history.
 - Multi-file Typst projects (`#include`), and files named by included files.
 - Editing the arguments of an existing call, and support for more Typst packages.
 - Sharp zooming (vector rendering) and Typst syntax highlighting in the source dialog.
