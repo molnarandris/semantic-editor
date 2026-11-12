@@ -141,6 +141,15 @@ impl SemEditor {
         }
     }
 
+    /// Insert a figure of the picture `bytes` (file name `name`), stored in
+    /// the project; the caret goes into its caption.
+    pub fn insert_picture(&self, name: &str, bytes: Vec<u8>) {
+        let imp = self.imp();
+        if imp.editor.borrow_mut().insert_picture(name, bytes) {
+            imp.after_command(true);
+        }
+    }
+
     /// Start an environment: a paragraph with `#` for its name (`lemma`,
     /// then space).
     pub fn start_env(&self) {

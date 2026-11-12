@@ -69,9 +69,11 @@ pub fn from_json(text: &str) -> Result<Document, String> {
     Ok(doc)
 }
 
-/// The project zip of a document: `document.json`, `main.typ` and its
-/// files.
+/// The project zip of a document: `document.json`, `main.typ` and the
+/// files it names (a picture deleted since stays out; the document keeps
+/// it, for undo).
 pub fn to_zip(doc: &Document) -> Result<Vec<u8>, String> {
+    let main = typst_bridge::serialize_document(doc);
     let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
     let options = SimpleFileOptions::default();
     let mut add = |path: &str, bytes: &[u8]| -> zip::result::ZipResult<()> {
@@ -81,8 +83,8 @@ pub fn to_zip(doc: &Document) -> Result<Vec<u8>, String> {
     };
     let written = (|| {
         add(DOCUMENT, to_json(doc).as_bytes())?;
-        add(MAIN, typst_bridge::serialize_document(doc).as_bytes())?;
-        for (path, bytes) in doc.files.iter() {
+        add(MAIN, main.as_bytes())?;
+        for (path, bytes) in doc.files.iter().filter(|(p, _)| main.contains(p)) {
             add(path, bytes)?;
         }
         Ok::<_, zip::result::ZipError>(())
@@ -172,6 +174,8 @@ mod tests {
             "Fig.~1 together.\\ A line break",
             "<eq:abs>",
             "<eq:square>",
+            "#figure(image(\"images/correlations.png\", width: 40%), caption: [Correlations in a \
+             matrix product state decay exponentially.]) <fig:correlations>\n\n$ |x|",
             "/ Bond dimension: the size",
             "#align(center)[",
             "@sec:mps, @eq:mps, @eq:abs, @fig:chain and @thm:fundamental.",
@@ -241,11 +245,13 @@ mod tests {
     #[test]
     fn projects_are_zips() {
         let mut doc = sample::document();
-        doc.files.insert("images/x.svg", b"<svg/>".to_vec());
+        let files = doc.files.clone();
+        doc.files.insert("images/unused.svg", b"<svg/>".to_vec());
         let zip = to_zip(&doc).unwrap();
         let back = from_zip(&zip).unwrap();
         assert_eq!(to_json(&back), to_json(&doc));
-        assert_eq!(back.files, doc.files);
+        assert!(!files.is_empty(), "the sample has a picture");
+        assert_eq!(back.files, files, "only the files the document names");
         let mut archive = zip::ZipArchive::new(Cursor::new(&zip[..])).unwrap();
         let mut main = String::new();
         archive

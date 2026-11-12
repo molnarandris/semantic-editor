@@ -1314,3 +1314,19 @@ reported targets, so only those are still listed. On the paper: no problems left
   box, `content_stops`); ↑ beside it enters the tab, ↓/Esc/Enter leave to
   just after it (`tab_exit`). Tests `figures_of_pictures`,
   `picture_options`, `picture_stops`.
+
+## Projects, step 4: Insert Picture and the sample's picture (2026-11-12)
+
+- Menu "Insert Picture…": a file dialog for pictures Typst reads (png, jpg,
+  gif, svg, webp, pdf); `Editor::insert_picture(name, bytes)` stores the
+  file as `images/<name>` (`Files::free_path`: `a-2.png` if taken) and puts
+  a figure of it after the caret's block (in place of an empty paragraph;
+  from a caption, after its figure), the caret in its empty caption. The
+  file stays in the document on undo; the zip keeps only the files
+  `main.typ` names (`to_zip`).
+- The sample's typed section inserts `data/sample/correlations.png` (a
+  12-site correlation matrix, generated), types its caption and label and
+  `width: 40%` in its options tab. Tests `inserting_pictures`,
+  `sample_has_every_feature`, `projects_are_zips`.
+- Seen on the way, not fixed: `insert_block` (diagram, raw Typst) from a
+  caption probably puts the block inside the figure after its caption.

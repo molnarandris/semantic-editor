@@ -2,7 +2,7 @@
 //! every feature of the editor. The first sections are built node by node;
 //! the last one is typed through the editor, as a user would.
 
-use model::{Document, Editor, InlineNode, ListKind, MathNode, NewBlock};
+use model::{CursorPath, Document, Editor, InlineNode, ListKind, MathNode, NewBlock};
 
 /// Short helpers so the sample reads roughly like the formulas it builds.
 struct B(Document);
@@ -438,6 +438,36 @@ fn typed_section(doc: Document) -> Document {
     e.insert_block(NewBlock::Diagram);
     e.insert_text("$.");
     e.enter();
+
+    // A picture: Insert Picture copies the file into the project and adds
+    // a figure, the caret in its caption; a label; the width in the
+    // picture's options tab (↑ beside it).
+    let png = include_bytes!("../../../data/sample/correlations.png");
+    e.insert_picture("correlations.png", png.to_vec());
+    e.insert_text("Correlations in a matrix product state decay exponentially.");
+    e.enter_label();
+    e.insert_text("fig:correlations");
+    let figure = e.label_focus().expect("the figure");
+    let picture = e
+        .doc()
+        .block(figure)
+        .and_then(|f| f.kind.body())
+        .expect("a body")[0]
+        .id;
+    e.set_caret(CursorPath {
+        block: picture,
+        path: vec![],
+        offset: 0,
+    });
+    let tab = e.vertical_target(false).expect("the options tab");
+    e.set_caret(tab);
+    e.insert_text("width: 40%");
+    // Just after the figure, typing goes on in a new paragraph.
+    e.set_caret(CursorPath {
+        block: figure,
+        path: vec![],
+        offset: 1,
+    });
 
     // Labelled display formulas: `$$`, the formula, its label.
     // Enter in `cases` starts the next case.

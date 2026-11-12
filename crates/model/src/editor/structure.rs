@@ -422,6 +422,34 @@ impl Editor {
         self.commit(vec![op], after, Last::Other)
     }
 
+    /// Insert a figure of a picture after the caret's block (in place of
+    /// it, if that is an empty paragraph): the picture is `bytes`, stored in
+    /// the project as `images/<name>` (or a free name like it). The caret
+    /// goes into the figure's empty caption.
+    pub fn insert_picture(&mut self, name: &str, bytes: Vec<u8>) -> bool {
+        self.finish_word();
+        self.selected = None;
+        // In a caption: after its figure (a caption is a figure's last block).
+        let after_block = self.caption_of_caret().unwrap_or(self.caret.block);
+        let Some(place) = self.doc.place(after_block) else {
+            return false;
+        };
+        let path = self.doc.files.free_path("images", name);
+        self.doc.files.insert(path.clone(), bytes);
+        let picture = self.doc.image(&path);
+        let caption = self.doc.caption(vec![]);
+        let after = self.doc.start_of(&caption);
+        let figure = self.doc.env("figure", vec![picture, caption]);
+        let replace = self.doc.at(place).is_some_and(is_empty_text_block);
+        let op = Op::Replace {
+            seq: place.seq(),
+            index: place.index + usize::from(!replace),
+            count: usize::from(replace),
+            items: Items::Blocks(vec![figure]),
+        };
+        self.commit(vec![op], after, Last::Other)
+    }
+
     /// A title block at the start of the document, or the caret onto the one
     /// there is.
     fn insert_title(&mut self) -> bool {

@@ -253,8 +253,8 @@ labels (110), CeTZ drawings inside formulas (101), theorem environments (~70, bu
 figures with a kind), ~100 document-level `#let`s next to the figures that use them, a
 mid-document `#set heading(numbering: …)` (appendix), primes (129), text in math (90),
 lists (90 items), text markup (~100), multi-line aligned equations (30), `cases`,
-figures, footnotes, an embedded bibliography. Not used: images, tables, local files
-(images and local files: see Projects and pictures, 2026-11-12).
+figures, footnotes, an embedded bibliography. Not used: tables (pictures and local
+files: see Projects and pictures, 2026-11-12; the sample has a picture).
 
 Principle (discussed 2026-11-08): **stay close to Typst in what a document means,
 diverge freely in how it is typed and shown.** Every structure the editor has maps to

@@ -1341,6 +1341,28 @@ fn picture_options() {
     assert_eq!(texts(&e), ["#figure[img(images/a.png;)|cap()]"]);
 }
 
+/// Insert Picture: a figure in place of an empty paragraph, the file in the
+/// project under a free name, the caret in the caption.
+#[test]
+fn inserting_pictures() {
+    let mut e = Editor::default();
+    assert!(e.insert_picture("a.png", vec![1]));
+    assert_eq!(texts(&e), ["#figure[img(images/a.png;)|cap()]"]);
+    assert!(e.caption_of_caret().is_some());
+    e.insert_text("A.");
+    assert!(e.insert_picture("a.png", vec![2]));
+    assert_eq!(
+        texts(&e),
+        [
+            "#figure[img(images/a.png;)|cap(A.)]",
+            "#figure[img(images/a-2.png;)|cap()]"
+        ]
+    );
+    assert_eq!(e.doc().files.get("images/a-2.png"), Some(&[2u8][..]));
+    while e.undo() {}
+    assert_eq!(texts(&e), [""]);
+}
+
 /// ←/→ pass a footnote's marker in one step; its text comes after the rest
 /// of the paragraph, where it is shown.
 #[test]

@@ -122,6 +122,28 @@ impl Window {
         }
     }
 
+    /// Choose a picture and insert a figure of it, the file copied into the
+    /// project.
+    pub(super) async fn insert_picture(self: Rc<Self>) {
+        let dialog = gtk::FileDialog::builder()
+            .title("Insert Picture")
+            .filters(&filters("Pictures", PICTURE_EXTENSIONS))
+            .build();
+        let Ok(file) = dialog.open_future(Some(&self.window)).await else {
+            return;
+        };
+        let name = file
+            .basename()
+            .map_or_else(|| "picture".into(), |p| p.to_string_lossy().into_owned());
+        match file.load_contents_future().await {
+            Ok((bytes, _)) => {
+                self.editor.insert_picture(&name, bytes.to_vec());
+                self.editor.grab_focus();
+            }
+            Err(e) => self.toast(&format!("Could not read the picture: {e}")),
+        }
+    }
+
     /// A save dialog for a file named after the document with `extension`.
     async fn choose_target(&self, title: &str, kind: &str, extension: &str) -> Option<gio::File> {
         let dialog = gtk::FileDialog::builder()
@@ -190,6 +212,9 @@ async fn write_file(file: &gio::File, bytes: Vec<u8>) -> Result<(), String> {
     .map(|_| ())
     .map_err(|(_, e)| e.to_string())
 }
+
+/// Picture formats Typst reads.
+const PICTURE_EXTENSIONS: &str = "png jpg jpeg gif svg webp pdf PNG JPG JPEG";
 
 /// A filter for files with the (space separated) `extensions`.
 fn filters(kind: &str, extensions: &str) -> gio::ListStore {
