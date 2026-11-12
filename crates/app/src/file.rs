@@ -1,27 +1,23 @@
-//! `.sem` files: JSON with a format version, the Typst version the document
-//! was written with, the header and the blocks. Node ids are not stored;
-//! they are regenerated on load.
+//! `.sem` files: a zip of the project. `document.json` holds a format
+//! version, the Typst version the document was written with, the header
+//! and the blocks (node ids are not stored; they are regenerated on load);
+//! `main.typ` is the document as Typst, written on every save so the
+//! unzipped folder compiles as is (not read back); every other entry is a
+//! project file at its path (`images/chain.png`).
+
+use std::io::{Cursor, Read, Write};
 
 use model::{BlockNode, Document};
 use serde::{Deserialize, Serialize};
+use zip::write::SimpleFileOptions;
 
-/// Version of the file format written by this build. 2: the header.
-/// 3: environments (`Env` blocks), with an optional `title` (absent when
-/// empty, so older version-3 files load unchanged). 4: list items (`Item`).
-/// 5: block calls with source arguments (`args` on `Env`, absent when empty).
-/// 6: code and diagrams in formulas (`MathKind::Code`, `MathKind::Diagram`).
-/// 7: function calls in formulas (`MathKind::Call`). 8: primes, text,
-/// alignment points and line breaks in formulas. 9: calls in text
-/// (`Inline::Call`: bold, italic, `#name[…]`). 10: inline code
-/// (`Inline::Raw`). 11: block labels (`label`, absent when empty).
-/// 12: references (`Inline::Ref`). 13: figure captions (`Block::Caption`).
-/// 14: the bibliography (`Block::Bibliography`). 15: the title block
-/// (`Block::Title`). 16: spaces in formulas next to bars and text (`space`
-/// on a math node; older files get the spaces their export wrote).
-/// 17: named arguments of calls in formulas (`opts` on `MathKind::Call`,
-/// absent when empty), as written in math (`size: #55%`). 18: the same as
-/// code (`size: 55%`), as typed in the options tab.
-pub const FORMAT_VERSION: u32 = 18;
+/// Version of `document.json` written by this build (restarted at 1 with
+/// the zipped format, 2026-11-12).
+pub const FORMAT_VERSION: u32 = 1;
+
+/// The entries of a project zip that are not project files.
+const DOCUMENT: &str = "document.json";
+const MAIN: &str = "main.typ";
 
 #[derive(Serialize)]
 struct SemFileOut<'a> {
@@ -36,13 +32,12 @@ struct SemFileIn {
     version: u32,
     #[allow(dead_code)]
     typst: String,
-    /// Version 1 has none: the editor's defaults, nothing numbered.
     #[serde(default)]
     header: String,
     blocks: Vec<BlockNode>,
 }
 
-/// The file contents for a document (pretty-printed, ends with a newline).
+/// `document.json` for a document (pretty-printed, ends with a newline).
 pub fn to_json(doc: &Document) -> String {
     let file = SemFileOut {
         version: FORMAT_VERSION,
@@ -55,11 +50,11 @@ pub fn to_json(doc: &Document) -> String {
     out
 }
 
-/// Parse a `.sem` file. The document gets fresh node ids and its structural
-/// invariants restored.
+/// Parse `document.json`. The document gets fresh node ids and its
+/// structural invariants restored; it has no files yet.
 pub fn from_json(text: &str) -> Result<Document, String> {
     let file: SemFileIn =
-        serde_json::from_str(text).map_err(|e| format!("not a valid .sem file: {e}"))?;
+        serde_json::from_str(text).map_err(|e| format!("not a valid document: {e}"))?;
     if file.version > FORMAT_VERSION {
         return Err(format!(
             "file format version {} is newer than this app supports ({FORMAT_VERSION})",
@@ -69,14 +64,61 @@ pub fn from_json(text: &str) -> Result<Document, String> {
     let mut doc = Document::empty();
     doc.header = file.header;
     doc.blocks = file.blocks;
-    if file.version < 16 {
-        doc.space_bars_and_text();
-    }
-    if file.version == 17 {
-        doc.map_call_opts(typst_bridge::code_opts);
-    }
     doc.regenerate_ids();
     doc.check_invariants()?;
+    Ok(doc)
+}
+
+/// The project zip of a document: `document.json`, `main.typ` and its
+/// files.
+pub fn to_zip(doc: &Document) -> Result<Vec<u8>, String> {
+    let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let options = SimpleFileOptions::default();
+    let mut add = |path: &str, bytes: &[u8]| -> zip::result::ZipResult<()> {
+        zip.start_file(path, options)?;
+        zip.write_all(bytes)?;
+        Ok(())
+    };
+    let written = (|| {
+        add(DOCUMENT, to_json(doc).as_bytes())?;
+        add(MAIN, typst_bridge::serialize_document(doc).as_bytes())?;
+        for (path, bytes) in doc.files.iter() {
+            add(path, bytes)?;
+        }
+        Ok::<_, zip::result::ZipError>(())
+    })();
+    written.map_err(|e| e.to_string())?;
+    let bytes = zip.finish().map_err(|e| e.to_string())?.into_inner();
+    Ok(bytes)
+}
+
+/// Read a project zip: its document with its files.
+pub fn from_zip(bytes: &[u8]) -> Result<Document, String> {
+    let not_sem = |e: zip::result::ZipError| format!("not a valid .sem file: {e}");
+    let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(not_sem)?;
+    let count = zip.len();
+    let mut read = |i: usize| -> Result<(String, Vec<u8>), String> {
+        let mut entry = zip.by_index(i).map_err(not_sem)?;
+        let name = entry.name().map_err(not_sem)?.into_owned();
+        let mut bytes = vec![];
+        entry.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+        Ok((name, bytes))
+    };
+    let mut json = None;
+    let mut files = model::Files::default();
+    for i in 0..count {
+        let (name, bytes) = read(i)?;
+        match name.as_str() {
+            DOCUMENT => json = Some(bytes),
+            MAIN => {}
+            _ if name.ends_with('/') => {}
+            _ => files.insert(name, bytes),
+        }
+    }
+    let json = json.ok_or("not a valid .sem file: no document.json")?;
+    let text = std::str::from_utf8(&json).map_err(|_| "document.json is not UTF-8")?;
+    let mut doc = from_json(text)?;
+    doc.files = files;
     Ok(doc)
 }
 
@@ -98,50 +140,6 @@ mod tests {
         assert!(saved.contains(&format!("\"version\": {FORMAT_VERSION}")));
         assert!(saved.contains("\"header\": \"#set heading"));
         assert!(saved.contains(&format!("\"typst\": \"{}\"", typst_bridge::TYPST_VERSION)));
-    }
-
-    /// Version 17 stored a math call's options as written in math; they
-    /// load as code.
-    #[test]
-    fn version_17_options_load_as_code() {
-        let mut d = Document::empty();
-        let arg = d.row(vec![]);
-        let call = d.call_with("lr", "size: #55%, x: \"a\"", vec![arg]);
-        d.blocks = vec![d.display(vec![call])];
-        let old = to_json(&d).replace(&format!("\"version\": {FORMAT_VERSION}"), "\"version\": 17");
-        let loaded = from_json(&old).unwrap();
-        let model::MathKind::Call { opts, .. } = &loaded.blocks[0].rows()[0].nodes[0].kind else {
-            panic!("a call");
-        };
-        assert_eq!(opts, "size: 55%, x: \"a\"");
-    }
-
-    /// Files before version 16 get the spaces their export wrote around
-    /// bars and text, so they look as before.
-    #[test]
-    fn old_files_keep_spaced_bars_and_text() {
-        let mut d = Document::empty();
-        let nodes = vec![
-            d.sym("|"),
-            d.ident("x"),
-            d.sym("|"),
-            d.node(model::MathKind::Text("Ker".into())),
-            d.sym("("),
-            d.ident("A"),
-            d.sym(")"),
-        ];
-        d.blocks = vec![d.display(nodes)];
-        let old = to_json(&d).replace(&format!("\"version\": {FORMAT_VERSION}"), "\"version\": 15");
-        let loaded = from_json(&old).unwrap();
-        let spaces: Vec<bool> = loaded.blocks[0].rows()[0]
-            .nodes
-            .iter()
-            .map(|n| n.space)
-            .collect();
-        assert_eq!(spaces, [false, true, true, true, false, false, false]);
-        // A current file is read as it is.
-        let current = from_json(&to_json(&d)).unwrap();
-        assert!(current.blocks[0].rows()[0].nodes.iter().all(|n| !n.space));
     }
 
     #[test]
@@ -236,6 +234,27 @@ mod tests {
             .filter(|b| matches!(b.kind, model::Block::RawTypst(_)))
             .collect();
         assert_eq!(raw(&opened), raw(&doc), "{raws:#?}");
+    }
+
+    /// A project zip holds the document, its Typst and its files, and
+    /// reads back as the same document with the same files.
+    #[test]
+    fn projects_are_zips() {
+        let mut doc = sample::document();
+        doc.files.insert("images/x.svg", b"<svg/>".to_vec());
+        let zip = to_zip(&doc).unwrap();
+        let back = from_zip(&zip).unwrap();
+        assert_eq!(to_json(&back), to_json(&doc));
+        assert_eq!(back.files, doc.files);
+        let mut archive = zip::ZipArchive::new(Cursor::new(&zip[..])).unwrap();
+        let mut main = String::new();
+        archive
+            .by_name(MAIN)
+            .unwrap()
+            .read_to_string(&mut main)
+            .unwrap();
+        assert_eq!(main, serialize_document(&doc));
+        assert!(from_zip(b"not a zip").is_err());
     }
 
     #[test]

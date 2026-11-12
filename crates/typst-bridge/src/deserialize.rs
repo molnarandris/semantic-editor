@@ -1012,25 +1012,6 @@ pub fn parse_fragment(text: &str, in_math: bool) -> Fragment {
     }
 }
 
-/// Options written as in math (`size: #55%`) as code (`size: 55%`); as
-/// they are if they are not all options.
-pub fn code_opts(math: &str) -> String {
-    fn find(n: &SyntaxNode) -> Option<ast::MathCall<'_>> {
-        n.cast().or_else(|| n.children().find_map(find))
-    }
-    let root = parse(&format!("$ff({math})$"));
-    let opts = find(&root).and_then(|c| {
-        c.args()
-            .arg_items()
-            .map(|item| match item.arg {
-                ast::Arg::Named(named) => code_opt(named),
-                _ => None,
-            })
-            .collect::<Option<Vec<_>>>()
-    });
-    opts.map_or_else(|| math.to_string(), |o| o.join(", "))
-}
-
 /// Whether `nodes[i]` is the `#` of a call that stands on lines of its own
 /// in the paragraph collected in `run`: a line break (or nothing) before it,
 /// and after it a line break, a paragraph break or the end, possibly after

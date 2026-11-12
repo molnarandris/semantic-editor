@@ -151,7 +151,7 @@ An `adw::Application` with one `adw::ApplicationWindow`, matching the notes.sem 
   it. Independent of an `#outline()` in the document.
 - **Body:** `SemEditor` in a `GtkScrolledWindow`; optional right pane with a read-only `sourceview5::View` showing the serialized Typst, current node highlighted.
 - **Status bar:** breadcrumb of the cursor path (clickable to select that structure) and a hint like "Tab → next slot".
-- **File format `.sem`:** JSON `{ "version": 1, "typst": "<pinned version>", "blocks": [...] }` via serde; NodeIds regenerated on load.
+- **File format `.sem`:** a zip (2026-11-12): `document.json`, JSON `{ "version": 1, "typst": "<pinned version>", "header": "...", "blocks": [...] }` via serde (NodeIds regenerated on load), `main.typ` (the export, not read back) and the project's files at their paths.
 - **Export:** `.typ` via serializer; PDF via `typst-pdf` from a full-document compile.
 - **Actions:** `GAction`s with accelerators (`Ctrl+S`, `Ctrl+O`, `Ctrl+E` export).
 

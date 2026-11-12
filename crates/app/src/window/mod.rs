@@ -14,7 +14,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 use editor_widget::{PreviewTarget, SemEditor};
 use gtk::{gio, glib};
-use model::{BlockNode, Document, NewBlock};
+use model::{BlockNode, Document, Files, NewBlock};
 
 use crate::sample;
 use block_editor::BlockEditor;
@@ -36,9 +36,9 @@ pub struct Window {
     /// The name (without extension) of the `.typ` file the document was
     /// opened from, until it is saved as a `.sem` file.
     imported: RefCell<Option<String>>,
-    /// Header and blocks as last saved or loaded, to tell if there are
+    /// Header, blocks and files as last saved or loaded, to tell if there are
     /// changes.
-    saved: RefCell<(String, Vec<BlockNode>)>,
+    saved: RefCell<(String, Vec<BlockNode>, Files)>,
     /// The open source editor dialog, if any.
     block_editor: RefCell<Option<Rc<BlockEditor>>>,
     /// The toast of the last problem gone to, replaced by the next one.
@@ -289,7 +289,7 @@ impl Window {
     // ----- State -----
 
     fn set_document(&self, doc: Document, file: Option<gio::File>) {
-        *self.saved.borrow_mut() = (doc.header.clone(), doc.blocks.clone());
+        *self.saved.borrow_mut() = (doc.header.clone(), doc.blocks.clone(), doc.files.clone());
         *self.file.borrow_mut() = file;
         *self.imported.borrow_mut() = None;
         // Emits caret-moved, which updates the title and status bar.
@@ -303,7 +303,7 @@ impl Window {
         }
         let doc = self.editor.document();
         let saved = self.saved.borrow();
-        doc.header != saved.0 || doc.blocks != saved.1
+        doc.header != saved.0 || doc.blocks != saved.1 || doc.files != saved.2
     }
 
     /// File name without extension, for titles and export names.

@@ -59,12 +59,10 @@ impl Window {
         let path = file.basename().unwrap_or_default();
         let typst = path.extension().is_some_and(|e| e == "typ");
         let result = match file.load_contents_future().await {
-            Ok((bytes, _)) => std::str::from_utf8(&bytes)
-                .map_err(|_| "the file is not UTF-8 text".to_string())
-                .and_then(|text| match typst {
-                    true => Ok(typst_bridge::import_typ(text)),
-                    false => file::from_json(text),
-                }),
+            Ok((bytes, _)) if typst => std::str::from_utf8(&bytes)
+                .map(typst_bridge::import_typ)
+                .map_err(|_| "the file is not UTF-8 text".to_string()),
+            Ok((bytes, _)) => file::from_zip(&bytes),
             Err(e) => Err(e.to_string()),
         };
         match result {
@@ -106,10 +104,10 @@ impl Window {
         self.apply_block_edit();
         let saved = {
             let doc = self.editor.document();
-            (doc.header.clone(), doc.blocks.clone())
+            (doc.header.clone(), doc.blocks.clone(), doc.files.clone())
         };
-        let json = file::to_json(&self.editor.document());
-        match write_file(&file, json.into_bytes()).await {
+        let zip = file::to_zip(&self.editor.document());
+        match async { write_file(&file, zip?).await }.await {
             Ok(()) => {
                 *self.saved.borrow_mut() = saved;
                 *self.file.borrow_mut() = Some(file);

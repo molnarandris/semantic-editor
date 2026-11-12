@@ -1285,3 +1285,13 @@ reported targets, so only those are still listed. On the paper: no problems left
   them to the world before compiling, and `BridgeWorld` serves project paths
   from them (bytes, or a `Source` for `.typ`). `compile_pdf(source, files)`.
   Test `project_files` (an SVG by its path).
+
+## Projects, step 2: the zipped `.sem` (2026-11-12)
+
+- `file::to_zip` / `from_zip` (crate `zip`, deflate only): `document.json`
+  (the former JSON, format version restarted at 1: no files of the old
+  format exist, user), `main.typ` (written on save, skipped on load), every
+  other entry a project file. Open and save in the window use them; unsaved
+  changes count the files too. The old migrations (spaces before format 16,
+  math-form options of format 17) and their helpers are gone. Test
+  `projects_are_zips`.

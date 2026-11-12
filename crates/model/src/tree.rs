@@ -907,59 +907,6 @@ impl Document {
         id
     }
 
-    /// Files before format 16 kept no spaces in formulas: their export put
-    /// a space on both sides of bars and text, except text before an
-    /// opening bracket (`"Ker"(A)`). Give them those spaces, so they look
-    /// as before.
-    pub fn space_bars_and_text(&mut self) {
-        fn row(r: &mut MathRow) {
-            for i in 1..r.nodes.len() {
-                let (a, b) = (&r.nodes[i - 1], &r.nodes[i]);
-                let applied = matches!(&a.kind, MathKind::Text(s) if !s.is_empty())
-                    && matches!(&b.kind, MathKind::Sym(s) if matches!(s.as_str(), "(" | "[" | "{"));
-                if spaced_gap(a, b) && !applied {
-                    r.nodes[i].space = true;
-                }
-            }
-            for n in &mut r.nodes {
-                n.children_mut().into_iter().for_each(row);
-            }
-        }
-        fn blocks(list: &mut [BlockNode]) {
-            for b in list {
-                b.rows_mut().into_iter().for_each(row);
-                if let Some(body) = b.kind.body_mut() {
-                    blocks(body);
-                }
-            }
-        }
-        blocks(&mut self.blocks);
-    }
-
-    /// Rewrite the options of every math call with `f` (files of format 17
-    /// stored them as written in math, `size: #55%`).
-    pub fn map_call_opts(&mut self, f: fn(&str) -> String) {
-        fn row(r: &mut MathRow, f: fn(&str) -> String) {
-            for n in &mut r.nodes {
-                if let MathKind::Call { opts, .. } = &mut n.kind
-                    && !opts.is_empty()
-                {
-                    *opts = f(opts);
-                }
-                n.children_mut().into_iter().for_each(|c| row(c, f));
-            }
-        }
-        fn blocks(list: &mut [BlockNode], f: fn(&str) -> String) {
-            for b in list {
-                b.rows_mut().into_iter().for_each(|r| row(r, f));
-                if let Some(body) = b.kind.body_mut() {
-                    blocks(body, f);
-                }
-            }
-        }
-        blocks(&mut self.blocks, f);
-    }
-
     /// Assign new ids to every node, e.g. after deserialization, and restore
     /// the structural invariants.
     pub fn regenerate_ids(&mut self) {

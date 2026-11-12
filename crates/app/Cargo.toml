@@ -13,3 +13,4 @@ typst-bridge = { workspace = true }
 sourceview5 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+zip = { version = "9.5.1", default-features = false, features = ["deflate"] }
