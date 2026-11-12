@@ -1,9 +1,10 @@
-//! One document window: header bar, editor, status bar. File actions live
-//! in `files`, the source editor for diagram and raw Typst blocks in
-//! `block_editor`.
+//! One document window: header bar, outline pane, editor, status bar. File
+//! actions live in `files`, the source editor for diagram and raw Typst
+//! blocks in `block_editor`, the outline in `outline`.
 
 mod block_editor;
 mod files;
+mod outline;
 mod title_editor;
 
 use std::cell::RefCell;
@@ -17,6 +18,7 @@ use model::{BlockNode, Document, NewBlock};
 
 use crate::sample;
 use block_editor::BlockEditor;
+use outline::Outline;
 
 thread_local! {
     /// Open windows. Closures hold weak references; this keeps each window's
@@ -29,6 +31,7 @@ pub struct Window {
     editor: SemEditor,
     title: adw::WindowTitle,
     toasts: adw::ToastOverlay,
+    outline: Outline,
     file: RefCell<Option<gio::File>>,
     /// The name (without extension) of the `.typ` file the document was
     /// opened from, until it is saved as a `.sem` file.
@@ -60,6 +63,12 @@ impl Window {
             .action_name("app.new")
             .tooltip_text("New Window (Ctrl+N)")
             .build();
+        let show_outline = gtk::ToggleButton::builder()
+            .icon_name("sidebar-show-symbolic")
+            .active(true)
+            .tooltip_text("Outline")
+            .build();
+        header.pack_start(&show_outline);
         header.pack_start(&open);
         header.pack_start(&new);
         let menu_button = gtk::MenuButton::builder()
@@ -80,9 +89,21 @@ impl Window {
         let toasts = adw::ToastOverlay::new();
         toasts.set_child(Some(&scroller));
 
+        let outline = Outline::new();
+        let split = adw::OverlaySplitView::builder()
+            .sidebar(&outline.widget)
+            .content(&toasts)
+            .max_sidebar_width(260.0)
+            .build();
+        show_outline
+            .bind_property("active", &split, "show-sidebar")
+            .bidirectional()
+            .sync_create()
+            .build();
+
         let content = adw::ToolbarView::new();
         content.add_top_bar(&header);
-        content.set_content(Some(&toasts));
+        content.set_content(Some(&split));
         content.add_bottom_bar(&status_bar(&editor));
 
         let window = adw::ApplicationWindow::builder()
@@ -103,6 +124,7 @@ impl Window {
             editor,
             title,
             toasts,
+            outline,
             file: RefCell::new(None),
             imported: RefCell::new(None),
             saved: RefCell::default(),
@@ -133,6 +155,15 @@ impl Window {
             if let Some(this) = weak.upgrade() {
                 this.update_title();
                 this.sync_block_editor();
+                this.outline
+                    .update(&this.editor.document(), this.editor.caret().block);
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.outline.connect_activated(move |id| {
+            if let Some(this) = weak.upgrade() {
+                this.editor.go_to_block(id);
+                this.editor.grab_focus();
             }
         });
         let weak = Rc::downgrade(self);

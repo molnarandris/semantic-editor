@@ -116,6 +116,11 @@ impl SemEditor {
         Some((k + 1, problems.len(), problems[k].1.clone()))
     }
 
+    /// Put the caret at the start of top-level block `id` and show it.
+    pub fn go_to_block(&self, id: NodeId) {
+        self.imp().go_to_block(id);
+    }
+
     /// Select the structure a breadcrumb entry stands for.
     pub fn select_crumb(&self, crumb: &Crumb) {
         self.imp().select_crumb(crumb.path_len);

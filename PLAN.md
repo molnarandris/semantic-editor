@@ -1212,3 +1212,16 @@ reported targets, so only those are still listed. On the paper: no problems left
   marker is one step for ←/→. ↑/↓ already go by the layout. Test
   `footnotes_after_their_paragraph`; `stops_in_inline_calls` compares a
   footnote paragraph's stops with the positions as sets.
+
+## Outline pane (2026-11-12)
+
+- User: view and navigate the table of contents even if the document has no
+  `#outline()`; a side pane is fine. `window/outline.rs`: a list of the
+  top-level headings (indented by level, level 1 bold; formulas as their
+  source, footnotes left out, `heading_titles`) in the sidebar of an
+  `adw::OverlaySplitView`, left of the editor, max 260 px; shown by default,
+  a header-bar toggle hides it. Updated on `caret-moved` (rows rebuilt only
+  when the headings changed); the heading the caret is under is selected.
+  Activating a row: `SemEditor::go_to_block`, focus back to the editor.
+- Not yet: heading numbers (Typst draws them; the numbering is the header's),
+  headings inside environments, remembering whether the pane is shown.
