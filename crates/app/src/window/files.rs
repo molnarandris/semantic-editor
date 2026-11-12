@@ -7,6 +7,8 @@ use adw::prelude::*;
 use gtk::gio;
 use typst_bridge::{compile_pdf, serialize_document};
 
+use model::Files;
+
 use super::Window;
 use crate::file;
 
@@ -53,15 +55,20 @@ impl Window {
         }
     }
 
-    /// Open a `.sem` file, or import a `.typ` file: its document is saved
-    /// as a new `.sem` file named after it.
+    /// Open a `.sem` file, or import a `.typ` file with the files it names
+    /// (copied into the project): its document is saved as a new `.sem`
+    /// file named after it.
     pub(super) async fn load(self: &Rc<Self>, file: gio::File) {
         let path = file.basename().unwrap_or_default();
         let typst = path.extension().is_some_and(|e| e == "typ");
         let result = match file.load_contents_future().await {
-            Ok((bytes, _)) if typst => std::str::from_utf8(&bytes)
-                .map(typst_bridge::import_typ)
-                .map_err(|_| "the file is not UTF-8 text".to_string()),
+            Ok((bytes, _)) if typst => match String::from_utf8(bytes.to_vec()) {
+                Ok(text) => {
+                    let files = self.local_files(&file, &text).await;
+                    Ok(typst_bridge::import_project(&text, files))
+                }
+                Err(_) => Err("the file is not UTF-8 text".to_string()),
+            },
             Ok((bytes, _)) => file::from_zip(&bytes),
             Err(e) => Err(e.to_string()),
         };
@@ -79,6 +86,55 @@ impl Window {
             }
             Err(e) => self.toast(&format!("Could not open the file: {e}")),
         }
+    }
+
+    /// The files Typst `source` (of `file`) names, read from beside it. The
+    /// Flatpak sandbox grants only the chosen file, so if some cannot be
+    /// read, a folder dialog asks for its folder, which grants that. Files
+    /// not found are reported.
+    async fn local_files(&self, file: &gio::File, source: &str) -> Files {
+        let mut files = Files::default();
+        let mut missing = typst_bridge::local_files(source);
+        async fn read(dir: &gio::File, paths: &mut Vec<String>, files: &mut Files) {
+            let mut left = vec![];
+            for path in paths.drain(..) {
+                match dir
+                    .resolve_relative_path(&path)
+                    .load_contents_future()
+                    .await
+                {
+                    Ok((bytes, _)) => files.insert(path, bytes.to_vec()),
+                    Err(_) => left.push(path),
+                }
+            }
+            *paths = left;
+        }
+        if let Some(dir) = file.parent() {
+            read(&dir, &mut missing, &mut files).await;
+        }
+        if missing.is_empty() {
+            return files;
+        }
+        let name = file
+            .basename()
+            .map_or_else(String::new, |p| p.to_string_lossy().into_owned());
+        let dialog = gtk::FileDialog::builder()
+            .title(format!("Folder of “{name}”, for Its Pictures and Files"))
+            .accept_label("_Use Folder")
+            .build();
+        if let Some(dir) = file.parent() {
+            dialog.set_initial_folder(Some(&dir));
+        }
+        if let Ok(dir) = dialog.select_folder_future(Some(&self.window)).await {
+            read(&dir, &mut missing, &mut files).await;
+        }
+        if !missing.is_empty() {
+            self.toast(&format!(
+                "Not found beside the file: {}",
+                missing.join(", ")
+            ));
+        }
+        files
     }
 
     /// Save to the current file, or ask for one. True if saved.

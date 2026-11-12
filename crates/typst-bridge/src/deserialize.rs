@@ -23,6 +23,42 @@ pub fn import_typ(source: &str) -> Document {
     import_project(source, model::Files::default())
 }
 
+/// The project files Typst `source` names: string literals that are
+/// relative paths of files of kinds a document uses (pictures, `.bib`,
+/// `.typ`, data), without `..`; a leading `/` (the project root) dropped.
+/// Sorted, each once.
+pub fn local_files(source: &str) -> Vec<String> {
+    const KINDS: [&str; 16] = [
+        "png", "jpg", "jpeg", "gif", "svg", "webp", "pdf", "bib", "yml", "yaml", "typ", "csv",
+        "json", "txt", "toml", "xml",
+    ];
+    fn walk(node: &SyntaxNode, out: &mut Vec<String>) {
+        if let Some(s) = node.cast::<ast::Str>() {
+            let value = s.get();
+            let path = value.strip_prefix('/').unwrap_or(&value);
+            let kind = path
+                .rsplit_once('.')
+                .map(|(stem, ext)| (stem, ext.to_lowercase()));
+            let known = kind.is_some_and(|(stem, ext)| {
+                !stem.is_empty() && !stem.ends_with('/') && KINDS.contains(&ext.as_str())
+            });
+            let plain = !path.contains("://") && !path.starts_with('@');
+            let inside = path
+                .split('/')
+                .all(|p| !p.is_empty() && p != ".." && p != ".");
+            if known && plain && inside {
+                out.push(path.to_string());
+            }
+        }
+        node.children().for_each(|c| walk(c, out));
+    }
+    let mut out = vec![];
+    walk(&parse(source), &mut out);
+    out.sort();
+    out.dedup();
+    out
+}
+
 /// [`import_typ`] for a Typst project: `source` is its main file, `files`
 /// the files it uses (pictures, `.bib`), which become the document's. A
 /// `#bibliography("x.bib")` of one of them becomes the bibliography block.
@@ -1295,6 +1331,22 @@ $ f(x) &= cases(1 "if" x > 0, 0) \
         // Without the file it stays as written.
         let doc = import_typ("#bibliography(\"lit.bib\")\n");
         assert!(matches!(&doc.blocks[0].kind, Block::RawTypst(_)));
+    }
+
+    /// The files a Typst source names, for copying them into the project.
+    #[test]
+    fn local_files_of_a_source() {
+        let source = r#"#import "@preview/cetz:0.3.0"
+#set heading(numbering: "1.1")
+#figure(image("figs/a.png", width: 50%), caption: [A.])
+#image("/figs/b.SVG") #image("figs/a.png")
+#link("https://x.org/y.pdf")[y] #include "../other.typ" "e.g." #let n = "notes.typ"
+#bibliography("refs.bib")
+"#;
+        assert_eq!(
+            local_files(source),
+            ["figs/a.png", "figs/b.SVG", "notes.typ", "refs.bib"]
+        );
     }
 
     #[test]

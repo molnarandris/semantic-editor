@@ -1356,3 +1356,17 @@ reported targets, so only those are still listed. On the paper: no problems left
   bibliography block with that source; without it, raw as before. The
   exported project opens as the same document again. Test
   `bibliography_files`.
+
+## Projects, step 7: importing a `.typ` with its files (2026-11-12)
+
+- `typst_bridge::local_files(source)`: the string literals that are
+  relative paths of document files (pictures, `.bib`, `.typ`, data; no
+  URLs, packages or `..`). Opening a `.typ` reads them from beside it; what
+  cannot be read (the Flatpak grants only the chosen file) is read from a
+  folder the user picks in a folder dialog (opened at the file's folder),
+  which grants access to it. Files still missing are reported in a toast.
+  `import_project` gets them, so pictures show, a `#bibliography("x.bib")`
+  becomes the bibliography block, and the files go into the project.
+- Not yet: files named by an included `.typ` (only the main file is
+  scanned); paths built in code (`"figs/" + name`).
+- Test `local_files_of_a_source`.
