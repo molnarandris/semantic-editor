@@ -1295,3 +1295,22 @@ reported targets, so only those are still listed. On the paper: no problems left
   changes count the files too. The old migrations (spaces before format 16,
   math-form options of format 17) and their helpers are gone. Test
   `projects_are_zips`.
+
+## Projects, step 3: picture blocks with options (2026-11-12)
+
+- `Block::Image { path, opts }` (`Document::image`): a project file's path
+  and the other arguments as Typst code. Written `#image("…", opts)`; a
+  figure whose body is one picture is written in code form,
+  `#figure(image("…", width: 2cm), caption: […])`, and read back from it
+  (`Parser::picture` in `code_figure`; anything but a path and named
+  arguments stays raw). Bare `#image` outside a figure stays raw (figures
+  only, user).
+- For the caret it is like a diagram (`Target::Raw` with its path: before
+  and after it, Backspace selects it, Enter makes a paragraph), but has no
+  source to edit (`source_target` skips it) and an options tab:
+  `Step::Opts` on the block, `Target::Opts { id }` and `Seq::Opts(id)` now
+  take a math node or a block. `tab_focus` is the empty path beside a
+  picture, so the widget outlines it and draws its tab (stops above its
+  box, `content_stops`); ↑ beside it enters the tab, ↓/Esc/Enter leave to
+  just after it (`tab_exit`). Tests `figures_of_pictures`,
+  `picture_options`, `picture_stops`.

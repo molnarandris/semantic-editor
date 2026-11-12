@@ -48,6 +48,7 @@ fn block_text(b: &BlockNode) -> String {
         Block::Title(_) => "title".into(),
         Block::DisplayMath(_) => "$$".into(),
         Block::RawTypst(s) | Block::Diagram(s) => s.clone(),
+        Block::Image { path, opts } => format!("img({path};{opts})"),
         Block::Env {
             name,
             args,
@@ -1303,6 +1304,41 @@ fn bold_and_italic_as_in_typst() {
     e.doc().check_invariants().unwrap();
     while e.undo() {}
     assert_eq!(texts(&e), [""]);
+}
+
+/// A picture: ←/→ pass it (never into its options tab); ↑ beside it enters
+/// the tab, where its options are typed; ↓ or Esc leave to just after it.
+#[test]
+fn picture_options() {
+    let mut d = Document::empty();
+    let picture = d.image("images/a.png");
+    let id = picture.id;
+    let caption = d.caption(vec![]);
+    d.blocks = vec![d.env("figure", vec![picture, caption])];
+    let mut e = Editor::new(d);
+    let before = CursorPath {
+        block: id,
+        path: vec![],
+        offset: 0,
+    };
+    e.set_caret(before.clone());
+    assert_eq!(e.tab_focus(), Some(vec![]));
+    while e.move_right() {
+        assert_ne!(e.caret().path, [Step::Opts]);
+    }
+    e.set_caret(before);
+    let up = e.vertical_target(false).unwrap();
+    assert_eq!(up.path, [Step::Opts]);
+    e.set_caret(up);
+    e.insert_text("width: 50%");
+    assert_eq!(texts(&e), ["#figure[img(images/a.png;width: 50%)|cap()]"]);
+    assert!(!e.move_right(), "the tab keeps the caret");
+    assert!(e.escape());
+    assert_eq!((e.caret().block, e.caret().path.clone()), (id, vec![]));
+    assert_eq!(e.caret().offset, "images/a.png".len());
+    assert_eq!(e.source_target(), None, "no source to edit");
+    while e.undo() {}
+    assert_eq!(texts(&e), ["#figure[img(images/a.png;)|cap()]"]);
 }
 
 /// ←/→ pass a footnote's marker in one step; its text comes after the rest

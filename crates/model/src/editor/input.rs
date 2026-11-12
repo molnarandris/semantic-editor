@@ -586,6 +586,10 @@ impl Editor {
     /// the call's first argument (after the call if it has none).
     pub(super) fn tab_exit(&self) -> CursorPath {
         let c = &self.caret;
+        // A picture's tab: just after the picture.
+        if let Some(Block::Image { path, .. }) = self.doc.block(c.block).map(|b| &b.kind) {
+            return cursor(c.block, vec![], path.chars().count());
+        }
         let call = &c.path[..c.path.len() - 1];
         let has_arg = self
             .doc

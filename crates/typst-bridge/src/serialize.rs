@@ -384,6 +384,32 @@ impl Writer {
                     )) => (rest, None),
                     _ => (&body[..], None),
                 };
+                // A figure of a picture: the picture is its first argument,
+                // `#figure(image("…"), caption: […])`.
+                if let (
+                    [
+                        picture @ BlockNode {
+                            kind: Block::Image { .. },
+                            ..
+                        },
+                    ],
+                    "figure",
+                ) = (body, name.as_str())
+                {
+                    w.out.push('(');
+                    w.node(picture.id, |w| w.image(&picture.kind));
+                    for arg in [&args[..]].into_iter().filter(|a| !a.is_empty()) {
+                        w.out.push_str(", ");
+                        w.out.push_str(arg);
+                    }
+                    if let Some(caption) = caption {
+                        w.out.push_str(", caption: [");
+                        w.block(caption);
+                        w.out.push(']');
+                    }
+                    w.out.push(')');
+                    return;
+                }
                 if !args.is_empty() || caption.is_some() {
                     w.out.push('(');
                     w.out.push_str(args);
@@ -411,6 +437,10 @@ impl Writer {
                 w.blocks(body);
                 w.nl();
                 w.out.push(']');
+            }
+            Block::Image { .. } => {
+                w.out.push('#');
+                w.image(&block.kind);
             }
             // In a figure, written by the figure; elsewhere (not made by the
             // editor) like a paragraph.
@@ -451,6 +481,20 @@ impl Writer {
 
     /// Typst source copied as is, each line after the first indented by
     /// `indent`; records where every char went.
+    /// A picture's call, `image("images/x.png", width: 80%)`.
+    fn image(&mut self, kind: &Block) {
+        let Block::Image { path, opts } = kind else {
+            return;
+        };
+        self.out.push_str("image(");
+        self.out.push_str(&quoted(path));
+        if !opts.trim().is_empty() {
+            self.out.push_str(", ");
+            self.out.push_str(opts.trim());
+        }
+        self.out.push(')');
+    }
+
     fn verbatim(&mut self, id: NodeId, src: &str, indent: &str) {
         let mut starts = Vec::with_capacity(src.len() + 1);
         for c in src.chars() {

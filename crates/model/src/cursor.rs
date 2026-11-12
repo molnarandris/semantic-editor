@@ -28,7 +28,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::tree::{Block, BlockNode, Document, Inline, InlineNode, MathNode, MathRow, NodeId};
+use crate::tree::{Block, BlockNode, Document, Inline, InlineNode, MathRow, NodeId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Step {
@@ -96,9 +96,9 @@ pub enum Target<'a> {
         block: &'a BlockNode,
         text: &'a str,
     },
-    /// The options of a math call.
+    /// The options of a math call or a picture (`id`: the node or block).
     Opts {
-        node: &'a MathNode,
+        id: NodeId,
         text: &'a str,
     },
 }
@@ -209,9 +209,17 @@ impl Document {
             {
                 Ok(Target::Raw { block, text })
             }
-            Block::RawTypst(_) | Block::Diagram(_) | Block::Bibliography(_) | Block::Title(_) => {
-                Err(0)
-            }
+            // A picture: before and after it, and its options tab.
+            Block::Image { path: text, .. } if path.is_empty() => Ok(Target::Raw { block, text }),
+            Block::Image { opts, .. } if path == [Step::Opts] => Ok(Target::Opts {
+                id: block.id,
+                text: opts,
+            }),
+            Block::RawTypst(_)
+            | Block::Diagram(_)
+            | Block::Bibliography(_)
+            | Block::Title(_)
+            | Block::Image { .. } => Err(0),
         }
     }
 
@@ -405,7 +413,11 @@ impl Document {
             Block::DisplayMath(row) => {
                 row_positions(block.id, vec![], row, &mut out);
             }
-            Block::RawTypst(s) | Block::Diagram(s) | Block::Bibliography(s) | Block::Title(s) => {
+            Block::RawTypst(s)
+            | Block::Diagram(s)
+            | Block::Bibliography(s)
+            | Block::Title(s)
+            | Block::Image { path: s, .. } => {
                 out.push(at(vec![], 0));
                 out.push(at(vec![], s.chars().count()));
             }
@@ -506,7 +518,17 @@ impl Document {
                 consumed += 1;
                 row
             }
-            Block::RawTypst(_) | Block::Diagram(_) | Block::Bibliography(_) | Block::Title(_) => {
+            Block::RawTypst(_)
+            | Block::Diagram(_)
+            | Block::Bibliography(_)
+            | Block::Title(_)
+            | Block::Image { .. } => {
+                if cursor.path == [Step::Opts] {
+                    crumbs.push(Crumb {
+                        label: "options",
+                        path_len: 1,
+                    });
+                }
                 return crumbs;
             }
         };
@@ -568,7 +590,7 @@ fn walk_row<'a>(row: &'a MathRow, path: &[Step]) -> Result<Target<'a>, usize> {
         [Step::Index(k), Step::Opts] => {
             let node = row.nodes.get(*k).ok_or(0usize)?;
             let text = node.kind.tab().ok_or(0usize)?;
-            Ok(Target::Opts { node, text })
+            Ok(Target::Opts { id: node.id, text })
         }
         [Step::Index(k), child, rest @ ..] => {
             let child = row

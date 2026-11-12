@@ -406,6 +406,26 @@ fn content_stops(block: &BlockNode, l: &BlockLayout, top: bool) -> Vec<Stop> {
                 stop(block, vec![], n, r.right(), r.y, r.bottom(), line),
             ]
         }
+        // A picture: its box (or the page), its options tab on top.
+        Block::Image { path, opts } => {
+            let r = match (l.box_of(block.id), top) {
+                (Some(r), _) => r,
+                (None, true) => Rect {
+                    x: 0.0,
+                    y: 0.0,
+                    w: l.width,
+                    h: l.height,
+                },
+                (None, false) => return vec![],
+            };
+            let n = path.chars().count();
+            let mut out = vec![
+                stop(block, vec![], 0, r.x, r.y, r.bottom(), r.bottom()),
+                stop(block, vec![], n, r.right(), r.y, r.bottom(), r.bottom()),
+            ];
+            out.extend(tab_stops(block, vec![Step::Opts], opts, r, r.bottom(), 1));
+            out
+        }
         Block::Item { term, body, .. } => {
             let mut out = inline_stops(block, term, l);
             out.extend(body.iter().flat_map(|b| block_stops(b, l, false)));
@@ -1054,6 +1074,34 @@ mod tests {
         let (src, offset) = block_document(&Around::default(), &snippet, width);
         let doc = compile(&mut world, &src).unwrap();
         raw_layout(&world, &doc.pages()[0], offset).resolve(&map)
+    }
+
+    /// A picture in a figure: stops at its box's edges, its options tab's
+    /// stops above the box.
+    #[test]
+    fn picture_stops() {
+        let mut d = Document::empty();
+        let picture = d.image("images/box.svg");
+        let id = picture.id;
+        let caption = d.caption(vec![]);
+        let figure = d.env("figure", vec![picture, caption]);
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10"/></svg>"#;
+        let mut files = model::Files::default();
+        files.insert("images/box.svg", svg.as_bytes().to_vec());
+        let mut world = BridgeWorld::new();
+        world.set_files(files);
+        let (snippet, map) = serialize_block(&figure);
+        let (src, offset) = block_document(&Around::default(), &snippet, 300.0);
+        let doc = compile(&mut world, &src).unwrap();
+        let l = raw_layout(&world, &doc.pages()[0], offset).resolve(&map);
+        let r = l.box_of(id).unwrap();
+        let s = super::stops(&figure, Some(&l));
+        let mine: Vec<&Stop> = s.iter().filter(|s| s.cursor.block == id).collect();
+        let (edges, tab): (Vec<&Stop>, Vec<&Stop>) = mine.into_iter().partition(|s| !s.tab);
+        assert_eq!(edges.len(), 2);
+        assert!((edges[0].x - r.x).abs() < 0.01 && (edges[1].x - r.right()).abs() < 0.01);
+        assert_eq!(tab.len(), 1, "no options yet: one place");
+        assert!(tab[0].bottom < r.y && tab[0].cursor.path == [Step::Opts]);
     }
 
     /// A call over several lines gets one outline: the contour of its

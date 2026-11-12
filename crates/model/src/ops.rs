@@ -30,7 +30,7 @@ pub enum Seq {
     Header,
     /// The chars of a block's label (by block id).
     Label(NodeId),
-    /// The chars of a math call's options (by node id).
+    /// The chars of the options of a math call or picture (by node or block id).
     Opts(NodeId),
 }
 
@@ -230,6 +230,12 @@ impl Document {
                 .block_mut(block)
                 .map(|b| SeqMut::Text(&mut b.label))
                 .ok_or_else(not_found),
+            Seq::Opts(id) if self.block(id).is_some() => {
+                match &mut self.block_mut(id).ok_or_else(not_found)?.kind {
+                    Block::Image { opts, .. } => Ok(SeqMut::Text(opts)),
+                    _ => Err(OpError::KindMismatch),
+                }
+            }
             Seq::Opts(node) => {
                 let (row, k) = self
                     .find_node(node)

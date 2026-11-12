@@ -450,7 +450,7 @@ impl Editor {
     /// caret is in the options tab of a math call.
     fn opts_pos(&self) -> Option<(NodeId, usize, usize)> {
         match self.doc.resolve(&self.caret)? {
-            Target::Opts { node, text } => Some((node.id, self.caret.offset, text.chars().count())),
+            Target::Opts { id, text } => Some((id, self.caret.offset, text.chars().count())),
             _ => None,
         }
     }
@@ -903,7 +903,15 @@ impl Editor {
     /// What Ctrl+Enter or a double click opens in the source dialog: the
     /// caret's raw/diagram block or the code atom next to it.
     pub fn source_target(&self) -> Option<NodeId> {
-        self.source_block().or_else(|| self.code_atom())
+        let picture = |id: &NodeId| {
+            matches!(
+                self.doc.block(*id).map(|b| &b.kind),
+                Some(Block::Image { .. })
+            )
+        };
+        self.source_block()
+            .filter(|id| !picture(id))
+            .or_else(|| self.code_atom())
     }
 
     /// The node just before the caret in its row.
@@ -1104,6 +1112,9 @@ impl Editor {
             (_, Some(_)) if self.code_atom().is_some() => {
                 "Ctrl+Enter or double click → edit code · Backspace → select, then delete"
             }
+            (None, _) if self.source_block().is_some() && self.source_target().is_none() => {
+                "picture · ↑ → its options (width: 80%) · Enter → new paragraph · Backspace → delete"
+            }
             (None, _) if self.source_block().is_some() => {
                 "Ctrl+Enter or double click → edit source · Enter → new paragraph · Backspace → delete"
             }
@@ -1203,9 +1214,13 @@ impl Editor {
 
     /// The innermost math call with an options tab that the caret is in
     /// (in an argument or in the tab): the path to the call node, ending
-    /// `Index(k)`. Its outline and tab show.
+    /// `Index(k)`; for a picture (beside it or in its tab) the empty path.
+    /// Its outline and tab show.
     pub fn tab_focus(&self) -> Option<Vec<Step>> {
         let block = self.doc.block(self.caret.block)?;
+        if matches!(block.kind, Block::Image { .. }) {
+            return Some(vec![]);
+        }
         let path = &self.caret.path;
         (1..path.len()).rev().find_map(|n| {
             let (Step::Index(k), Step::Arg(_) | Step::Opts) = (path[n - 1], path[n]) else {

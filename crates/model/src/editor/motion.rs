@@ -109,6 +109,16 @@ impl Editor {
             }
             return Some(self.tab_exit());
         }
+        // Beside a picture: ↑ into its options tab.
+        if !down
+            && self.caret.path.is_empty()
+            && matches!(
+                self.doc.block(self.caret.block).map(|b| &b.kind),
+                Some(Block::Image { .. })
+            )
+        {
+            return Some(cursor(self.caret.block, vec![Step::Opts], 0));
+        }
         let p = self.row_pos()?;
         let mut path = p.path.clone();
         while path.len() > p.base {

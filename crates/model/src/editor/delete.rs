@@ -41,7 +41,7 @@ impl Editor {
                 let seq = match self.doc.walk(b, &path) {
                     Ok(Target::Text { inline, .. }) => Seq::Text(inline.id),
                     Ok(Target::Label { block, .. }) => Seq::Label(block.id),
-                    Ok(Target::Opts { node, .. }) => Seq::Opts(node.id),
+                    Ok(Target::Opts { id, .. }) => Seq::Opts(id),
                     // Raw Typst (its start to its end): the block goes.
                     Ok(Target::Raw { .. }) => {
                         let Some(place) = self.doc.place(block) else {

@@ -567,6 +567,8 @@ impl Importer<'_> {
         let value = args.children().find(|c| is_positional(c.kind()))?;
         let mut body = if value.kind() == SyntaxKind::ContentBlock {
             self.blocks(&content_markup(&value))
+        } else if let Some(picture) = self.picture(&value) {
+            vec![picture]
         } else {
             vec![self.doc.raw(&format!("#{}", value.full_text()))]
         };
@@ -579,6 +581,34 @@ impl Importer<'_> {
             *args = rest;
         }
         Some(block)
+    }
+
+    /// A picture, `image("images/x.png", width: 80%)`: a path and named
+    /// arguments only (kept as their source).
+    fn picture(&mut self, value: &LinkedNode) -> Option<BlockNode> {
+        let ast::Expr::FuncCall(call) = value.cast::<ast::Expr>()? else {
+            return None;
+        };
+        let ast::Expr::Ident(name) = call.callee() else {
+            return None;
+        };
+        if name.as_str() != "image" {
+            return None;
+        }
+        let mut path = None;
+        let mut opts = vec![];
+        for arg in call.args().items() {
+            match arg {
+                ast::Arg::Pos(ast::Expr::Str(s)) if path.is_none() => path = Some(s.get()),
+                ast::Arg::Named(named) => opts.push(named.to_untyped().full_text().to_string()),
+                _ => return None,
+            }
+        }
+        let mut picture = self.doc.image(&path?);
+        if let model::Block::Image { opts: o, .. } = &mut picture.kind {
+            *o = opts.join(", ");
+        }
+        Some(picture)
     }
 
     /// A figure's `caption: […]` argument, taken out of its arguments (with
@@ -1193,6 +1223,38 @@ $ f(x) &= cases(1 "if" x > 0, 0) \
             assert!(matches!(body[0].kind, Block::RawTypst(_)));
             assert!(matches!(body[1].kind, Block::Caption(_)));
         }
+    }
+
+    /// A figure of a picture: the picture with its options, written back
+    /// as it was; compiled with its file, the picture has a box.
+    #[test]
+    fn figures_of_pictures() {
+        let source = "#figure(image(\"images/box.svg\", width: 2cm), caption: [A box.]) <fig:box>";
+        let doc = import_typ(source);
+        doc.check_invariants().unwrap();
+        let figure = &doc.blocks[0];
+        let body = figure.kind.body().unwrap();
+        assert!(
+            matches!(&body[0].kind, Block::Image { path, opts }
+                if path == "images/box.svg" && opts == "width: 2cm"),
+            "{:?}",
+            body[0].kind
+        );
+        assert!(serialize_document(&doc).contains(source));
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10"/></svg>"#;
+        let mut files = model::Files::default();
+        files.insert("images/box.svg", svg.as_bytes().to_vec());
+        let mut world = crate::BridgeWorld::new();
+        world.set_files(files);
+        let (snippet, map) = crate::serialize_block(figure);
+        let (src, offset) = crate::block_document(&crate::Around::default(), &snippet, 300.0);
+        let compiled = crate::compile(&mut world, &src).expect("compiles");
+        let layout = crate::raw_layout(&world, &compiled.pages()[0], offset).resolve(&map);
+        let r = layout.box_of(body[0].id).expect("a box");
+        assert!(
+            (r.w - 56.7).abs() < 1.0 && (r.h - 28.3).abs() < 1.0,
+            "{r:?}"
+        );
     }
 
     #[test]

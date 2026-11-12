@@ -71,6 +71,14 @@ pub enum Block {
     /// ([`TitleFields`], stored as lines), shown where the block is (at the
     /// top) and set as the document's metadata. Edited in a dialog.
     Title(String),
+    /// A picture, `#image("images/x.png", width: 80%)`: the path of a
+    /// project file and the other arguments as Typst code (empty if none),
+    /// typed in an options tab like a math call's. The body of a figure.
+    Image {
+        path: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        opts: String,
+    },
 }
 
 /// The fields of a title block. The title is Typst markup; the date is
@@ -533,9 +541,11 @@ impl BlockNode {
                 inline_rows(inlines, &mut out);
                 out
             }
-            Block::RawTypst(_) | Block::Diagram(_) | Block::Bibliography(_) | Block::Title(_) => {
-                vec![]
-            }
+            Block::RawTypst(_)
+            | Block::Diagram(_)
+            | Block::Bibliography(_)
+            | Block::Title(_)
+            | Block::Image { .. } => vec![],
         }
     }
 
@@ -551,9 +561,11 @@ impl BlockNode {
                 inline_rows_mut(inlines, &mut out);
                 out
             }
-            Block::RawTypst(_) | Block::Diagram(_) | Block::Bibliography(_) | Block::Title(_) => {
-                vec![]
-            }
+            Block::RawTypst(_)
+            | Block::Diagram(_)
+            | Block::Bibliography(_)
+            | Block::Title(_)
+            | Block::Image { .. } => vec![],
         }
     }
 
@@ -564,6 +576,7 @@ impl BlockNode {
             Block::DisplayMath(_) => "display math",
             Block::RawTypst(_) => "raw typst",
             Block::Diagram(_) => "diagram",
+            Block::Image { .. } => "picture",
             Block::Env { .. } => "environment",
             Block::Item { .. } => "list item",
             Block::Caption(_) => "caption",
@@ -855,7 +868,11 @@ fn visit_block_ids(blocks: &mut [BlockNode], f: &mut impl FnMut(&mut NodeId)) {
                 visit_inline_ids(title, f);
                 visit_block_ids(body, f);
             }
-            Block::RawTypst(_) | Block::Diagram(_) | Block::Bibliography(_) | Block::Title(_) => {}
+            Block::RawTypst(_)
+            | Block::Diagram(_)
+            | Block::Bibliography(_)
+            | Block::Title(_)
+            | Block::Image { .. } => {}
         }
     }
 }
@@ -1481,6 +1498,18 @@ impl Document {
             label: String::new(),
             id: self.fresh_id(),
             kind: Block::Diagram(source.into()),
+        }
+    }
+
+    /// A picture of project file `path`, with no options.
+    pub fn image(&mut self, path: &str) -> BlockNode {
+        BlockNode {
+            label: String::new(),
+            id: self.fresh_id(),
+            kind: Block::Image {
+                path: path.into(),
+                opts: String::new(),
+            },
         }
     }
 

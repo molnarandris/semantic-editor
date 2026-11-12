@@ -106,15 +106,17 @@ fn all_cursors(doc: &Document) -> Vec<CursorPath> {
                 }
             }
             Block::DisplayMath(r) => row(&mut out, b.id, vec![], r),
-            Block::RawTypst(s) | Block::Diagram(s) | Block::Bibliography(s) | Block::Title(s) => {
-                (0..=s.chars().count()).for_each(|o| {
-                    out.push(CursorPath {
-                        block: b.id,
-                        path: vec![],
-                        offset: o,
-                    })
+            Block::RawTypst(s)
+            | Block::Diagram(s)
+            | Block::Bibliography(s)
+            | Block::Title(s)
+            | Block::Image { path: s, .. } => (0..=s.chars().count()).for_each(|o| {
+                out.push(CursorPath {
+                    block: b.id,
+                    path: vec![],
+                    offset: o,
                 })
-            }
+            }),
             Block::Env { .. } | Block::Item { .. } => unreachable!("leaves are not containers"),
         }
     }
