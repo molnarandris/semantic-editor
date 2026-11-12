@@ -110,6 +110,8 @@ pub enum Selected {
 #[derive(Debug)]
 pub struct Editor {
     doc: Document,
+    /// No edits (an old version shown): every change is refused.
+    read_only: bool,
     caret: CursorPath,
     history: History,
     last: Last,
@@ -305,6 +307,7 @@ impl Editor {
         let caret = doc.doc_start();
         Self {
             doc,
+            read_only: false,
             caret,
             history: History::new(),
             last: Last::Other,
@@ -318,6 +321,16 @@ impl Editor {
             back: vec![],
             anchor: None,
         }
+    }
+
+    /// Refuse (or allow again) every change of the document; the caret
+    /// still moves, selects and copies.
+    pub fn set_read_only(&mut self, read_only: bool) {
+        self.read_only = read_only;
+    }
+
+    pub fn read_only(&self) -> bool {
+        self.read_only
     }
 
     pub fn set_symbol_resolver(&mut self, resolver: SymbolResolver) {
@@ -405,6 +418,9 @@ impl Editor {
 
     /// Returns whether anything changed.
     pub fn undo(&mut self) -> bool {
+        if self.read_only {
+            return false;
+        }
         self.finish_word();
         self.reset_state();
         match self.history.undo(&mut self.doc) {
@@ -417,6 +433,9 @@ impl Editor {
     }
 
     pub fn redo(&mut self) -> bool {
+        if self.read_only {
+            return false;
+        }
         self.reset_state();
         match self.history.redo(&mut self.doc) {
             Some(caret) => {
@@ -515,6 +534,9 @@ impl Editor {
     /// Run ops as one undo step (or merged into the previous one) and move
     /// the caret.
     fn commit(&mut self, ops: Vec<Op>, after: CursorPath, last: Last) -> bool {
+        if self.read_only {
+            return false;
+        }
         let merge = match (self.last, last) {
             (Last::Typing { space: was }, Last::Typing { space: now }) => !was || now,
             (Last::Deleting, Last::Deleting) => true,

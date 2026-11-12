@@ -453,6 +453,7 @@ impl Command {
 impl SemEditor {
     pub(crate) fn set_document(&self, doc: Document) {
         let mut editor = Editor::new(doc);
+        editor.set_read_only(self.editor.borrow().read_only());
         editor.set_symbol_resolver(typst_bridge::resolve_symbol);
         editor.set_call_resolver(typst_bridge::call_shape);
         editor.set_math_call_resolver(typst_bridge::math_call_shape);

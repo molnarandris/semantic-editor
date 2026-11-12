@@ -4,6 +4,7 @@
 
 mod block_editor;
 mod files;
+mod old_version;
 mod outline;
 mod title_editor;
 mod versions;
@@ -20,6 +21,7 @@ use model::{BlockNode, Document, Files, NewBlock};
 use crate::history::History;
 use crate::sample;
 use block_editor::BlockEditor;
+use old_version::OldVersion;
 use outline::Outline;
 use versions::VersionsPane;
 
@@ -36,6 +38,15 @@ pub struct Window {
     toasts: adw::ToastOverlay,
     outline: Outline,
     versions: VersionsPane,
+    /// The sidebar's Outline / Versions switcher (hidden for an old
+    /// version).
+    sidebar_switcher: adw::InlineViewSwitcher,
+    /// Says which old version a read-only window shows, with "Restore".
+    banner: adw::Banner,
+    /// In a read-only window: the old version shown.
+    origin: RefCell<Option<OldVersion>>,
+    /// The message of the next version saved ("Saved" if none).
+    commit_message: RefCell<Option<String>>,
     file: RefCell<Option<gio::File>>,
     /// The name (without extension) of the `.typ` file the document was
     /// opened from, until it is saved as a `.sem` file.
@@ -109,6 +120,10 @@ impl Window {
             .margin_top(6)
             .margin_bottom(6)
             .build();
+        let banner = adw::Banner::builder()
+            .button_label("_Restore this Version")
+            .revealed(false)
+            .build();
         let sidebar = gtk::Box::new(gtk::Orientation::Vertical, 0);
         sidebar.append(&switcher);
         pages.set_vexpand(true);
@@ -126,6 +141,7 @@ impl Window {
 
         let content = adw::ToolbarView::new();
         content.add_top_bar(&header);
+        content.add_top_bar(&banner);
         content.set_content(Some(&split));
         content.add_bottom_bar(&status_bar(&editor));
 
@@ -149,6 +165,10 @@ impl Window {
             toasts,
             outline,
             versions,
+            sidebar_switcher: switcher,
+            banner,
+            origin: RefCell::new(None),
+            commit_message: RefCell::new(None),
             file: RefCell::new(None),
             imported: RefCell::new(None),
             saved: RefCell::default(),
@@ -192,7 +212,13 @@ impl Window {
         let weak = Rc::downgrade(self);
         self.versions.connect_pick(move |id| {
             if let Some(this) = weak.upgrade() {
-                spawn(async move { this.name_version(Some(id)).await });
+                this.open_version(id);
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.banner.connect_button_clicked(move |_| {
+            if let Some(this) = weak.upgrade() {
+                spawn(async move { this.restore_version().await });
             }
         });
         let weak = Rc::downgrade(self);
@@ -350,6 +376,14 @@ impl Window {
     /// Name a version (`None`: the current one, saved first) with a name
     /// asked for; the file is saved, so the name is kept.
     async fn name_version(self: Rc<Self>, id: Option<git2::Oid>) {
+        // An old version's window: name that version, in its document.
+        let old = self.origin.borrow().clone();
+        if let Some(old) = old {
+            if let Some(origin) = old.window.upgrade() {
+                Box::pin(origin.name_version(Some(old.id))).await;
+            }
+            return;
+        }
         let Some(name) = self.ask_version_name().await else {
             return;
         };
@@ -413,6 +447,13 @@ impl Window {
     }
 
     fn update_title(&self) {
+        if let Some(old) = self.origin.borrow().as_ref() {
+            let title = format!("{} — {} (read-only)", old.stem, old.label);
+            self.title.set_title(&title);
+            self.window
+                .set_title(Some(&format!("{title} — Semantic Editor")));
+            return;
+        }
         let name = match self.file.borrow().as_ref().and_then(|f| f.basename()) {
             Some(path) => path.to_string_lossy().into_owned(),
             None => match self.imported.borrow().as_ref() {

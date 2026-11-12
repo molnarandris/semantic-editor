@@ -237,7 +237,6 @@ impl History {
     }
 
     /// The files of version `id` (path, contents).
-    #[allow(dead_code)] // For opening old versions (next step).
     pub fn files_at(&self, id: Oid) -> Result<Vec<(String, Vec<u8>)>, String> {
         let tree = self
             .repo

@@ -149,6 +149,25 @@ pub fn to_zip(doc: &Document, history: Option<&History>) -> Result<Vec<u8>, Stri
     Ok(bytes)
 }
 
+/// The document of a version's files (a [`snapshot`]).
+pub fn from_snapshot(entries: Vec<(String, Vec<u8>)>) -> Result<Document, String> {
+    let mut json = None;
+    let mut files = model::Files::default();
+    for (path, bytes) in entries {
+        match path.as_str() {
+            DOCUMENT => json = Some(bytes),
+            MAIN => {}
+            _ if safe_path(&path) => files.insert(path, bytes),
+            _ => {}
+        }
+    }
+    let json = json.ok_or("the version has no document.json")?;
+    let text = std::str::from_utf8(&json).map_err(|_| "document.json is not UTF-8")?;
+    let mut doc = from_json(text)?;
+    doc.files = files;
+    Ok(doc)
+}
+
 /// Read a project zip: its document with its files, and its history (an
 /// empty one if it has none).
 pub fn from_zip(bytes: &[u8]) -> Result<(Document, History), String> {
@@ -321,10 +340,9 @@ mod tests {
             history.versions().unwrap()
         );
         let version = back_history.versions().unwrap()[0].id;
-        assert_eq!(
-            back_history.files_at(version).unwrap().len(),
-            snapshot(&doc).len()
-        );
+        let old = from_snapshot(back_history.files_at(version).unwrap()).unwrap();
+        assert_eq!(to_json(&old), to_json(&doc));
+        assert_eq!(old.files, files);
         assert_eq!(to_json(&back), to_json(&doc));
         let paths: Vec<&str> = files.iter().map(|(p, _)| p).collect();
         assert_eq!(paths, ["images/correlations.png", "refs.bib"]);

@@ -1,6 +1,6 @@
 //! The Versions page of the sidebar: the document's named versions, then
 //! every save grouped by day (collapsed, the latest day open), each with
-//! its time and tags. Clicking a version offers to name it.
+//! its time and tags. Clicking a version opens it (read-only).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -164,6 +164,11 @@ fn set_row_id(row: &gtk::ListBoxRow, id: Oid) {
 
 fn local(v: &Version) -> Option<glib::DateTime> {
     glib::DateTime::from_unix_local(v.time).ok()
+}
+
+/// When a version was saved: "Today, 14:03", "3 November 2026, 09:12".
+pub fn label(v: &Version) -> String {
+    format!("{}, {}", day_of(v), time_of(v))
 }
 
 /// "Today", "Yesterday" or the date, in local time.

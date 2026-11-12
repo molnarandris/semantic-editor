@@ -42,6 +42,12 @@ impl SemEditor {
         glib::Object::new()
     }
 
+    /// Refuse (or allow again) every change of the document, as for an old
+    /// version shown; moving, selecting and copying still work.
+    pub fn set_read_only(&self, read_only: bool) {
+        self.imp().editor.borrow_mut().set_read_only(read_only);
+    }
+
     /// Replace the document and re-render every block.
     pub fn set_document(&self, doc: Document) {
         self.imp().set_document(doc);

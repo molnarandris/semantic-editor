@@ -427,6 +427,9 @@ impl Editor {
     /// the project as `images/<name>` (or a free name like it). The caret
     /// goes into the figure's empty caption.
     pub fn insert_picture(&mut self, name: &str, bytes: Vec<u8>) -> bool {
+        if self.read_only {
+            return false;
+        }
         self.finish_word();
         self.selected = None;
         // In a caption: after its figure (a caption is a figure's last block).

@@ -172,7 +172,9 @@ impl Window {
             let history = self.history.borrow();
             if let Some(history) = history.as_ref() {
                 let snapshot = file::snapshot(&self.editor.document());
-                if let Err(e) = history.commit(&snapshot, &author(), "Saved") {
+                let message = self.commit_message.take();
+                let message = message.as_deref().unwrap_or("Saved");
+                if let Err(e) = history.commit(&snapshot, &author(), message) {
                     self.toast(&format!("Saved without a new version: {e}"));
                 }
             }

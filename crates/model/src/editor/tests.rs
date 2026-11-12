@@ -1341,6 +1341,28 @@ fn picture_options() {
     assert_eq!(texts(&e), ["#figure[img(images/a.png;)|cap()]"]);
 }
 
+/// A read-only editor refuses every change; the caret still moves and
+/// selects.
+#[test]
+fn read_only() {
+    let mut e = Editor::default();
+    e.insert_text("ab $x/y$");
+    e.set_read_only(true);
+    let before = texts(&e);
+    e.insert_text("more");
+    e.backspace();
+    e.enter();
+    assert!(!e.undo());
+    assert!(!e.insert_picture("a.png", vec![1]));
+    assert!(!e.set_header("#set text(red)"));
+    e.paste(Fragment::Plain("pasted".into()));
+    assert_eq!(texts(&e), before);
+    assert!(e.doc().files.is_empty());
+    assert!(e.move_left());
+    e.set_read_only(false);
+    assert!(e.undo());
+}
+
 /// Insert Picture: a figure in place of an empty paragraph, the file in the
 /// project under a free name, the caret in the caption.
 #[test]

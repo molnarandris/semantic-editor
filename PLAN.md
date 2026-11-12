@@ -1419,3 +1419,20 @@ reported targets, so only those are still listed. On the paper: no problems left
   kept; the list is refreshed on load, save and naming.
 - A name is asked in a dialog with an entry; any text, kept as typed in the
   annotated tag (see step A).
+
+## History, step C: old versions read-only, and restoring them (2026-11-12)
+
+- `Editor::set_read_only`: `commit`, undo/redo and `insert_picture` refuse
+  every change; moving, selecting and copying work (`SemEditor::
+  set_read_only`, kept across `set_document`). Test `read_only`.
+- Clicking a version in the Versions tab opens it in a new window
+  (`window/old_version.rs`): `History::files_at` → `file::from_snapshot`,
+  read-only, the editing actions (save, open, insert, header) disabled, no
+  Versions switcher, title "<name> — Today, 14:03 (read-only)", an
+  `adw::Banner` "The version of …, read-only" with "Restore this Version".
+- Restore: unsaved changes of the current document are saved first (a
+  version), then the old content replaces the document and is saved as a
+  new version, "Restored the version of …" (`commit_message`); the
+  read-only window closes. Undo cannot take a restore back (the document is
+  replaced), but every earlier version stays in the history.
+- "Name Current Version…" in an old version's window names that version.
