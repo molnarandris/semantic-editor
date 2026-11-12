@@ -412,8 +412,10 @@ Titles decided 2026-11-08: optional, never added by default; positional
   none), used on headings, display formulas and environments; written `<label>` after
   the block as in Typst. Typing in the pill keeps only the chars Typst allows in a
   label (letters, digits, `-`, `_`, `.`, `:`); space, Enter or Esc leave
-  it (2026-11-12: ←/→ stay in it, and only a click enters it). The pill is drawn beside the page, right of the block's first line (a display
-  formula's line), in a monospace font so every char has its caret place. Numbering
+  it (2026-11-12: ←/→ stay in it, and only a click enters it). The pill is drawn
+  beside the page, right of the block's first line (a display formula's: centred
+  on the formula, at its number's height, 2026-11-12), in a monospace font so every
+  char has its caret place. Numbering
   stays Typst's: equations are numbered if the header numbers them (labelling does
   not number an equation by itself, which would need inventing formatting; a header
   can number only labelled equations with a show rule).

@@ -1192,3 +1192,13 @@ reported targets, so only those are still listed. On the paper: no problems left
 - `Editor::enter_label` does what the click does (the sample and tests use it).
 - Open: a keyboard way into the label (and the options tab), proposed to the
   user, not yet chosen.
+
+## Equation labels at the number's height (2026-11-12)
+
+- User: a display formula's label pill should sit where its number is, in the
+  middle of the formula, not on its first baseline. Typst centres the number
+  (`number-align: end + horizon`), so the pill is centred on the extent of the
+  formula's caret stops (`block_stops`, `label_stops(.., mid, ..)`). The stops
+  keep the first line's baseline for grouping into lines; the pill's text is
+  drawn from its bottom edge. Test in `label_pills` (a fraction: above the
+  baseline).

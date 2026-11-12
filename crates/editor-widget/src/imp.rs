@@ -1381,7 +1381,7 @@ impl SemEditor {
                     snapshot.save();
                     snapshot.translate(&graphene::Point::new(
                         (x0 + x * zoom) as f32,
-                        (y0 + first.line * zoom - baseline) as f32,
+                        (y0 + (first.bottom - caret::PILL_BELOW_PT) * zoom - baseline) as f32,
                     ));
                     snapshot.append_layout(&layout, &text);
                     snapshot.restore();

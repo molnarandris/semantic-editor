@@ -57,7 +57,7 @@ pub const PILL_FONT_PT: f64 = 7.5;
 pub const PILL_CHAR_PT: f64 = 4.6;
 /// Extent of the pill above and below the baseline of its line.
 const PILL_ABOVE_PT: f64 = 8.5;
-const PILL_BELOW_PT: f64 = 3.0;
+pub const PILL_BELOW_PT: f64 = 3.0;
 
 /// All caret positions of a block, in document order.
 pub fn stops(block: &BlockNode, layout: Option<&BlockLayout>) -> Vec<Stop> {
@@ -258,7 +258,16 @@ fn block_stops(block: &BlockNode, l: &BlockLayout, top: bool) -> Vec<Stop> {
     let Some(first) = out.first() else {
         return out;
     };
-    let label = label_stops(block, first.line, l.width);
+    // A formula's label is centred on it, like its number.
+    let mid = matches!(block.kind, Block::DisplayMath(_)).then(|| {
+        let top = out.iter().map(|s| s.top).fold(f64::INFINITY, f64::min);
+        let bottom = out
+            .iter()
+            .map(|s| s.bottom)
+            .fold(f64::NEG_INFINITY, f64::max);
+        (top + bottom) / 2.0
+    });
+    let label = label_stops(block, first.line, mid, l.width);
     // An environment's label comes before the position just after it.
     let at = match out.last() {
         Some(s) if s.edge && out.len() > 1 => out.len() - 1,
@@ -338,9 +347,12 @@ pub fn tab_hit<'a>(
     })?
 }
 
-/// The positions in the label pill of `block`, on the line at `line`.
-fn label_stops(block: &BlockNode, line: f64, width: f64) -> Vec<Stop> {
+/// The positions in the label pill of `block`, on the line at `line`:
+/// on its baseline, or centred at height `mid`. The pill's text sits
+/// [`PILL_BELOW_PT`] above its bottom.
+fn label_stops(block: &BlockNode, line: f64, mid: Option<f64>, width: f64) -> Vec<Stop> {
     let x0 = width + PILL_GAP_PT + PILL_PAD_PT;
+    let text = mid.map_or(line, |m| m + (PILL_ABOVE_PT - PILL_BELOW_PT) / 2.0);
     (0..=block.label.chars().count())
         .map(|k| Stop {
             label: true,
@@ -350,8 +362,8 @@ fn label_stops(block: &BlockNode, line: f64, width: f64) -> Vec<Stop> {
                 vec![Step::Label],
                 k,
                 x0 + k as f64 * PILL_CHAR_PT,
-                line - PILL_ABOVE_PT,
-                line + PILL_BELOW_PT,
+                text - PILL_ABOVE_PT,
+                text + PILL_BELOW_PT,
                 line,
             )
         })
@@ -976,6 +988,21 @@ mod tests {
         let lines = lines(&s);
         assert!(!line_edge(&s, &lines[0], true).unwrap().label);
         assert!(!nearest_in_line(&s, &lines[0], 400.0).unwrap().label);
+        // A formula's label is centred on it (as its number is), here above
+        // the baseline: a fraction reaches further up than down.
+        let mut e = model::Editor::new(Document::new());
+        e.insert_text("$$a/b");
+        into_label(&mut e, "eq");
+        let block = e.doc().blocks[0].clone();
+        let s = super::stops(&block, Some(&layout_of(&block, 300.0)));
+        let content: Vec<&Stop> = s.iter().filter(|s| !s.label).collect();
+        let top = content.iter().map(|s| s.top).fold(f64::INFINITY, f64::min);
+        let bottom = content.iter().map(|s| s.bottom).fold(0.0, f64::max);
+        let pill = s.iter().find(|s| s.label).unwrap();
+        let centre = (pill.top + pill.bottom) / 2.0;
+        assert!((centre - (top + bottom) / 2.0).abs() < 0.01, "{pill:?}");
+        assert!(pill.bottom < content[0].line, "{pill:?}");
+        assert_eq!(hit(&s, pill.x, centre).map(|s| s.label), Some(true));
         // A figure: its caption's text has stops, under the body.
         let mut e = model::Editor::new(Document::new());
         e.insert_text("#figure Body");
