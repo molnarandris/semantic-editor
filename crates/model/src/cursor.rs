@@ -353,10 +353,19 @@ impl Document {
     /// Every caret position of a block in reading order: the chars of each
     /// text, and in math rows each position between nodes, with the rows of
     /// a structure visited right after the position before it. A footnote's
-    /// text comes after the rest of its paragraph (it is shown under it).
+    /// text comes after the rest of the top-level block (it is shown under
+    /// it: under a theorem or list item as a whole, not its paragraph).
     /// ←/→ step through this list.
     pub fn positions(&self, block: &BlockNode) -> Vec<CursorPath> {
+        let (mut out, notes) = self.positions_and_notes(block);
+        out.extend(notes);
+        out
+    }
+
+    /// The positions of a block without its footnotes' text, and those.
+    fn positions_and_notes(&self, block: &BlockNode) -> (Vec<CursorPath>, Vec<CursorPath>) {
         let mut out = vec![];
+        let mut notes = vec![];
         let at = |path: Vec<Step>, offset| CursorPath {
             block: block.id,
             path,
@@ -398,17 +407,16 @@ impl Document {
                 }
             }
         }
-        let inline_positions = |inlines: &[InlineNode], out: &mut Vec<CursorPath>| {
-            let mut notes = vec![];
-            inline_positions(block.id, &[], inlines, out, &mut notes);
-            out.extend(notes);
-        };
+        let inline_positions =
+            |inlines: &[InlineNode], out: &mut Vec<CursorPath>, notes: &mut Vec<CursorPath>| {
+                inline_positions(block.id, &[], inlines, out, notes)
+            };
         match &block.kind {
             Block::Paragraph(inlines) | Block::Caption(inlines) => {
-                inline_positions(inlines, &mut out)
+                inline_positions(inlines, &mut out, &mut notes)
             }
             Block::Heading { inlines, .. } => {
-                inline_positions(inlines, &mut out);
+                inline_positions(inlines, &mut out, &mut notes);
             }
             Block::DisplayMath(row) => {
                 row_positions(block.id, vec![], row, &mut out);
@@ -423,20 +431,24 @@ impl Document {
             }
             Block::Env { title, body, .. } => {
                 out.push(at(vec![], 0));
-                inline_positions(title, &mut out);
+                inline_positions(title, &mut out, &mut notes);
                 for child in body {
-                    out.extend(self.positions(child));
+                    let (child_out, child_notes) = self.positions_and_notes(child);
+                    out.extend(child_out);
+                    notes.extend(child_notes);
                 }
                 out.push(at(vec![], 1));
             }
             Block::Item { term, body, .. } => {
-                inline_positions(term, &mut out);
+                inline_positions(term, &mut out, &mut notes);
                 for child in body {
-                    out.extend(self.positions(child));
+                    let (child_out, child_notes) = self.positions_and_notes(child);
+                    out.extend(child_out);
+                    notes.extend(child_notes);
                 }
             }
         }
-        out
+        (out, notes)
     }
 
     /// Labels for the status bar, e.g. paragraph › math › fraction › numerator.

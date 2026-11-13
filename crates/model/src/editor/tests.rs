@@ -1451,6 +1451,53 @@ fn footnotes_after_their_paragraph() {
     assert_eq!(at(&e), (vec![i(3), body, i(0)], 1));
 }
 
+/// In a theorem the footnote's text is shown under the whole theorem, so
+/// ←/→ reach it after the theorem's later blocks and its end, not right
+/// after the footnote's paragraph.
+#[test]
+fn footnotes_after_their_theorem() {
+    let mut d = Document::empty();
+    let a = d.text("a");
+    let n = d.text("n");
+    let note = InlineNode {
+        id: d.fresh_id(),
+        kind: Inline::Call {
+            name: "footnote".into(),
+            args: String::new(),
+            body: vec![n],
+        },
+    };
+    let p = d.paragraph(vec![a, note]);
+    let x = d.sym("x");
+    let eq = d.display(vec![x]);
+    d.blocks = vec![d.env("theorem", vec![p, eq])];
+    let e = Editor::new(d);
+    let env = &e.doc().blocks[0];
+    let body = env.kind.body().unwrap();
+    let (p, eq) = (body[0].id, body[1].id);
+    let got: Vec<_> = e
+        .doc()
+        .positions(env)
+        .iter()
+        .map(|c| (c.block, c.path.clone(), c.offset))
+        .collect();
+    let (i, b) = (Step::Index, Step::Body);
+    assert_eq!(
+        got,
+        [
+            (env.id, vec![], 0),
+            (p, vec![i(0)], 0),
+            (p, vec![i(0)], 1),
+            (p, vec![i(2)], 0),
+            (eq, vec![], 0),
+            (eq, vec![], 1),
+            (env.id, vec![], 1),
+            (p, vec![i(1), b, i(0)], 0),
+            (p, vec![i(1), b, i(0)], 1),
+        ]
+    );
+}
+
 /// Backspace at the start of an inline call's body marks the call (Esc
 /// cancels); the next one replaces it by its body, joined with the text
 /// around it.

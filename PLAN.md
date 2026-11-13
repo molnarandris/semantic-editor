@@ -1477,3 +1477,11 @@ reported targets, so only those are still listed. On the paper: no problems left
   escape the `#`), and the box ends with `;` (`#sem-code($#…$);`), so a
   following `(`, `[` or `.` is not read as part of it. Test
   `code_in_formula_renders_tight` (fails without the fix).
+
+## Footnote text after its theorem for ←/→ (2026-11-13)
+
+- User: in a theorem, ←/→ reached a footnote's text right after its
+  paragraph, before a later display equation, though it is shown under the
+  whole theorem (↑/↓ were right). `Document::positions` now collects the
+  footnotes of an environment's or list item's blocks and puts them after the
+  whole block, after its end edge. Test `footnotes_after_their_theorem`.

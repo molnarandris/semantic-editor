@@ -466,7 +466,8 @@ Titles decided 2026-11-08: optional, never added by default; positional
   text shows under its own paragraph (where Typst puts it on the block's page,
   measured), edited in place; the export puts it at the foot of the page as usual.
   ←/→ pass the footnote's marker in one step and reach its text after the rest of
-  the paragraph, where it is shown (user, 2026-11-12).
+  the paragraph, where it is shown (user, 2026-11-12); in a theorem or list item,
+  after the whole theorem or item, under which it is shown (user, 2026-11-13).
 - M16c decisions (2026-11-09): the bibliography is a block of its own
   (`Block::Bibliography`), its BibTeX (or Hayagriva YAML) source embedded and edited
   in the source dialog like a diagram ("Insert Bibliography"); written
