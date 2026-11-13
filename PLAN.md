@@ -1485,3 +1485,17 @@ reported targets, so only those are still listed. On the paper: no problems left
   whole theorem (↑/↓ were right). `Document::positions` now collects the
   footnotes of an environment's or list item's blocks and puts them after the
   whole block, after its end edge. Test `footnotes_after_their_theorem`.
+
+## Calls of the header's functions in formulas get their whole box (2026-11-13)
+
+- User: with `#let im(x) = $upright("im")(#x)$` in the header, after `im(x)`
+  the caret showed before the `)`; a display formula holding only it could
+  not be navigated. What the function draws (name, parentheses) carries the
+  header's spans, so the call's box covered only `x`. `im` is a predefined
+  operator in Typst, so it can only be called as the header's function.
+- Edit style: a call of anything that is not a Typst math function or
+  callable symbol is written `class("normal", #sem-code() im(x) #sem-code())`:
+  the empty boxes carry the call's span on both sides; `class` keeps it one
+  piece for scripts and in the formula's style (a box around the call made a
+  display fraction in its argument inline-sized; measured). Export unchanged.
+  Test `calls_of_header_functions_cover_their_drawing`.

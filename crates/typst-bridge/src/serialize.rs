@@ -867,6 +867,15 @@ impl Writer {
             MathKind::Call { name, opts, args } => {
                 // Inside the arguments a comma is written `comma`, so it
                 // cannot split them.
+                // A function of the document's own draws with the spans of
+                // its definition: in the editor, empty `sem-code` boxes on
+                // both sides carry the call's span, so its box covers all of
+                // it. `class` keeps it one piece (for scripts) in the
+                // formula's style (a box around it would not).
+                let wrap = w.style == Style::Edit && !crate::calls::in_math_library(name);
+                if wrap {
+                    w.out.push_str("class(\"normal\", #sem-code() ");
+                }
                 w.args += 1;
                 w.out.push_str(name);
                 w.out.push('(');
@@ -879,6 +888,9 @@ impl Writer {
                 }
                 w.out.push(')');
                 w.args -= 1;
+                if wrap {
+                    w.out.push_str(" #sem-code())");
+                }
             }
             MathKind::Diagram(src) if w.style == Style::Edit => {
                 w.out.push_str("#sem-code($#");

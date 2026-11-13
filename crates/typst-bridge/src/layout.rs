@@ -357,6 +357,67 @@ mod tests {
         assert_eq!(l.glyphs[0].chars, 0..1);
     }
 
+    /// A function of the header called in a formula: what its body draws
+    /// (here the name and the parentheses) carries the header's spans, yet
+    /// the call's box covers it, so the caret after the call is after it.
+    #[test]
+    fn calls_of_header_functions_cover_their_drawing() {
+        for display in [false, true] {
+            let mut d = Document::empty();
+            let x = d.ident("x");
+            let xid = x.id;
+            let arg = d.row(vec![x]);
+            let call = d.call("im", vec![arg]);
+            let cid = call.id;
+            let block = match display {
+                true => d.display(vec![call]),
+                false => {
+                    let m = d.math(vec![call]);
+                    d.paragraph(vec![m])
+                }
+            };
+            let (snippet, map) = serialize_block(&block);
+            let around = Around {
+                header: "#let im(x) = $upright(\"im\")(#x)$\n".into(),
+                ..Around::default()
+            };
+            let mut world = BridgeWorld::new();
+            let (src, offset) = block_document(&around, &snippet, 300.0);
+            let doc = compile(&mut world, &src).unwrap();
+            let l = raw_layout(&world, &doc.pages()[0], offset).resolve(&map);
+            let (c, x) = (l.box_of(cid).unwrap(), l.box_of(xid).unwrap());
+            assert!(c.x < x.x - 5.0, "the name is in the call: {c:?} {x:?}");
+            assert!(c.right() > x.right() + 2.0, "so is `)`: {c:?} {x:?}");
+        }
+        // The box keeps the formula's style: a fraction in the argument of
+        // a display formula's call is as tall as one outside it.
+        let height = |wrapped: bool| {
+            let mut d = Document::empty();
+            let (a, b) = (d.ident("a"), d.ident("b"));
+            let frac = d.frac(vec![a], vec![b]);
+            let fid = frac.id;
+            let node = match wrapped {
+                true => {
+                    let arg = d.row(vec![frac]);
+                    d.call("g", vec![arg])
+                }
+                false => frac,
+            };
+            let block = d.display(vec![node]);
+            let (snippet, map) = serialize_block(&block);
+            let around = Around {
+                header: "#let g(x) = x\n".into(),
+                ..Around::default()
+            };
+            let mut world = BridgeWorld::new();
+            let (src, offset) = block_document(&around, &snippet, 300.0);
+            let doc = compile(&mut world, &src).unwrap();
+            let l = raw_layout(&world, &doc.pages()[0], offset).resolve(&map);
+            l.box_of(fid).unwrap().h
+        };
+        assert!((height(true) - height(false)).abs() < 0.01);
+    }
+
     #[test]
     fn math_nodes_get_nested_boxes() {
         let mut d = Document::empty();

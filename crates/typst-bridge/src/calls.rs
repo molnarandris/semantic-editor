@@ -54,6 +54,17 @@ pub fn call_shape(sources: &[&str], name: &str) -> Option<CallShape> {
     }
 }
 
+/// Whether `name` is one of Typst's own math functions or callable symbols
+/// (`sqrt`, `hat`), whose drawing carries the call's spans. Not `im`, a
+/// predefined operator that a header can redefine as a function.
+pub(crate) fn in_math_library(name: &str) -> bool {
+    match LIBRARY.math.scope().get(name).map(|b| b.read()) {
+        Some(Value::Func(_)) => true,
+        Some(Value::Symbol(symbol)) => symbol.func().is_ok(),
+        _ => false,
+    }
+}
+
 /// The shape of `name` called in math: a function defined by `sources`,
 /// else one of Typst's math functions (`sqrt`, `cal`, `root`, `cases`) or
 /// a symbol that can be called (`hat`, `floor`). One slot per positional
