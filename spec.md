@@ -678,6 +678,38 @@ version, and comparing versions later. Decisions (user, 2026-11-12):
 - Steps: A history and a commit per save; B the Versions tab and tags; C opening and
   restoring old versions; D scratch files.
 
+### Remarks, chat, suggestions, comparing versions (user request, 2026-11-13)
+
+The user wants to discuss the paper with Claude in a sidebar (ask about a
+selection), remarks kept apart from the text instead of the inline `#audit[…]`,
+suggested changes, and later comparing versions like latexdiff. Decisions (user,
+2026-11-13): order R → C → S → D below; sharing remarks with coauthors comes later
+(no export of remarks yet); only the user's own subscription can be used, no API key.
+
+- **R — Anchored remarks.** Blocks get ids that are saved (today ids are
+  regenerated on load). A remark points at a block (a theorem, an equation) or a
+  range in it; the range moves with edits like the caret; if its text goes, the
+  remark falls back to the whole block, never lost. A right sidebar, tab Remarks:
+  cards next to what they point at, highlighted in the text, click jumps either
+  way; author, replies, Resolve. Stored in the `.sem` beside the document (committed
+  with it), not in the Typst text: the export stays clean. A one-time program
+  converts the `#audit[…]` calls of the user's only document into remarks.
+- **C — Chat.** Tab Chat in the right sidebar. Through the user's logged-in Claude
+  Code, as the Obsidian plugin Claudian does: the app runs `claude -p` with JSON
+  streaming output (outside the Flatpak sandbox via `flatpak-spawn --host`; a
+  permission in the Devel manifest), the paper's `.typ` export as context, a
+  selection quoted as Typst source with where it is ("Theorem 3.2"). Claude writes
+  math in Typst syntax, rendered by the editor. The conversation is kept in the
+  `.sem`, not versioned (like scratch files). Claude gets no tools to change files.
+- **S — Suggestions.** A range and its proposed replacement, kept outside the text
+  (no Word-like suggesting mode for now); the card shows old and new, Accept (an
+  ordinary edit, undoable) and Reject. Formulas are compared whole at first. Chat v2:
+  Claude leaves remarks and suggestions as cards.
+- **D — Comparing versions.** Two versions from the Versions tab, shown read-only
+  with insertions and deletions marked: blocks matched by their saved ids, text word
+  by word, formulas whole; a diff PDF (latexdiff). Differences can be turned into
+  suggestions to accept or reject one by one.
+
 ### Later
 
 - Project files: images, `#include`, local imports, bibliography files.
