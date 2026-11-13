@@ -1543,3 +1543,17 @@ reported targets, so only those are still listed. On the paper: no problems left
   longer resolves is on its block; a detached remark's block id is reserved
   (`Document::reserve_id`) so no new block takes it. Old versions open with
   their remarks. Test `remarks_roundtrip`.
+
+## R2c — Adding remarks and seeing them (2026-11-13)
+
+- *Add Remark…* (menu, Ctrl+Alt+M): a dialog with a text field; the remark
+  goes on the selection, or on the top-level block the caret is in; author
+  as for versions, today's date. `SemEditor::add_remark`.
+- Drawn under the text whether focused or not: a range shaded yellow (the
+  selection's line rectangles, `range_rects`, now shared); a block remark as
+  a yellow bar in the paper's left margin, the block's height (a nested
+  block: its caret positions' lines, `block_extent`). Resolved and detached
+  remarks are not drawn. Pointing at a shading or bar shows author, date and
+  text as a tooltip, until the sidebar (R3).
+- Remarks count for unsaved changes (`saved_state`). README: feature and key.
+- Drawing is unchecked by tests (widget only): awaiting the user's test.

@@ -160,10 +160,7 @@ impl Window {
 
     async fn write(self: &Rc<Self>, file: gio::File) -> bool {
         self.apply_block_edit();
-        let saved = {
-            let doc = self.editor.document();
-            (doc.header.clone(), doc.blocks.clone(), doc.files.clone())
-        };
+        let saved = super::saved_state(&self.editor.document());
         // Every save that changes something is a version.
         if self.history.borrow().is_none() {
             *self.history.borrow_mut() = History::new().ok();

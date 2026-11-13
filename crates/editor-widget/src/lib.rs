@@ -134,6 +134,21 @@ impl SemEditor {
         self.imp().outline_entry(id)
     }
 
+    /// Add a remark about the selection, or the top-level block the caret
+    /// is in (see [`model::Editor::add_remark`]). `false` if read-only.
+    pub fn add_remark(&self, text: &str, author: &str, date: &str) -> bool {
+        let added = self
+            .imp()
+            .editor
+            .borrow_mut()
+            .add_remark(text, author, date)
+            .is_some();
+        if added {
+            self.imp().after_command(false);
+        }
+        added
+    }
+
     /// Select the structure a breadcrumb entry stands for.
     pub fn select_crumb(&self, crumb: &Crumb) {
         self.imp().select_crumb(crumb.path_len);

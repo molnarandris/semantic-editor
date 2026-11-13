@@ -340,6 +340,7 @@ impl WidgetImpl for SemEditor {
         );
         snapshot.append_color(&gdk::RGBA::WHITE, &paper);
         self.snapshot_ref_marks(snapshot, x0, scroll);
+        self.snapshot_remarks(snapshot, x0, scroll);
         if obj.has_focus() {
             self.snapshot_env_outline(snapshot, x0, scroll);
             self.snapshot_call_outline(snapshot, x0, scroll);
@@ -527,6 +528,16 @@ impl SemEditor {
             }
         });
         obj.add_controller(focus);
+
+        // A remark's text when the pointer is on its shading or bar.
+        obj.set_has_tooltip(true);
+        obj.connect_query_tooltip(|obj, x, y, _keyboard, tooltip| {
+            let Some(text) = obj.imp().remark_at(x as f64, y as f64) else {
+                return false;
+            };
+            tooltip.set_text(Some(&text));
+            true
+        });
 
         let click = gtk::GestureClick::new();
         click.set_button(gdk::BUTTON_PRIMARY);
@@ -976,25 +987,150 @@ impl SemEditor {
         let Some((first, last)) = ed.selection_bounds() else {
             return;
         };
-        let Some(index) = ed.doc().top_index(first.block) else {
-            return;
-        };
         drop(ed);
-        let Some(&top) = tops.get(index) else {
-            return;
+        for rect in self.range_rects(&first, &last, x0, scroll) {
+            snapshot.append_color(&color, &rect);
+        }
+    }
+
+    /// Open remarks, under the text: a range is shaded yellow; a whole
+    /// block gets a yellow bar in the paper's left margin.
+    fn snapshot_remarks(&self, snapshot: &gtk::Snapshot, x0: f64, scroll: f64) {
+        let zoom = self.zoom.get();
+        let shade = gdk::RGBA::new(1.0, 0.82, 0.15, 0.35);
+        let bar = gdk::RGBA::new(0.95, 0.7, 0.0, 0.9);
+        let (ranges, blocks) = {
+            let ed = self.editor.borrow();
+            let doc = ed.doc();
+            let open = doc.remarks.iter().filter(|r| !r.resolved);
+            let mut ranges = vec![];
+            let mut blocks = vec![];
+            for remark in open {
+                match (remark.anchor, doc.remark_range(remark)) {
+                    (_, Some(range)) => ranges.push(range),
+                    (model::Anchor::Block(id), None) => blocks.push(id),
+                    // A range that does not resolve (detached): not shown.
+                    (model::Anchor::Range { .. }, None) => {}
+                }
+            }
+            (ranges, blocks)
+        };
+        for (first, last) in &ranges {
+            for rect in self.range_rects(first, last, x0, scroll) {
+                snapshot.append_color(&shade, &rect);
+            }
+        }
+        for id in blocks {
+            let Some((y, h)) = self.block_extent(id) else {
+                continue;
+            };
+            let rect = graphene::Rect::new(
+                (x0 - PAPER_PAD_PT * zoom / 2.0 - 1.5) as f32,
+                (y - scroll) as f32,
+                3.0,
+                h as f32,
+            );
+            snapshot.append_color(&bar, &rect);
+        }
+    }
+
+    /// The open remarks drawn at widget point `(x, y)` (on a shaded range
+    /// or a block's bar): author, date and text of each.
+    fn remark_at(&self, x: f64, y: f64) -> Option<String> {
+        let zoom = self.zoom.get();
+        let scroll = self.scroll();
+        let x0 = self.page_x(self.obj().width() as f64);
+        let remarks: Vec<model::Remark> = {
+            let ed = self.editor.borrow();
+            ed.doc()
+                .remarks
+                .iter()
+                .filter(|r| !r.resolved)
+                .cloned()
+                .collect()
+        };
+        let mut found = vec![];
+        for remark in &remarks {
+            let range = self.editor.borrow().doc().remark_range(remark);
+            let hit = match (remark.anchor, range) {
+                (_, Some((first, last))) => self
+                    .range_rects(&first, &last, x0, scroll)
+                    .iter()
+                    .any(|r| r.contains_point(&graphene::Point::new(x as f32, y as f32))),
+                (model::Anchor::Block(id), None) => {
+                    let bar = x0 - PAPER_PAD_PT * zoom / 2.0;
+                    (x - bar).abs() <= 6.0
+                        && self
+                            .block_extent(id)
+                            .is_some_and(|(top, h)| (top - scroll..=top - scroll + h).contains(&y))
+                }
+                _ => false,
+            };
+            if hit {
+                found.push(format!(
+                    "{} ({}): {}",
+                    remark.author, remark.date, remark.text
+                ));
+            }
+        }
+        (!found.is_empty()).then(|| found.join("\n\n"))
+    }
+
+    /// Where block `id` (at any depth) is: its top in content coordinates
+    /// and its height, in widget pixels. A nested block spans its caret
+    /// positions' lines.
+    fn block_extent(&self, id: NodeId) -> Option<(f64, f64)> {
+        let zoom = self.zoom.get();
+        let (index, top_level) = {
+            let ed = self.editor.borrow();
+            let doc = ed.doc();
+            let index = doc.top_index(id)?;
+            (index, doc.blocks[index].id == id)
+        };
+        let top = *self.block_tops().get(index)?;
+        if top_level {
+            let height = self.views.borrow().get(index)?.height_pt();
+            return Some((top, height * zoom));
+        }
+        let stops = self.block_stops(index);
+        let ed = self.editor.borrow();
+        let block = ed.doc().block(id)?;
+        let inside = stops.iter().filter(|s| block.contains(s.cursor.block));
+        let (y0, y1) = inside.fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), s| {
+            (a.min(s.top), b.max(s.bottom))
+        });
+        (y0 < y1).then_some((top + y0 * zoom, (y1 - y0) * zoom))
+    }
+
+    /// The rectangles, line by line, covering every caret position from
+    /// `first` to `last` (in one block), in widget coordinates.
+    fn range_rects(
+        &self,
+        first: &CursorPath,
+        last: &CursorPath,
+        x0: f64,
+        scroll: f64,
+    ) -> Vec<graphene::Rect> {
+        let zoom = self.zoom.get();
+        let Some(index) = self.editor.borrow().doc().top_index(first.block) else {
+            return vec![];
+        };
+        let Some(&top) = self.block_tops().get(index) else {
+            return vec![];
         };
         let stops = self.block_stops(index);
         let (Some(a), Some(b)) = (
-            stops.iter().position(|s| s.cursor == first),
-            stops.iter().position(|s| s.cursor == last),
+            stops.iter().position(|s| s.cursor == *first),
+            stops.iter().position(|s| s.cursor == *last),
         ) else {
-            return;
+            return vec![];
         };
         let inside: Vec<Stop> = stops[a.min(b)..=a.max(b)]
             .iter()
             .filter(|s| !s.tab && !s.label)
             .cloned()
             .collect();
+        let mut rects = vec![];
         for line in caret::lines(&inside) {
             let x_min = line
                 .iter()
@@ -1012,14 +1148,14 @@ impl SemEditor {
                 .iter()
                 .map(|&i| inside[i].bottom)
                 .fold(f64::NEG_INFINITY, f64::max);
-            let rect = graphene::Rect::new(
+            rects.push(graphene::Rect::new(
                 (x0 + x_min * zoom) as f32,
                 (top - scroll + y_min * zoom) as f32,
                 ((x_max - x_min) * zoom).max(1.0) as f32,
                 ((y_max - y_min) * zoom) as f32,
-            );
-            snapshot.append_color(&color, &rect);
+            ));
         }
+        rects
     }
 
     /// The math call with an options tab that the caret is in: its block's

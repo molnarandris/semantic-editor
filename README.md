@@ -80,6 +80,10 @@ and their own file formats. This editor tries to give you both:
 - Selection with Shift and the arrow keys, Shift+click or dragging. Copy, cut and paste
   use Typst source, so text from any `.typ` file can be pasted.
 - Undo and redo of everything. Zoom with Ctrl+plus and Ctrl+minus.
+- **Remarks** (Ctrl+Alt+M): a note on the selected text, or on the whole block the caret
+  is in (a theorem). They are kept beside the text, not in it: the selected text is
+  shaded yellow, a remarked block gets a yellow bar in the margin, and pointing at
+  either shows the remark. Remarks follow the text as you edit it.
 
 ### Files
 
@@ -115,6 +119,7 @@ and their own file formats. This editor tries to give you both:
 | Ctrl+Enter or double click | edit a diagram's or raw block's source |
 | Ctrl+click, Alt+← | follow a reference, go back |
 | F8, Shift+F8 | next or previous problem |
+| Ctrl+Alt+M | add a remark on the selection or the block |
 | Ctrl+Z, Ctrl+Shift+Z | undo, redo |
 | Ctrl+C, Ctrl+X, Ctrl+V | copy, cut, paste (as Typst) |
 | Ctrl+S, Ctrl+O, Ctrl+E | save, open, export PDF |

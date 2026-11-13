@@ -74,6 +74,7 @@ fn setup_actions(app: &adw::Application) {
         ("win.export-pdf", &["<Control>e"]),
         ("win.export-typ", &["<Control><Shift>e"]),
         ("win.insert-diagram", &["<Control><Shift>d"]),
+        ("win.add-remark", &["<Control><Alt>m"]),
         ("win.next-problem", &["F8"]),
         ("win.previous-problem", &["<Shift>F8"]),
         ("window.close", &["<Control>w"]),

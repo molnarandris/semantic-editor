@@ -16,7 +16,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 use editor_widget::{PreviewTarget, SemEditor};
 use gtk::{gio, glib};
-use model::{BlockNode, Document, Files, NewBlock};
+use model::{BlockNode, Document, Files, NewBlock, Remark};
 
 use crate::history::History;
 use crate::sample;
@@ -53,7 +53,7 @@ pub struct Window {
     imported: RefCell<Option<String>>,
     /// Header, blocks and files as last saved or loaded, to tell if there are
     /// changes.
-    saved: RefCell<(String, Vec<BlockNode>, Files)>,
+    saved: RefCell<(String, Vec<BlockNode>, Files, Vec<Remark>)>,
     /// The document's version history (`None` if it could not be set up:
     /// saving then works without one).
     history: RefCell<Option<History>>,
@@ -281,7 +281,7 @@ impl Window {
 
     fn add_actions(self: &Rc<Self>) {
         type Handler = fn(Rc<Window>);
-        let actions: [(&str, Handler); 20] = [
+        let actions: [(&str, Handler); 21] = [
             ("insert-env", |w| {
                 w.editor.start_env();
                 w.editor.grab_focus();
@@ -321,6 +321,7 @@ impl Window {
                     }
                 })
             }),
+            ("add-remark", |w| spawn(async move { w.add_remark().await })),
             ("name-version", |w| {
                 spawn(async move { w.name_version(None).await })
             }),
@@ -370,7 +371,7 @@ impl Window {
     /// Show `doc` (from `file`, with its `history`; a new history if none).
     fn set_document(&self, doc: Document, file: Option<gio::File>, history: Option<History>) {
         *self.history.borrow_mut() = history.or_else(|| History::new().ok());
-        *self.saved.borrow_mut() = (doc.header.clone(), doc.blocks.clone(), doc.files.clone());
+        *self.saved.borrow_mut() = saved_state(&doc);
         *self.file.borrow_mut() = file;
         *self.imported.borrow_mut() = None;
         // Emits caret-moved, which updates the title and status bar.
@@ -444,6 +445,50 @@ impl Window {
         self.update_versions();
     }
 
+    /// Ask for a remark and put it on the selection, or on the block the
+    /// caret is in.
+    async fn add_remark(self: Rc<Self>) {
+        let text = gtk::TextView::builder()
+            .wrap_mode(gtk::WrapMode::WordChar)
+            .top_margin(6)
+            .bottom_margin(6)
+            .left_margin(6)
+            .right_margin(6)
+            .build();
+        let scrolled = gtk::ScrolledWindow::builder()
+            .child(&text)
+            .min_content_height(100)
+            .min_content_width(320)
+            .has_frame(true)
+            .build();
+        let dialog = adw::AlertDialog::new(
+            Some("Add Remark"),
+            Some("On the selected text, or on the block the caret is in."),
+        );
+        dialog.set_extra_child(Some(&scrolled));
+        dialog.add_responses(&[("cancel", "_Cancel"), ("add", "_Add")]);
+        dialog.set_response_appearance("add", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("add"));
+        dialog.set_close_response("cancel");
+        text.grab_focus();
+        let answer = dialog.choose_future(Some(&self.window)).await;
+        let buffer = text.buffer();
+        let remark = buffer
+            .text(&buffer.start_iter(), &buffer.end_iter(), false)
+            .trim()
+            .to_string();
+        if answer == "add" && !remark.is_empty() {
+            let date = gtk::glib::DateTime::now_local()
+                .and_then(|d| d.format("%Y-%m-%d"))
+                .map(|d| d.to_string())
+                .unwrap_or_default();
+            if !self.editor.add_remark(&remark, &files::author(), &date) {
+                self.toast("Remarks cannot be added to an old version");
+            }
+        }
+        self.editor.grab_focus();
+    }
+
     /// Ask for a version's name ("arXiv submission").
     async fn ask_version_name(&self) -> Option<String> {
         let entry = gtk::Entry::builder()
@@ -468,7 +513,10 @@ impl Window {
         }
         let doc = self.editor.document();
         let saved = self.saved.borrow();
-        doc.header != saved.0 || doc.blocks != saved.1 || doc.files != saved.2
+        doc.header != saved.0
+            || doc.blocks != saved.1
+            || doc.files != saved.2
+            || doc.remarks != saved.3
     }
 
     /// File name without extension, for titles and export names.
@@ -530,6 +578,16 @@ impl Window {
     }
 }
 
+/// What a save stores, to tell unsaved changes.
+fn saved_state(doc: &Document) -> (String, Vec<BlockNode>, Files, Vec<Remark>) {
+    (
+        doc.header.clone(),
+        doc.blocks.clone(),
+        doc.files.clone(),
+        doc.remarks.clone(),
+    )
+}
+
 /// An empty document with the default header.
 fn new_document() -> Document {
     let mut doc = Document::new();
@@ -570,6 +628,9 @@ fn main_menu() -> gio::Menu {
         Some("win.insert-bibliography"),
     );
     menu.append_section(None, &insert);
+    let remarks = gio::Menu::new();
+    remarks.append(Some("Add _Remark…"), Some("win.add-remark"));
+    menu.append_section(None, &remarks);
     let other = gio::Menu::new();
     other.append(Some("Open S_ample Document"), Some("win.open-sample"));
     menu.append_section(None, &other);
