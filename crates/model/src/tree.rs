@@ -931,6 +931,11 @@ impl Document {
         }
     }
 
+    /// Never hand out `id` (a deleted block a detached remark points at).
+    pub fn reserve_id(&mut self, id: NodeId) {
+        self.next_id = self.next_id.max(id.0 + 1);
+    }
+
     pub fn fresh_id(&mut self) -> NodeId {
         let id = NodeId(self.next_id);
         self.next_id += 1;

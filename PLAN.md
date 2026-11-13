@@ -1533,3 +1533,13 @@ reported targets, so only those are still listed. On the paper: no problems left
 - Known: joining two paragraphs (Backspace at the start of the second) moves
   the second's text into the first's text inline, so a range on it is lost:
   the remark is detached until undo.
+
+## R2b — Remarks saved in the `.sem` (2026-11-13)
+
+- `remarks.json` beside `document.json` (only when there are remarks), part
+  of the snapshot, so every save that changes a remark is a version. Each
+  remark: id, block id, a range's ends as path + offset from the block (inner
+  ids are not saved), text, author, date, resolved. On load a range that no
+  longer resolves is on its block; a detached remark's block id is reserved
+  (`Document::reserve_id`) so no new block takes it. Old versions open with
+  their remarks. Test `remarks_roundtrip`.

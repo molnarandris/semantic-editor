@@ -1,6 +1,7 @@
 //! `.sem` files: a zip of the project. `document.json` holds a format
 //! version, the Typst version the document was written with, the header
 //! and the blocks (with their ids; other nodes' ids are regenerated on load);
+//! `remarks.json` the remarks (if any, see [`remarks_to_json`]);
 //! `main.typ` is the document as Typst, written on every save so the
 //! unzipped folder compiles as is (not read back); every other entry is a
 //! project file at its path (`images/chain.png`), except the version
@@ -21,6 +22,101 @@ pub const FORMAT_VERSION: u32 = 1;
 /// The entries of a project zip that are not project files.
 const DOCUMENT: &str = "document.json";
 const MAIN: &str = "main.typ";
+const REMARKS: &str = "remarks.json";
+
+/// A remark in `remarks.json`: on block `block`, or on the range between
+/// two caret positions in it (paths from the block; the inner nodes' ids
+/// are not saved).
+#[derive(Serialize, Deserialize)]
+struct RemarkFile {
+    id: u64,
+    block: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    start: Option<PointFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    end: Option<PointFile>,
+    text: String,
+    author: String,
+    date: String,
+    #[serde(default)]
+    resolved: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PointFile {
+    path: Vec<model::Step>,
+    offset: usize,
+}
+
+/// `remarks.json` for a document, `None` without remarks.
+pub fn remarks_to_json(doc: &Document) -> Option<String> {
+    if doc.remarks.is_empty() {
+        return None;
+    }
+    let point = |c: model::CursorPath| PointFile {
+        path: c.path,
+        offset: c.offset,
+    };
+    let remarks: Vec<RemarkFile> = doc
+        .remarks
+        .iter()
+        .map(|r| {
+            let range = doc.remark_range(r);
+            let (start, end) = match range {
+                Some((a, b)) => (Some(point(a)), Some(point(b))),
+                None => (None, None),
+            };
+            RemarkFile {
+                id: r.id,
+                block: r.anchor.block().0,
+                start,
+                end,
+                text: r.text.clone(),
+                author: r.author.clone(),
+                date: r.date.clone(),
+                resolved: r.resolved,
+            }
+        })
+        .collect();
+    let mut out = serde_json::to_string_pretty(&remarks).expect("remarks always serialize");
+    out.push('\n');
+    Some(out)
+}
+
+/// Read `remarks.json` into a loaded document. A range that no longer
+/// resolves is on its block.
+pub fn remarks_from_json(doc: &mut Document, text: &str) -> Result<(), String> {
+    let remarks: Vec<RemarkFile> =
+        serde_json::from_str(text).map_err(|e| format!("not valid remarks: {e}"))?;
+    for r in remarks {
+        let block = model::NodeId(r.block);
+        doc.reserve_id(block);
+        let point = |p: &PointFile| {
+            doc.point_at(&model::CursorPath {
+                block,
+                path: p.path.clone(),
+                offset: p.offset,
+            })
+        };
+        let range = match (&r.start, &r.end) {
+            (Some(a), Some(b)) => point(a).zip(point(b)),
+            _ => None,
+        };
+        let anchor = match range {
+            Some((start, end)) => model::Anchor::Range { block, start, end },
+            None => model::Anchor::Block(block),
+        };
+        doc.remarks.push(model::Remark {
+            id: r.id,
+            anchor,
+            text: r.text,
+            author: r.author,
+            date: r.date,
+            resolved: r.resolved,
+        });
+    }
+    Ok(())
+}
 
 #[derive(Serialize)]
 struct SemFileOut<'a> {
@@ -122,10 +218,11 @@ pub fn safe_path(path: &str) -> bool {
             .all(|part| part != ".." && part != "." && !part.is_empty())
 }
 
-/// What a version of the document holds: `document.json` and its Typst
-/// project.
+/// What a version of the document holds: `document.json`, its remarks (if
+/// any) and its Typst project.
 pub fn snapshot(doc: &Document) -> Vec<(String, Vec<u8>)> {
     std::iter::once((DOCUMENT.to_string(), to_json(doc).into_bytes()))
+        .chain(remarks_to_json(doc).map(|r| (REMARKS.to_string(), r.into_bytes())))
         .chain(typst_project(doc))
         .collect()
 }
@@ -166,11 +263,12 @@ pub fn to_zip(doc: &Document, history: Option<&History>) -> Result<Vec<u8>, Stri
 
 /// The document of a version's files (a [`snapshot`]).
 pub fn from_snapshot(entries: Vec<(String, Vec<u8>)>) -> Result<Document, String> {
-    let mut json = None;
+    let (mut json, mut remarks) = (None, None);
     let mut files = model::Files::default();
     for (path, bytes) in entries {
         match path.as_str() {
             DOCUMENT => json = Some(bytes),
+            REMARKS => remarks = Some(bytes),
             MAIN => {}
             _ if safe_path(&path) => files.insert(path, bytes),
             _ => {}
@@ -179,8 +277,18 @@ pub fn from_snapshot(entries: Vec<(String, Vec<u8>)>) -> Result<Document, String
     let json = json.ok_or("the version has no document.json")?;
     let text = std::str::from_utf8(&json).map_err(|_| "document.json is not UTF-8")?;
     let mut doc = from_json(text)?;
+    read_remarks(&mut doc, remarks)?;
     doc.files = files;
     Ok(doc)
+}
+
+/// The remarks of `remarks.json` (if there is one) into `doc`.
+fn read_remarks(doc: &mut Document, bytes: Option<Vec<u8>>) -> Result<(), String> {
+    let Some(bytes) = bytes else {
+        return Ok(());
+    };
+    let text = std::str::from_utf8(&bytes).map_err(|_| "remarks.json is not UTF-8")?;
+    remarks_from_json(doc, text)
 }
 
 /// Read a project zip: its document with its files, and its history (an
@@ -196,13 +304,14 @@ pub fn from_zip(bytes: &[u8]) -> Result<(Document, History), String> {
         entry.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
         Ok((name, bytes))
     };
-    let mut json = None;
+    let (mut json, mut remarks) = (None, None);
     let mut files = model::Files::default();
     let mut git = vec![];
     for i in 0..count {
         let (name, bytes) = read(i)?;
         match name.as_str() {
             DOCUMENT => json = Some(bytes),
+            REMARKS => remarks = Some(bytes),
             MAIN => {}
             _ if name.ends_with('/') => {}
             _ if !safe_path(&name) => return Err(format!("not a valid .sem file: entry {name}")),
@@ -215,6 +324,7 @@ pub fn from_zip(bytes: &[u8]) -> Result<(Document, History), String> {
     let json = json.ok_or("not a valid .sem file: no document.json")?;
     let text = std::str::from_utf8(&json).map_err(|_| "document.json is not UTF-8")?;
     let mut doc = from_json(text)?;
+    read_remarks(&mut doc, remarks)?;
     doc.files = files;
     let history = match git.is_empty() {
         true => History::new()?,
@@ -405,5 +515,54 @@ mod tests {
         let doc = from_json(r#"{"version": 1, "typst": "0.15.1", "blocks": []}"#).unwrap();
         assert_eq!(doc.blocks.len(), 1);
         assert_eq!(doc.header, "");
+    }
+
+    /// Remarks are saved beside the document: a range keeps its text, a
+    /// remark on a deleted block stays detached and its id is not reused.
+    #[test]
+    fn remarks_roundtrip() {
+        let mut doc = sample::document();
+        assert!(!snapshot(&doc).iter().any(|(p, _)| p == REMARKS));
+        let (para, text) = doc
+            .leaves()
+            .iter()
+            .find_map(|b| match b.kind.inlines()?.first()?.kind {
+                model::Inline::Text(ref t) if t.chars().count() > 5 => Some((b.id, t.clone())),
+                _ => None,
+            })
+            .unwrap();
+        let at = |offset| model::CursorPath {
+            block: para,
+            path: vec![model::Step::Index(0)],
+            offset,
+        };
+        let (start, end) = (doc.point_at(&at(1)).unwrap(), doc.point_at(&at(4)).unwrap());
+        let range = model::Anchor::Range {
+            block: para,
+            start,
+            end,
+        };
+        doc.add_remark(range, "Range.", "A", "2026-11-13");
+        let block = doc.blocks[3].id;
+        doc.add_remark(model::Anchor::Block(block), "Block.", "A", "2026-11-13");
+        let gone = model::NodeId(10_000);
+        doc.add_remark(model::Anchor::Block(gone), "Detached.", "A", "2026-11-13");
+        let zip = to_zip(&doc, None).unwrap();
+        let (mut back, _) = from_zip(&zip).unwrap();
+        assert_eq!(back.remarks.len(), 3);
+        let (a, b) = back.remark_range(&back.remarks[0]).unwrap();
+        assert_eq!((a.block, a.offset, b.offset), (para, 1, 4));
+        assert_eq!(&text[1..4], {
+            let t = back.block(para).unwrap().kind.inlines().unwrap()[0].clone();
+            match t.kind {
+                model::Inline::Text(t) => t[1..4].to_string(),
+                _ => unreachable!(),
+            }
+        });
+        assert_eq!(back.remarks[1].anchor, model::Anchor::Block(block));
+        assert_eq!(back.remarks[1].text, "Block.");
+        assert_eq!(back.remarks[2].anchor, model::Anchor::Block(gone));
+        assert!(back.fresh_id() > gone);
+        back.check_invariants().unwrap();
     }
 }
