@@ -1002,7 +1002,7 @@ reported targets, so only those are still listed. On the paper: no problems left
   it shows, else is held for the next atom typed (`held_space`, as in prose); it
   also keeps `|` `-` from combining into ⊢. Backspace/Delete take a shown space
   first; Backspace right after a held space forgets it.
-- Code atoms (`#…`) are boxes too, but their spacing is left as before.
+- Code atoms (`#…`) are boxes too; see "Code next to a space" (2026-11-13).
 - Check: paper import 46 → 30 raw blocks, 55 pages render identical.
 
 ## Restated blocks (2026-11-10)
@@ -1466,3 +1466,14 @@ reported targets, so only those are still listed. On the paper: no problems left
   before and after the formula, the text's stops sit at its first and last
   stop (after it: where it ends on the last line). Test
   `wrapped_inline_formula`.
+
+## Code next to a space in a formula (2026-11-13)
+
+- User: in the PEPS definition, `$e = #sym.brace.l h, overline(h) #sym.brace.r$`
+  showed as `{ h, h̄ }` in the editor, tight `{h, h̄}` in Typst. The editor lays
+  code out as a `sem-code` box, and the edit style wrote a space on both
+  sides; a space next to a box shows (measured). The export was right.
+- Edit style: no space next to a code atom (only after `\`, which would
+  escape the `#`), and the box ends with `;` (`#sem-code($#…$);`), so a
+  following `(`, `[` or `.` is not read as part of it. Test
+  `code_in_formula_renders_tight` (fails without the fix).

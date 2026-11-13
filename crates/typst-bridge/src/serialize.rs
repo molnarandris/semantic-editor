@@ -785,6 +785,13 @@ impl Writer {
         {
             return b.space;
         }
+        // In the editor code is a box, and a space next to a box shows
+        // (measured: `#sym.brace.l h` got a gap). Its `;` ends it, so
+        // nothing after can continue it; before it only `\` would clash.
+        let code = |n: &MathNode| matches!(n.kind, MathKind::Code(_));
+        if self.style == Style::Edit && (code(a) || code(b)) {
+            return a.kind == MathKind::Linebreak;
+        }
         // After code, a `;` or `,` would be read as part of it; after `\`
         // they would be escaped.
         if self.style == Style::Edit || a.source().is_some() || a.kind == MathKind::Linebreak {
@@ -843,7 +850,7 @@ impl Writer {
             MathKind::Code(src) if w.style == Style::Edit => {
                 w.out.push_str("#sem-code($#");
                 w.out.push_str(src);
-                w.out.push_str("$)");
+                w.out.push_str("$);");
             }
             MathKind::Code(src) => {
                 w.out.push('#');
@@ -2101,6 +2108,32 @@ mod inline_call_tests {
             assert!(
                 render(&edit) == render(&read),
                 "renders differ for {keys:?}:\n  edit:     {edit}\n  readable: {read}"
+            );
+        }
+    }
+
+    /// Code in a formula is a box in the editor; no space may show next
+    /// to it (the PEPS definition's `#sym.brace.l h` had a gap).
+    #[test]
+    fn code_in_formula_renders_tight() {
+        let mut world = BridgeWorld::new();
+        let mut render = |snippet: &str| {
+            let (src, _) = block_document(&Around::default(), snippet, 400.0);
+            let doc = compile(&mut world, &src).unwrap_or_else(|e| panic!("{e:?}\n{src}"));
+            crate::render_page(&doc.pages()[0], 2.0).data
+        };
+        let texts = [
+            "where $e = #sym.brace.l h, overline(h) #sym.brace.r$,",
+            "$x #sym.brace.l (b) #sym.brace.r . c$",
+        ];
+        for text in texts {
+            let d = crate::import_typ(text);
+            let block = &d.blocks[0];
+            let edit = serialize_block_styled(block, Style::Edit).0;
+            let read = serialize_block_styled(block, Style::Readable).0;
+            assert!(
+                render(&edit) == render(&read),
+                "renders differ for {text:?}:\n  edit:     {edit}\n  readable: {read}"
             );
         }
     }
