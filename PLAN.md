@@ -1512,3 +1512,24 @@ reported targets, so only those are still listed. On the paper: no problems left
   `json_roundtrip_keeps_block_ids`, `nested_block_ids_are_kept`.
 - Not checked yet: which edits replace a block by a new one (new id), e.g.
   changing its kind; to look at with the anchors (R2).
+
+## R2a — Remarks in the model, following edits (2026-11-13)
+
+- `model::remarks`: `Remark { id, anchor, text, author, date, resolved }`,
+  `Anchor::Block(id)` or `Anchor::Range { block, start, end }` whose ends are
+  `Point { node, offset }` in a text inline (raw block) or math row. Kept in
+  `Document::remarks`, outside undo.
+- `Document::apply` works out what an op changes (`edit_of`) and moves the
+  ends (`move_remarks`): in the edited text or row, an end after the change
+  shifts; text typed at either end stays out; an end in removed items goes
+  to the edge of what replaced them. When an op may drop nodes, a range whose
+  ends are gone falls back to its block; whose ends moved to another block
+  is re-homed; whose block is gone stays detached (undo brings it back).
+  An emptied range falls back to the block. Undo and redo go through `apply`.
+- `Editor::add_remark(text, author, date)`: a range of the selection in one
+  block; selected blocks: the first; no selection: the top-level block the
+  caret is in (the whole theorem). Tests `remarks_follow_edits`,
+  `remarks_on_blocks`, `remarks_in_formulas`.
+- Known: joining two paragraphs (Backspace at the start of the second) moves
+  the second's text into the first's text inline, so a range on it is lost:
+  the remark is detached until undo.

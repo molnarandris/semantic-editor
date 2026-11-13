@@ -8,6 +8,7 @@
 use std::fmt;
 
 use crate::cursor::Step;
+use crate::remarks::Edit;
 use crate::tree::{
     Block, BlockNode, Document, Inline, InlineNode, MathKind, MathNode, NodeId, Place,
 };
@@ -258,7 +259,71 @@ impl Document {
     }
 
     /// Apply `op` and return its inverse. On error the document is unchanged.
+    /// Remarks follow the edit.
     pub fn apply(&mut self, op: Op) -> Result<Op, OpError> {
+        let edit = self.edit_of(&op);
+        let inverse = self.apply_op(op)?;
+        if let Some(edit) = edit {
+            self.move_remarks(&edit);
+        }
+        Ok(inverse)
+    }
+
+    /// What `op` will change, for the remarks (before it is applied).
+    fn edit_of(&self, op: &Op) -> Option<Edit> {
+        let in_seq = |seq: &Seq, index: usize, removed: usize, inserted: usize| {
+            let (node, drops) = match *seq {
+                Seq::Text(id) => (Some(id), false),
+                Seq::Row(id) => (Some(id), removed > 0),
+                Seq::Blocks | Seq::Body(_) | Seq::Inlines(_) => (None, removed > 0),
+                Seq::Header | Seq::Label(_) | Seq::Opts(_) => return None,
+            };
+            Some(Edit {
+                node,
+                index,
+                removed,
+                inserted,
+                drops,
+            })
+        };
+        match op {
+            Op::Insert { seq, index, items } => in_seq(seq, *index, 0, items.len()),
+            Op::Delete { seq, index, count } => in_seq(seq, *index, *count, 0),
+            Op::Replace {
+                seq,
+                index,
+                count,
+                items,
+            } => in_seq(seq, *index, *count, items.len()),
+            // The wrapped nodes keep their ids: nothing leaves.
+            Op::Wrap {
+                row, index, count, ..
+            } => Some(Edit {
+                node: Some(*row),
+                index: *index,
+                removed: *count,
+                inserted: 1,
+                drops: false,
+            }),
+            Op::Unwrap { row, index, slot } => {
+                let n = self
+                    .find_row(*row)
+                    .and_then(|r| r.nodes.get(*index))
+                    .and_then(|w| w.child(*slot))
+                    .map_or(0, |r| r.nodes.len());
+                Some(Edit {
+                    node: Some(*row),
+                    index: *index,
+                    removed: 1,
+                    inserted: n,
+                    drops: true,
+                })
+            }
+            Op::SetFile { .. } => None,
+        }
+    }
+
+    fn apply_op(&mut self, op: Op) -> Result<Op, OpError> {
         match op {
             Op::SetFile { path, bytes } => {
                 let old = self.files.get(&path).map(<[u8]>::to_vec);

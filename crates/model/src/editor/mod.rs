@@ -14,6 +14,7 @@ use std::collections::HashSet;
 use crate::cursor::{CursorPath, Step, Target};
 use crate::history::History;
 use crate::ops::{Items, Op, Seq};
+use crate::remarks::Anchor;
 use crate::selection::{Fragment, SelRange, Selection};
 use crate::symbols;
 use crate::tree::{
@@ -819,6 +820,33 @@ impl Editor {
             }
             SelRange::Blocks { .. } => None,
         }
+    }
+
+    /// Add a remark about the selection: a range in one block; selected
+    /// blocks: the first; no selection: the top-level block the caret is in
+    /// (the whole theorem). Not part of undo. Returns its id.
+    pub fn add_remark(&mut self, text: &str, author: &str, date: &str) -> Option<u64> {
+        if self.read_only {
+            return None;
+        }
+        let range = self.selection_bounds().and_then(|(first, last)| {
+            Some(Anchor::Range {
+                block: first.block,
+                start: self.doc.point_at(&first)?,
+                end: self.doc.point_at(&last)?,
+            })
+        });
+        let anchor = match (range, self.selection()) {
+            (Some(range), _) => range,
+            (None, Some(SelRange::Blocks { start, .. })) => {
+                Anchor::Block(self.doc.blocks[start].id)
+            }
+            (None, _) => {
+                let top = self.doc.top_index(self.caret.block)?;
+                Anchor::Block(self.doc.blocks[top].id)
+            }
+        };
+        Some(self.doc.add_remark(anchor, text, author, date))
     }
 
     /// What the selected range covers, to copy.

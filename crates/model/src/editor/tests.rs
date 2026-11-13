@@ -1,4 +1,5 @@
 use super::*;
+use crate::remarks::Anchor;
 use crate::tree::{ListKind, MathKind, TitleFields};
 
 /// "ab $x$ cd" / "ef" / display "y" / "gh"
@@ -2152,5 +2153,113 @@ fn pasting() {
     assert_eq!(display_of(&e, 0), "a + b");
     e.insert_text("c");
     assert_eq!(display_of(&e, 0), "a + b c");
+    e.doc().check_invariants().unwrap();
+}
+
+/// A remark's range follows edits: text typed before it moves it, text typed
+/// at its end stays out, undo moves it back; deleting its text leaves a
+/// remark on the whole block.
+#[test]
+fn remarks_follow_edits() {
+    let mut e = Editor::default();
+    e.insert_text("Hello world.");
+    e.move_left();
+    select_with(&mut e, |e| {
+        for _ in 0..5 {
+            e.move_left();
+        }
+    });
+    let id = e.add_remark("Which world?", "A", "2026-11-13").unwrap();
+    let block = e.doc().blocks[0].id;
+    let range = |e: &Editor| {
+        let r = e.doc().remarks.iter().find(|r| r.id == id).unwrap();
+        let (a, b) = e.doc().remark_range(r).unwrap();
+        (a.offset, b.offset)
+    };
+    assert_eq!(range(&e), (6, 11));
+    e.set_caret(e.doc().start_of(&e.doc().blocks[0]));
+    e.insert_text("Oh ");
+    assert_eq!(range(&e), (9, 14));
+    let at = |offset| CursorPath {
+        block,
+        path: vec![Step::Index(0)],
+        offset,
+    };
+    e.set_caret(at(14));
+    e.insert_text("s");
+    assert_eq!(range(&e), (9, 14), "typed at the end: not in it");
+    e.set_caret(at(9));
+    e.insert_text("big ");
+    assert_eq!(range(&e), (13, 18), "typed at the start: not in it");
+    assert!(e.undo() && e.undo() && e.undo());
+    assert_eq!(texts(&e), ["Hello world."]);
+    assert_eq!(range(&e), (6, 11));
+    assert!(e.redo());
+    assert_eq!(range(&e), (9, 14));
+    // Deleting the remarked text: the remark is on the block.
+    e.set_caret(at(14));
+    select_with(&mut e, |e| {
+        for _ in 0..5 {
+            e.move_left();
+        }
+    });
+    assert!(e.backspace());
+    assert_eq!(texts(&e), ["Oh Hello ."]);
+    assert_eq!(e.doc().remarks[0].anchor, Anchor::Block(block));
+    e.doc().check_invariants().unwrap();
+}
+
+/// Without a selection a remark is on the top-level block the caret is in:
+/// a whole theorem, not its paragraph.
+#[test]
+fn remarks_on_blocks() {
+    let mut d = Document::empty();
+    let t = d.text("Text.");
+    let p = d.paragraph(vec![t]);
+    d.blocks = vec![d.env("lemma", vec![p])];
+    let mut e = Editor::new(d);
+    let env = e.doc().blocks[0].id;
+    e.set_caret(e.doc().start_of(&e.doc().blocks[0].kind.body().unwrap()[0]));
+    e.add_remark("Check.", "A", "2026-11-13").unwrap();
+    assert_eq!(e.doc().remarks[0].anchor, Anchor::Block(env));
+    assert_eq!(e.doc().remark_range(&e.doc().remarks[0]), None);
+}
+
+/// A range in a formula follows edits of its row; a structure made around
+/// part of the row keeps it in place.
+#[test]
+fn remarks_in_formulas() {
+    let mut e = Editor::default();
+    e.insert_text("$$a + b + c");
+    // Select `b`: nodes 2..3 of the row.
+    let block = e.doc().blocks[0].id;
+    let at = |offset| CursorPath {
+        block,
+        path: vec![],
+        offset,
+    };
+    e.set_caret(at(2));
+    select_with(&mut e, |e| {
+        e.set_caret(at(3));
+    });
+    let id = e.add_remark("b?", "A", "2026-11-13").unwrap();
+    let range = |e: &Editor| {
+        let r = e.doc().remarks.iter().find(|r| r.id == id).unwrap();
+        let (a, b) = e.doc().remark_range(r).unwrap();
+        (a.offset, b.offset)
+    };
+    assert_eq!(range(&e), (2, 3));
+    e.set_caret(at(0));
+    e.insert_text("x ");
+    assert_eq!(range(&e), (3, 4));
+    // `/` after `b` makes `b` a numerator: the range holds the fraction.
+    e.set_caret(at(4));
+    e.insert_text("/");
+    assert!(matches!(
+        e.doc().blocks[0].kind,
+        Block::DisplayMath(ref r) if matches!(r.nodes[3].kind, MathKind::Frac { .. })
+    ));
+    assert_eq!(range(&e), (3, 4));
+    while e.undo() {}
     e.doc().check_invariants().unwrap();
 }

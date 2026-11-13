@@ -897,6 +897,9 @@ pub struct Document {
     /// beside the document in the project file.
     #[serde(skip)]
     pub files: crate::Files,
+    /// Remarks on blocks and ranges, stored beside the document.
+    #[serde(skip)]
+    pub remarks: Vec<crate::Remark>,
     #[serde(skip)]
     next_id: u64,
 }
@@ -923,6 +926,7 @@ impl Document {
             header: String::new(),
             blocks: vec![],
             files: crate::Files::default(),
+            remarks: vec![],
             next_id: 1,
         }
     }
