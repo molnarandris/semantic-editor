@@ -1499,3 +1499,16 @@ reported targets, so only those are still listed. On the paper: no problems left
   piece for scripts and in the formula's style (a box around the call made a
   display fraction in its argument inline-sized; measured). Export unchanged.
   Test `calls_of_header_functions_cover_their_drawing`.
+
+## R1 — Blocks keep their ids across save and load (2026-11-13)
+
+- First step of the remarks (spec: Remarks, chat, suggestions, comparing
+  versions). `document.json` now writes each block's `id` (nested blocks in
+  environments and lists too); other nodes' ids are still not written.
+  `Document::restore_ids` (used by `file::from_json`) keeps the saved ids, a
+  repeated one only the first time, and gives every other node, and blocks of
+  older files without ids, a fresh id above them. Old files load as before;
+  they get ids on the next save. Nothing visible changes. Tests
+  `json_roundtrip_keeps_block_ids`, `nested_block_ids_are_kept`.
+- Not checked yet: which edits replace a block by a new one (new id), e.g.
+  changing its kind; to look at with the anchors (R2).

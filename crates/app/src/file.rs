@@ -1,6 +1,6 @@
 //! `.sem` files: a zip of the project. `document.json` holds a format
 //! version, the Typst version the document was written with, the header
-//! and the blocks (node ids are not stored; they are regenerated on load);
+//! and the blocks (with their ids; other nodes' ids are regenerated on load);
 //! `main.typ` is the document as Typst, written on every save so the
 //! unzipped folder compiles as is (not read back); every other entry is a
 //! project file at its path (`images/chain.png`), except the version
@@ -53,8 +53,8 @@ pub fn to_json(doc: &Document) -> String {
     out
 }
 
-/// Parse `document.json`. The document gets fresh node ids and its
-/// structural invariants restored; it has no files yet.
+/// Parse `document.json`. Blocks keep their saved ids, the other nodes get
+/// fresh ones; the structural invariants are restored; no files yet.
 pub fn from_json(text: &str) -> Result<Document, String> {
     let file: SemFileIn =
         serde_json::from_str(text).map_err(|e| format!("not a valid document: {e}"))?;
@@ -67,7 +67,7 @@ pub fn from_json(text: &str) -> Result<Document, String> {
     let mut doc = Document::empty();
     doc.header = file.header;
     doc.blocks = file.blocks;
-    doc.regenerate_ids();
+    doc.restore_ids();
     doc.check_invariants()?;
     Ok(doc)
 }

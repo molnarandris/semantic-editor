@@ -1,6 +1,7 @@
 //! The document tree. Every node carries a stable [`NodeId`] that is never
-//! reused within a document. Ids are not serialized; they are regenerated on
-//! load.
+//! reused within a document. Blocks' ids are saved, so remarks can point at
+//! a block and versions can be compared block by block; the other nodes'
+//! ids are not, they are regenerated on load.
 
 use serde::{Deserialize, Serialize};
 
@@ -11,9 +12,17 @@ use crate::cursor::Step;
 )]
 pub struct NodeId(pub u64);
 
+impl NodeId {
+    /// Not assigned yet (a node read from a file without its id).
+    pub fn is_unset(&self) -> bool {
+        self.0 == 0
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BlockNode {
-    #[serde(skip)]
+    /// Saved (see [`Document::restore_ids`]); missing in older files.
+    #[serde(default, skip_serializing_if = "NodeId::is_unset")]
     pub id: NodeId,
     #[serde(flatten)]
     pub kind: Block,
@@ -936,6 +945,56 @@ impl Document {
         self.normalize();
     }
 
+    /// After loading: blocks keep their saved ids (a repeated one only the
+    /// first time); every other node, and a block without one, gets a fresh
+    /// id above them. Restores the structural invariants.
+    pub fn restore_ids(&mut self) {
+        fn keep(blocks: &mut [BlockNode], seen: &mut std::collections::HashSet<NodeId>) {
+            for block in blocks {
+                if !block.id.is_unset() && !seen.insert(block.id) {
+                    block.id = NodeId(0);
+                }
+                if let Block::Env { body, .. } | Block::Item { body, .. } = &mut block.kind {
+                    keep(body, seen);
+                }
+            }
+        }
+        fn assign(blocks: &mut [BlockNode], fresh: &mut impl FnMut(&mut NodeId)) {
+            for block in blocks {
+                if block.id.is_unset() {
+                    fresh(&mut block.id);
+                }
+                match &mut block.kind {
+                    Block::Paragraph(inlines)
+                    | Block::Heading { inlines, .. }
+                    | Block::Caption(inlines) => visit_inline_ids(inlines, fresh),
+                    Block::DisplayMath(row) => row.visit_ids(fresh),
+                    Block::Env { title, body, .. }
+                    | Block::Item {
+                        term: title, body, ..
+                    } => {
+                        visit_inline_ids(title, fresh);
+                        assign(body, fresh);
+                    }
+                    Block::RawTypst(_)
+                    | Block::Diagram(_)
+                    | Block::Bibliography(_)
+                    | Block::Title(_)
+                    | Block::Image { .. } => {}
+                }
+            }
+        }
+        let mut seen = std::collections::HashSet::new();
+        keep(&mut self.blocks, &mut seen);
+        let mut next = seen.iter().map(|id| id.0).max().unwrap_or(0) + 1;
+        assign(&mut self.blocks, &mut |id: &mut NodeId| {
+            *id = NodeId(next);
+            next += 1;
+        });
+        self.next_id = next;
+        self.normalize();
+    }
+
     /// Give every node of `fragment` (from another document: a paste) a
     /// fresh id of this document.
     pub fn adopt(&mut self, fragment: &mut crate::Fragment) {
@@ -1589,7 +1648,7 @@ beta-2:
     }
 
     #[test]
-    fn json_roundtrip_regenerates_ids() {
+    fn json_roundtrip_keeps_block_ids() {
         let mut doc = Document::empty();
         let x = doc.ident("x");
         let two = doc.num("2");
@@ -1604,17 +1663,58 @@ beta-2:
         doc.blocks = vec![para, d];
 
         doc.blocks[1].label = "eq:frac".into();
+        let ids = |d: &Document| d.blocks.iter().map(|b| b.id).collect::<Vec<_>>();
         let json = serde_json::to_string(&doc).unwrap();
-        assert!(!json.contains("\"id\""));
-        // Blocks without a label are written as before labels existed.
+        // Only the blocks' ids are written; blocks without a label are
+        // written as before labels existed.
+        assert_eq!(json.matches("\"id\"").count(), 2, "{json}");
         assert!(
-            json.contains("{\"Paragraph\":[{\"Text\":\"see \"}"),
+            json.contains("\"Paragraph\":[{\"Text\":\"see \"}"),
             "{json}"
         );
         assert!(json.contains("\"label\":\"eq:frac\""), "{json}");
         let mut back: Document = serde_json::from_str(&json).unwrap();
-        back.regenerate_ids();
+        back.restore_ids();
         back.check_invariants().unwrap();
+        assert_eq!(ids(&back), ids(&doc));
         assert_eq!(serde_json::to_string(&back).unwrap(), json);
+        // New nodes get ids above the saved ones.
+        let fresh = back.fresh_id();
+        assert!(ids(&back).iter().all(|id| *id < fresh));
+
+        // A file from before ids were saved: fresh ids.
+        let mut old: Document =
+            serde_json::from_str(&json.replace(&format!("\"id\":{},", doc.blocks[0].id.0), ""))
+                .unwrap();
+        old.restore_ids();
+        old.check_invariants().unwrap();
+        assert_eq!(old.blocks[1].id, doc.blocks[1].id);
+        assert!(!old.blocks[0].id.is_unset());
+        // A repeated id (a hand-edited file) is kept only once.
+        let mut twice = back.clone();
+        twice.blocks[1].id = twice.blocks[0].id;
+        let mut twice: Document =
+            serde_json::from_str(&serde_json::to_string(&twice).unwrap()).unwrap();
+        twice.restore_ids();
+        twice.check_invariants().unwrap();
+        assert_eq!(twice.blocks[0].id, doc.blocks[0].id);
+        assert_ne!(twice.blocks[1].id, doc.blocks[0].id);
+    }
+
+    /// Blocks inside environments keep their ids too.
+    #[test]
+    fn nested_block_ids_are_kept() {
+        let mut doc = Document::empty();
+        let t = doc.text("Text.");
+        let p = doc.paragraph(vec![t]);
+        let env = doc.env("lemma", vec![p]);
+        doc.blocks = vec![env];
+        let inner = doc.blocks[0].kind.body().unwrap()[0].id;
+        let json = serde_json::to_string(&doc).unwrap();
+        let mut back: Document = serde_json::from_str(&json).unwrap();
+        back.restore_ids();
+        back.check_invariants().unwrap();
+        assert_eq!(back.blocks[0].id, doc.blocks[0].id);
+        assert_eq!(back.blocks[0].kind.body().unwrap()[0].id, inner);
     }
 }
