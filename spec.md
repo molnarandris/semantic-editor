@@ -701,6 +701,9 @@ suggested changes, and later comparing versions like latexdiff. Decisions (user,
   selection quoted as Typst source with where it is ("Theorem 3.2"). Claude writes
   math in Typst syntax, rendered by the editor. The conversation is kept in the
   `.sem`, not versioned (like scratch files). Claude gets no tools to change files.
+  Every question runs `claude -p` once with the paper, the conversation so far and
+  the question on stdin; no Claude Code session is kept (2026-11-14). C1: the tab,
+  plain-text answers; C2: answers rendered by Typst.
 - **S — Suggestions.** A range and its proposed replacement, kept outside the text
   (no Word-like suggesting mode for now); the card shows old and new, Accept (an
   ordinary edit, undoable) and Reject. Formulas are compared whole at first. Chat v2:

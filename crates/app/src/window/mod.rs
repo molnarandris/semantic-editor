@@ -3,6 +3,7 @@
 //! blocks in `block_editor`, the outline in `outline`.
 
 mod block_editor;
+mod chat;
 mod files;
 mod old_version;
 mod outline;
@@ -22,6 +23,7 @@ use model::{BlockNode, Document, Files, NewBlock, Remark};
 use crate::history::History;
 use crate::sample;
 use block_editor::BlockEditor;
+use chat::ChatPane;
 use old_version::OldVersion;
 use outline::Outline;
 use remarks::{RemarkAction, RemarksPane, Shown};
@@ -41,8 +43,11 @@ pub struct Window {
     outline: Outline,
     versions: VersionsPane,
     remarks: RemarksPane,
-    /// Holds the remarks sidebar on the right.
+    chat: Rc<ChatPane>,
+    /// The sidebar on the right: Remarks and Chat.
     split_remarks: adw::OverlaySplitView,
+    right_pages: adw::ViewStack,
+    right_switcher: adw::InlineViewSwitcher,
     /// The sidebar's Outline / Versions switcher (hidden for an old
     /// version).
     sidebar_switcher: adw::InlineViewSwitcher,
@@ -59,6 +64,8 @@ pub struct Window {
     /// Header, blocks and files as last saved or loaded, to tell if there are
     /// changes.
     saved: RefCell<(String, Vec<BlockNode>, Files, Vec<Remark>)>,
+    /// The chat as last saved or loaded.
+    saved_chat: RefCell<Vec<crate::chat::Message>>,
     /// The document's version history (`None` if it could not be set up:
     /// saving then works without one).
     history: RefCell<Option<History>>,
@@ -103,7 +110,7 @@ impl Window {
         header.pack_end(&menu_button);
         let show_remarks = gtk::ToggleButton::builder()
             .icon_name("sidebar-show-right-symbolic")
-            .tooltip_text("Remarks")
+            .tooltip_text("Remarks and Chat")
             .build();
         header.pack_end(&show_remarks);
 
@@ -117,13 +124,28 @@ impl Window {
         let toasts = adw::ToastOverlay::new();
         toasts.set_child(Some(&scroller));
 
-        // The remarks on the right.
+        // On the right: the remarks and the chat, a switcher on top.
         let remarks = RemarksPane::new();
+        let chat = ChatPane::new();
+        let right_pages = adw::ViewStack::builder().vexpand(true).build();
+        right_pages.add_titled(&remarks.widget, Some("remarks"), "Remarks");
+        right_pages.add_titled(&chat.widget, Some("chat"), "Chat");
+        let right_switcher = adw::InlineViewSwitcher::builder()
+            .stack(&right_pages)
+            .margin_start(6)
+            .margin_end(6)
+            .margin_top(6)
+            .margin_bottom(6)
+            .build();
+        let right = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        right.append(&right_switcher);
+        right.append(&right_pages);
         let split_remarks = adw::OverlaySplitView::builder()
-            .sidebar(&remarks.widget)
+            .sidebar(&right)
             .sidebar_position(gtk::PackType::End)
             .content(&toasts)
-            .max_sidebar_width(300.0)
+            .max_sidebar_width(380.0)
+            .sidebar_width_fraction(0.3)
             .show_sidebar(false)
             .build();
         show_remarks
@@ -191,7 +213,10 @@ impl Window {
             outline,
             versions,
             remarks,
+            chat,
             split_remarks,
+            right_pages,
+            right_switcher,
             sidebar_switcher: switcher,
             banner,
             origin: RefCell::new(None),
@@ -199,6 +224,7 @@ impl Window {
             file: RefCell::new(None),
             imported: RefCell::new(None),
             saved: RefCell::default(),
+            saved_chat: RefCell::default(),
             history: RefCell::new(None),
             block_editor: RefCell::new(None),
             problem_toast: RefCell::new(None),
@@ -230,6 +256,21 @@ impl Window {
                 this.outline.update(&this.editor);
                 this.update_scratch();
                 this.update_remarks();
+                this.chat.set_quote(this.selection_quote());
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.chat.connect_paper(move || match weak.upgrade() {
+            Some(this) => {
+                this.apply_block_edit();
+                typst_bridge::serialize_document(&this.editor.document())
+            }
+            None => String::new(),
+        });
+        let weak = Rc::downgrade(self);
+        self.chat.connect_changed(move || {
+            if let Some(this) = weak.upgrade() {
+                this.update_title();
             }
         });
         let weak = Rc::downgrade(self);
@@ -326,7 +367,7 @@ impl Window {
 
     fn add_actions(self: &Rc<Self>) {
         type Handler = fn(Rc<Window>);
-        let actions: [(&str, Handler); 21] = [
+        let actions: [(&str, Handler); 22] = [
             ("insert-env", |w| {
                 w.editor.start_env();
                 w.editor.grab_focus();
@@ -367,6 +408,7 @@ impl Window {
                 })
             }),
             ("add-remark", |w| spawn(async move { w.add_remark().await })),
+            ("ask-claude", |w| w.ask_claude()),
             ("name-version", |w| {
                 spawn(async move { w.name_version(None).await })
             }),
@@ -424,6 +466,46 @@ impl Window {
         self.update_versions();
         let open = self.editor.document().remarks.iter().any(|r| !r.resolved);
         self.split_remarks.set_show_sidebar(open);
+        self.right_pages.set_visible_child_name("remarks");
+        self.set_chat(vec![]);
+    }
+
+    /// Show `messages` as the document's (saved) conversation.
+    fn set_chat(&self, messages: Vec<crate::chat::Message>) {
+        self.chat.set_messages(messages.clone());
+        *self.saved_chat.borrow_mut() = messages;
+    }
+
+    /// The selection as the chat quotes it: its Typst, and where it is
+    /// (the section, the top-level block's Typst).
+    fn selection_quote(&self) -> Option<crate::chat::Quote> {
+        let source = self.editor.selection_source()?;
+        let doc = self.editor.document();
+        let top = doc.top_block(self.editor.caret().block)?;
+        let index = doc.blocks.iter().position(|b| b.id == top)?;
+        let block = &doc.blocks[index];
+        let heading = doc.blocks[..index]
+            .iter()
+            .rev()
+            .find(|b| matches!(b.kind, model::Block::Heading { .. }))
+            .map(|h| {
+                let (typst, _) = typst_bridge::serialize_block(h);
+                typst.trim_start_matches(['=', ' ']).trim().to_string()
+            });
+        let label = match &block.kind {
+            model::Block::Env { name, .. } => name.as_str(),
+            _ => block.label(),
+        };
+        let (block_source, _) = typst_bridge::serialize_block(block);
+        let place = crate::chat::place(heading.as_deref(), label, block_source.trim());
+        Some(crate::chat::Quote { place, source })
+    }
+
+    /// Ask Claude: the chat on the right, the input box focused.
+    fn ask_claude(&self) {
+        self.split_remarks.set_show_sidebar(true);
+        self.right_pages.set_visible_child_name("chat");
+        self.chat.focus_input();
     }
 
     /// Show the remarks in the right sidebar, the caret's selected.
@@ -520,6 +602,7 @@ impl Window {
         if let Some(text) = text {
             if self.editor.add_remark(&text, &files::author(), &today()) {
                 self.split_remarks.set_show_sidebar(true);
+                self.right_pages.set_visible_child_name("remarks");
             } else {
                 self.toast("Remarks cannot be added to an old version");
             }
@@ -596,6 +679,7 @@ impl Window {
             || doc.blocks != saved.1
             || doc.files != saved.2
             || doc.remarks != saved.3
+            || self.chat.messages() != *self.saved_chat.borrow()
     }
 
     /// File name without extension, for titles and export names.
@@ -717,6 +801,7 @@ fn main_menu() -> gio::Menu {
     menu.append_section(None, &insert);
     let remarks = gio::Menu::new();
     remarks.append(Some("Add _Remark…"), Some("win.add-remark"));
+    remarks.append(Some("Ask _Claude…"), Some("win.ask-claude"));
     menu.append_section(None, &remarks);
     let other = gio::Menu::new();
     other.append(Some("Open S_ample Document"), Some("win.open-sample"));

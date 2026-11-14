@@ -1,5 +1,6 @@
 //! Application shell: windows, actions and shortcuts, files, export.
 
+mod chat;
 mod file;
 mod history;
 mod sample;
@@ -75,6 +76,7 @@ fn setup_actions(app: &adw::Application) {
         ("win.export-typ", &["<Control><Shift>e"]),
         ("win.insert-diagram", &["<Control><Shift>d"]),
         ("win.add-remark", &["<Control><Alt>m"]),
+        ("win.ask-claude", &["<Control><Alt>k"]),
         ("win.next-problem", &["F8"]),
         ("win.previous-problem", &["<Shift>F8"]),
         ("window.close", &["<Control>w"]),

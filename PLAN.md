@@ -1588,3 +1588,33 @@ reported targets, so only those are still listed. On the paper: no problems left
   resolved card Reopen and Delete. None in an old version's window.
 - Not yet: the cards beside their text (they are a list), editing a remark,
   remark changes in undo. Widget only: awaiting the user's test.
+
+## C1 — Chat with Claude (2026-11-14)
+
+- R4 (converting `#audit[…]`) dropped: the user does it by hand.
+- `chat.rs`: `Message` (author, text, quote), `Quote` (where, Typst source);
+  `chat.json` in the `.sem` beside the snapshot, so not in versions (`to_zip`
+  takes the chat, `from_zip` returns it). `command`: `claude -p --output-format
+  stream-json --verbose --include-partial-messages --tools "" --strict-mcp-config
+  --no-session-persistence --setting-sources "" --system-prompt …`, through
+  `bash -lc` (finds `~/.local/bin`), in the Flatpak via `flatpak-spawn --host
+  --directory=/tmp` (manifest: `--talk-name=org.freedesktop.Flatpak`). `--bare`
+  cannot log in with the subscription (probed). `prompt`: the paper (the
+  `.typ` export), earlier messages, the question with its selection; stateless,
+  no `--resume`, so nothing depends on Claude Code's session files and the
+  paper never meets the argument length limit. `parse_line`: text deltas, the
+  result (error text when `is_error`). System prompt: Typst markup and Typst
+  math, no LaTeX, no Markdown.
+- Right sidebar: Remarks | Chat switcher (`adw::InlineViewSwitcher`), wider
+  (up to 380). `window/chat.rs`, `ChatPane`: messages (the user's in a card,
+  the quote dimmed above), input box (Enter asks, Shift+Enter new line), the
+  button turns into Stop while Claude writes; the answer streams in. If it fails
+  or is stopped before any text, the question goes back into the input box and
+  the error shows under it. Clear (with a confirmation). The selection's quote
+  (`SemEditor::selection_source`, `Window::selection_quote`: section heading
+  and the top-level block's Typst) shows above the input. *Ask Claude…*
+  (Ctrl+Alt+K) opens the tab. Hidden in an old version's window. The chat
+  counts for unsaved changes.
+- Checked end to end from inside the sandbox with the app's arguments (answer
+  in Typst math, no tools, no MCP). The pane is widget only: awaiting the user's
+  test. Next C2: render answers with Typst.

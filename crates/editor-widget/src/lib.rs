@@ -149,6 +149,12 @@ impl SemEditor {
         added
     }
 
+    /// The selection as Typst, as Copy puts it on the clipboard.
+    pub fn selection_source(&self) -> Option<String> {
+        let fragment = self.imp().editor.borrow().selection_fragment()?;
+        Some(typst_bridge::fragment_source(&fragment))
+    }
+
     /// The open remarks the caret is in (see `Editor::remarks_at_caret`).
     pub fn remarks_at_caret(&self) -> Vec<u64> {
         self.imp().editor.borrow().remarks_at_caret()

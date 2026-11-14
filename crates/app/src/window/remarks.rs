@@ -44,14 +44,6 @@ pub struct RemarksPane {
 
 impl RemarksPane {
     pub fn new() -> Self {
-        let heading = gtk::Label::builder()
-            .label("Remarks")
-            .xalign(0.0)
-            .css_classes(["heading"])
-            .margin_start(12)
-            .margin_top(12)
-            .margin_bottom(6)
-            .build();
         let list = || {
             gtk::ListBox::builder()
                 .selection_mode(gtk::SelectionMode::None)
@@ -85,7 +77,6 @@ impl RemarksPane {
             .child(&column)
             .build();
         let widget = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        widget.append(&heading);
         widget.append(&scroller);
 
         let on_action: Callback = Rc::default();

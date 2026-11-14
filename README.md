@@ -86,6 +86,11 @@ and their own file formats. This editor tries to give you both:
   either shows the remark. Remarks follow the text as you edit it. The Remarks sidebar
   on the right lists them in the order of the text: click one to select its text, reply
   to it, resolve it; the remarks the caret is in are highlighted there.
+- **Chat with Claude** (Ctrl+Alt+K): the Chat tab beside Remarks asks Claude about the
+  paper through your logged-in [Claude Code](https://claude.com/claude-code) (`claude`
+  on the host; no API key). Claude sees the whole paper as Typst; with text selected,
+  the question quotes it. Claude cannot change the paper. The conversation is saved in
+  the `.sem` file, not in its versions.
 
 ### Files
 
@@ -122,6 +127,7 @@ and their own file formats. This editor tries to give you both:
 | Ctrl+click, Alt+← | follow a reference, go back |
 | F8, Shift+F8 | next or previous problem |
 | Ctrl+Alt+M | add a remark on the selection or the block |
+| Ctrl+Alt+K | ask Claude (about the selection) |
 | Ctrl+Z, Ctrl+Shift+Z | undo, redo |
 | Ctrl+C, Ctrl+X, Ctrl+V | copy, cut, paste (as Typst) |
 | Ctrl+S, Ctrl+O, Ctrl+E | save, open, export PDF |

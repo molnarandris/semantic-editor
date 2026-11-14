@@ -82,6 +82,8 @@ impl Window {
             }
         }
         view.sidebar_switcher.set_visible(false);
+        // No chat about an old version.
+        view.right_switcher.set_visible(false);
         view.banner
             .set_title(&format!("The version of {label}, read-only"));
         view.banner.set_revealed(true);
