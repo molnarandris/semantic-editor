@@ -40,6 +40,15 @@ struct RemarkFile {
     date: String,
     #[serde(default)]
     resolved: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    replies: Vec<ReplyFile>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ReplyFile {
+    text: String,
+    author: String,
+    date: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -75,6 +84,15 @@ pub fn remarks_to_json(doc: &Document) -> Option<String> {
                 author: r.author.clone(),
                 date: r.date.clone(),
                 resolved: r.resolved,
+                replies: r
+                    .replies
+                    .iter()
+                    .map(|a| ReplyFile {
+                        text: a.text.clone(),
+                        author: a.author.clone(),
+                        date: a.date.clone(),
+                    })
+                    .collect(),
             }
         })
         .collect();
@@ -113,6 +131,15 @@ pub fn remarks_from_json(doc: &mut Document, text: &str) -> Result<(), String> {
             author: r.author,
             date: r.date,
             resolved: r.resolved,
+            replies: r
+                .replies
+                .into_iter()
+                .map(|a| model::Reply {
+                    text: a.text,
+                    author: a.author,
+                    date: a.date,
+                })
+                .collect(),
         });
     }
     Ok(())
@@ -547,6 +574,12 @@ mod tests {
         doc.add_remark(model::Anchor::Block(block), "Block.", "A", "2026-11-13");
         let gone = model::NodeId(10_000);
         doc.add_remark(model::Anchor::Block(gone), "Detached.", "A", "2026-11-13");
+        doc.remarks[1].resolved = true;
+        doc.remarks[1].replies.push(model::Reply {
+            text: "Done.".into(),
+            author: "B".into(),
+            date: "2026-11-14".into(),
+        });
         let zip = to_zip(&doc, None).unwrap();
         let (mut back, _) = from_zip(&zip).unwrap();
         assert_eq!(back.remarks.len(), 3);
@@ -561,6 +594,8 @@ mod tests {
         });
         assert_eq!(back.remarks[1].anchor, model::Anchor::Block(block));
         assert_eq!(back.remarks[1].text, "Block.");
+        // (The range's text node gets a new id on load: compare the others.)
+        assert_eq!(back.remarks[1..], doc.remarks[1..], "replies and resolved kept");
         assert_eq!(back.remarks[2].anchor, model::Anchor::Block(gone));
         assert!(back.fresh_id() > gone);
         back.check_invariants().unwrap();

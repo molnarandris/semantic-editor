@@ -19,7 +19,7 @@ pub use editor::{
 pub use files::{Files, SCRATCH_DIR, is_scratch};
 pub use history::History;
 pub use ops::{Items, Op, OpError, Seq};
-pub use remarks::{Anchor, Point, Remark};
+pub use remarks::{Anchor, Point, Remark, Reply};
 pub use selection::{Fragment, SelRange, Selection};
 pub use tree::{
     BARS, Block, BlockNode, Document, Inline, InlineNode, ListKind, MathKind, MathNode, MathRow,

@@ -14,7 +14,7 @@ use std::collections::HashSet;
 use crate::cursor::{CursorPath, Step, Target};
 use crate::history::History;
 use crate::ops::{Items, Op, Seq};
-use crate::remarks::Anchor;
+use crate::remarks::{Anchor, Remark, Reply};
 use crate::selection::{Fragment, SelRange, Selection};
 use crate::symbols;
 use crate::tree::{
@@ -847,6 +847,98 @@ impl Editor {
             }
         };
         Some(self.doc.add_remark(anchor, text, author, date))
+    }
+
+    /// The remark with id `id`, to change (not in a read-only document).
+    fn remark_mut(&mut self, id: u64) -> Option<&mut Remark> {
+        if self.read_only {
+            return None;
+        }
+        self.doc.remarks.iter_mut().find(|r| r.id == id)
+    }
+
+    /// Answer remark `id`. Not part of undo.
+    pub fn reply_remark(&mut self, id: u64, text: &str, author: &str, date: &str) -> bool {
+        let Some(remark) = self.remark_mut(id) else {
+            return false;
+        };
+        remark.replies.push(Reply {
+            text: text.into(),
+            author: author.into(),
+            date: date.into(),
+        });
+        true
+    }
+
+    /// Resolve remark `id` (it is no longer shown in the text) or reopen
+    /// it. Not part of undo.
+    pub fn set_remark_resolved(&mut self, id: u64, resolved: bool) -> bool {
+        let Some(remark) = self.remark_mut(id) else {
+            return false;
+        };
+        remark.resolved = resolved;
+        true
+    }
+
+    /// Delete remark `id` with its replies. Not part of undo.
+    pub fn delete_remark(&mut self, id: u64) -> bool {
+        if self.remark_mut(id).is_none() {
+            return false;
+        }
+        self.doc.remarks.retain(|r| r.id != id);
+        true
+    }
+
+    /// The open remarks the caret is in: on a range (its ends included) or
+    /// on a block holding the caret.
+    pub fn remarks_at_caret(&self) -> Vec<u64> {
+        let doc = &self.doc;
+        let Some(top) = doc.top_index(self.caret.block) else {
+            return vec![];
+        };
+        let mut positions = None;
+        let mut found = vec![];
+        for remark in doc.remarks.iter().filter(|r| !r.resolved) {
+            let inside = match doc.remark_range(remark) {
+                Some((a, b)) => {
+                    let ps = positions.get_or_insert_with(|| doc.positions(&doc.blocks[top]));
+                    let at = |c: &CursorPath| ps.iter().position(|p| p == c);
+                    match (at(&a), at(&b), at(&self.caret)) {
+                        (Some(a), Some(b), Some(c)) => (a.min(b)..=a.max(b)).contains(&c),
+                        _ => false,
+                    }
+                }
+                None => doc
+                    .block(remark.anchor.block())
+                    .is_some_and(|b| b.contains(self.caret.block)),
+            };
+            if inside {
+                found.push(remark.id);
+            }
+        }
+        found
+    }
+
+    /// Select remark `id`'s range, or put the caret at the start of its
+    /// block; `false` if it is detached.
+    pub fn select_remark(&mut self, id: u64) -> bool {
+        let Some(remark) = self.doc.remarks.iter().find(|r| r.id == id) else {
+            return false;
+        };
+        match self.doc.remark_range(remark) {
+            Some((start, end)) => {
+                self.set_caret(end);
+                self.set_anchor(start);
+            }
+            None => {
+                let Some(block) = self.doc.block(remark.anchor.block()) else {
+                    return false;
+                };
+                let start = self.doc.start_of(block);
+                self.set_caret(start);
+            }
+        }
+        true
     }
 
     /// What the selected range covers, to copy.

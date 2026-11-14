@@ -2263,3 +2263,49 @@ fn remarks_in_formulas() {
     while e.undo() {}
     e.doc().check_invariants().unwrap();
 }
+
+/// The sidebar's view of remarks: in text order, the ones the caret is in,
+/// selecting one, replies, resolving and deleting.
+#[test]
+fn remarks_for_the_sidebar() {
+    let mut e = Editor::default();
+    e.insert_text("First.");
+    e.enter();
+    e.insert_text("Second block.");
+    let (b0, b1) = (e.doc().blocks[0].id, e.doc().blocks[1].id);
+    let at = |block, offset| CursorPath {
+        block,
+        path: vec![Step::Index(0)],
+        offset,
+    };
+    // A range in the second block ("block"), then a remark on the first.
+    e.set_caret(at(b1, 7));
+    select_with(&mut e, |e| e.set_caret(at(b1, 12)));
+    let range = e.add_remark("Which?", "A", "2026-11-14").unwrap();
+    e.set_caret(at(b0, 2));
+    let block = e.add_remark("Whole.", "A", "2026-11-14").unwrap();
+    let order: Vec<u64> = e.doc().remarks_in_order().iter().map(|r| r.id).collect();
+    assert_eq!(order, [block, range]);
+
+    assert_eq!(e.remarks_at_caret(), [block]);
+    e.set_caret(at(b1, 3));
+    assert_eq!(e.remarks_at_caret(), [] as [u64; 0]);
+    e.set_caret(at(b1, 12));
+    assert_eq!(e.remarks_at_caret(), [range], "the end is in it");
+
+    assert!(e.select_remark(range));
+    let (a, b) = e.selection_bounds().unwrap();
+    assert_eq!((a.offset, b.offset), (7, 12));
+    assert!(e.select_remark(block));
+    assert_eq!(e.selection(), None);
+    assert_eq!(e.caret().block, b0);
+
+    assert!(e.reply_remark(range, "This one.", "B", "2026-11-14"));
+    assert_eq!(e.doc().remarks[0].replies[0].author, "B");
+    assert!(e.set_remark_resolved(range, true));
+    e.set_caret(at(b1, 9));
+    assert_eq!(e.remarks_at_caret(), [] as [u64; 0], "resolved: not in it");
+    assert!(e.delete_remark(range));
+    assert!(!e.delete_remark(range));
+    assert_eq!(e.doc().remarks.len(), 1);
+}

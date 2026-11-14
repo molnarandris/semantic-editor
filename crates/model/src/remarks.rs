@@ -19,6 +19,17 @@ pub struct Remark {
     /// When it was written, `YYYY-MM-DD`.
     pub date: String,
     pub resolved: bool,
+    /// Answers, oldest first.
+    pub replies: Vec<Reply>,
+}
+
+/// An answer to a remark.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Reply {
+    pub text: String,
+    pub author: String,
+    /// `YYYY-MM-DD`.
+    pub date: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -178,7 +189,32 @@ impl Document {
             author: author.into(),
             date: date.into(),
             resolved: false,
+            replies: vec![],
         });
         id
+    }
+
+    /// The remarks in the order of the text: by block, then by where the
+    /// range starts (a whole block before ranges in it); detached last.
+    pub fn remarks_in_order(&self) -> Vec<&Remark> {
+        let key = |r: &Remark| {
+            let Some(index) = self.top_index(r.anchor.block()) else {
+                return (usize::MAX, 0);
+            };
+            let positions = self.positions(&self.blocks[index]);
+            let at = match self.remark_range(r) {
+                Some((start, _)) => positions.iter().position(|p| *p == start),
+                None => {
+                    let block = self.block(r.anchor.block());
+                    positions
+                        .iter()
+                        .position(|p| block.is_some_and(|b| b.contains(p.block)))
+                }
+            };
+            (index, at.unwrap_or(0))
+        };
+        let mut remarks: Vec<&Remark> = self.remarks.iter().collect();
+        remarks.sort_by_cached_key(|r| key(r));
+        remarks
     }
 }

@@ -1560,3 +1560,15 @@ reported targets, so only those are still listed. On the paper: no problems left
 - Follow-up (2026-11-14): the user saw no margin bar because their remark was on
   a selection, which was only shaded. Now every remark gets the bar: a range's
   spans its shaded lines (`rects_extent`); pointing at it shows the remark too.
+
+## R3a — Remarks for the sidebar, in the model (2026-11-14)
+
+- `Remark::replies` (`Reply`: text, author, date), saved in `remarks.json`
+  (`replies`, left out when empty; older files read fine).
+- `Document::remarks_in_order`: by top-level block, then where the range starts
+  (a whole block first); detached last.
+- `Editor`: `reply_remark`, `set_remark_resolved`, `delete_remark` (none part
+  of undo, like `add_remark`; refused in an old version); `remarks_at_caret`
+  (open remarks whose range holds the caret, ends included, or whose block
+  does); `select_remark` (selects the range, or caret at the block's start).
+- Tests `remarks_for_the_sidebar`, `remarks_roundtrip` (replies, resolved).
