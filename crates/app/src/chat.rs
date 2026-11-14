@@ -2,21 +2,17 @@
 //! Code (`claude -p`, no API key). Every question runs the command once,
 //! with the paper's Typst, the conversation so far and the question on
 //! stdin; nothing is kept on Claude Code's side. Claude gets no tools.
-//! The conversation is saved in the `.sem` as `chat.json`, outside the
-//! versions.
-
-use serde::{Deserialize, Serialize};
+//! The conversation is not saved (the user wants it throw-away).
 
 /// Who wrote a message.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Author {
     User,
     Claude,
 }
 
 /// What a question is about: the selection as Typst and where it is.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Quote {
     /// Where the selection is, e.g. `in section "Results", in this
     /// theorem: …` (see [`place`]).
@@ -24,33 +20,11 @@ pub struct Quote {
     pub source: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Message {
     pub author: Author,
     pub text: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quote: Option<Quote>,
-}
-
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct ChatFile {
-    messages: Vec<Message>,
-}
-
-/// `chat.json` for a conversation, `None` if it is empty.
-pub fn to_json(messages: &[Message]) -> Option<String> {
-    if messages.is_empty() {
-        return None;
-    }
-    let file = ChatFile {
-        messages: messages.to_vec(),
-    };
-    serde_json::to_string_pretty(&file).ok()
-}
-
-pub fn from_json(text: &str) -> Result<Vec<Message>, String> {
-    let file: ChatFile = serde_json::from_str(text).map_err(|e| format!("chat.json: {e}"))?;
-    Ok(file.messages)
 }
 
 /// Replaces Claude Code's own system prompt.
@@ -230,28 +204,6 @@ mod tests {
         assert!(before.contains("<message from=\"You\">\nBecause.\n</message>"));
         assert!(after.contains("<message from=\"Me\">\nSure?\n</message>"));
         assert!(!after.contains("<selection>"));
-    }
-
-    #[test]
-    fn chat_json_roundtrip() {
-        assert_eq!(to_json(&[]), None);
-        let messages = vec![
-            user(
-                "Why?",
-                Some(Quote {
-                    place: "in this paragraph:\nx".into(),
-                    source: "x".into(),
-                }),
-            ),
-            Message {
-                author: Author::Claude,
-                text: "$x$".into(),
-                quote: None,
-            },
-        ];
-        let json = to_json(&messages).unwrap();
-        assert!(!json.contains("\"quote\": null"));
-        assert_eq!(from_json(&json).unwrap(), messages);
     }
 
     #[test]

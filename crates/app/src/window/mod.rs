@@ -64,8 +64,6 @@ pub struct Window {
     /// Header, blocks and files as last saved or loaded, to tell if there are
     /// changes.
     saved: RefCell<(String, Vec<BlockNode>, Files, Vec<Remark>)>,
-    /// The chat as last saved or loaded.
-    saved_chat: RefCell<Vec<crate::chat::Message>>,
     /// The document's version history (`None` if it could not be set up:
     /// saving then works without one).
     history: RefCell<Option<History>>,
@@ -226,7 +224,6 @@ impl Window {
             file: RefCell::new(None),
             imported: RefCell::new(None),
             saved: RefCell::default(),
-            saved_chat: RefCell::default(),
             history: RefCell::new(None),
             block_editor: RefCell::new(None),
             problem_toast: RefCell::new(None),
@@ -273,12 +270,6 @@ impl Window {
         self.chat.connect_render(move |markup, width, done| {
             if let Some(this) = weak.upgrade() {
                 this.editor.render_snippet(markup, width, done);
-            }
-        });
-        let weak = Rc::downgrade(self);
-        self.chat.connect_changed(move || {
-            if let Some(this) = weak.upgrade() {
-                this.update_title();
             }
         });
         let weak = Rc::downgrade(self);
@@ -475,13 +466,8 @@ impl Window {
         let open = self.editor.document().remarks.iter().any(|r| !r.resolved);
         self.split_remarks.set_show_sidebar(open);
         self.right_pages.set_visible_child_name("remarks");
-        self.set_chat(vec![]);
-    }
-
-    /// Show `messages` as the document's (saved) conversation.
-    fn set_chat(&self, messages: Vec<crate::chat::Message>) {
-        self.chat.set_messages(messages.clone());
-        *self.saved_chat.borrow_mut() = messages;
+        // A conversation is not kept: a new document starts without one.
+        self.chat.clear();
     }
 
     /// The selection as the chat quotes it: its Typst, and where it is
@@ -687,7 +673,6 @@ impl Window {
             || doc.blocks != saved.1
             || doc.files != saved.2
             || doc.remarks != saved.3
-            || self.chat.messages() != *self.saved_chat.borrow()
     }
 
     /// File name without extension, for titles and export names.

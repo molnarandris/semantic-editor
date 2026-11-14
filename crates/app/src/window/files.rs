@@ -67,25 +67,24 @@ impl Window {
             Ok((bytes, _)) if typst => match String::from_utf8(bytes.to_vec()) {
                 Ok(text) => {
                     let files = self.local_files(&file, &text).await;
-                    Ok((typst_bridge::import_project(&text, files), None, vec![]))
+                    Ok((typst_bridge::import_project(&text, files), None))
                 }
                 Err(_) => Err("the file is not UTF-8 text".to_string()),
             },
-            Ok((bytes, _)) => file::from_zip(&bytes).map(|(doc, h, chat)| (doc, Some(h), chat)),
+            Ok((bytes, _)) => file::from_zip(&bytes).map(|(doc, h)| (doc, Some(h))),
             Err(e) => Err(e.to_string()),
         };
         match result {
-            Ok((doc, _, _)) if typst => {
+            Ok((doc, _)) if typst => {
                 self.close_block_editor();
                 self.set_document(doc, None, None);
                 let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned());
                 *self.imported.borrow_mut() = stem;
                 self.update_title();
             }
-            Ok((doc, history, chat)) => {
+            Ok((doc, history)) => {
                 self.close_block_editor();
                 self.set_document(doc, Some(file), history);
-                self.set_chat(chat);
             }
             Err(e) => self.toast(&format!("Could not open the file: {e}")),
         }
@@ -162,7 +161,6 @@ impl Window {
     async fn write(self: &Rc<Self>, file: gio::File) -> bool {
         self.apply_block_edit();
         let saved = super::saved_state(&self.editor.document());
-        let chat = self.chat.messages();
         // Every save that changes something is a version.
         if self.history.borrow().is_none() {
             *self.history.borrow_mut() = History::new().ok();
@@ -177,12 +175,11 @@ impl Window {
                     self.toast(&format!("Saved without a new version: {e}"));
                 }
             }
-            file::to_zip(&self.editor.document(), history.as_ref(), &chat)
+            file::to_zip(&self.editor.document(), history.as_ref())
         };
         match async { write_file(&file, zip?).await }.await {
             Ok(()) => {
                 *self.saved.borrow_mut() = saved;
-                *self.saved_chat.borrow_mut() = chat;
                 *self.file.borrow_mut() = Some(file);
                 *self.imported.borrow_mut() = None;
                 self.update_title();

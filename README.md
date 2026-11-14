@@ -91,7 +91,8 @@ and their own file formats. This editor tries to give you both:
   on the host; no API key). Claude sees the whole paper as Typst; with text selected,
   the question quotes it. Answers are typeset by Typst, formulas and the paper's own
   notation included; *Copy* puts an answer's Typst on the clipboard. Claude cannot
-  change the paper. The conversation is saved in the `.sem` file, not in its versions.
+  change the paper. Conversations are throw-away: not saved, gone with the window or
+  when another document is opened.
 
 ### Files
 

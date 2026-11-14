@@ -4,7 +4,8 @@
 //! written; Stop ends it. If it fails before any answer, the question goes
 //! back into the input box. Answers are shown rendered by Typst (with the
 //! paper's definitions), as plain text while they stream in or if they do
-//! not compile; Copy puts an answer's Typst on the clipboard.
+//! not compile; Copy puts an answer's Typst on the clipboard. The
+//! conversation is not kept: it ends with the window or the document.
 
 use std::cell::{Cell, RefCell};
 use std::ffi::OsStr;
@@ -46,7 +47,6 @@ pub struct ChatPane {
     /// The paper's Typst, asked for on every question.
     paper: RefCell<Option<Paper>>,
     render: RefCell<Option<Render>>,
-    on_changed: RefCell<Option<Box<dyn Fn()>>>,
 }
 
 impl ChatPane {
@@ -160,7 +160,6 @@ impl ChatPane {
             stopped: Cell::new(false),
             paper: RefCell::default(),
             render: RefCell::default(),
-            on_changed: RefCell::default(),
         });
 
         let weak = Rc::downgrade(&this);
@@ -213,18 +212,8 @@ impl ChatPane {
         *self.render.borrow_mut() = Some(Box::new(f));
     }
 
-    /// Call `f` when the conversation changes.
-    pub fn connect_changed(&self, f: impl Fn() + 'static) {
-        *self.on_changed.borrow_mut() = Some(Box::new(f));
-    }
-
-    pub fn messages(&self) -> Vec<Message> {
-        self.messages.borrow().clone()
-    }
-
-    /// Show `messages` (another document's conversation); a running answer
-    /// is stopped.
-    pub fn set_messages(&self, messages: Vec<Message>) {
+    /// Start a new conversation; a running answer is stopped.
+    pub fn clear(&self) {
         self.stop();
         // Its end then leaves this conversation alone.
         self.running.replace(None);
@@ -235,11 +224,8 @@ impl ChatPane {
         self.answers.borrow_mut().clear();
         self.list.append(&self.sizer);
         self.list.append(&self.empty);
-        for m in &messages {
-            self.append(m);
-        }
-        self.empty.set_visible(messages.is_empty());
-        *self.messages.borrow_mut() = messages;
+        self.empty.set_visible(true);
+        self.messages.borrow_mut().clear();
     }
 
     /// What the next question is about (the selection), shown above the
@@ -260,12 +246,6 @@ impl ChatPane {
 
     pub fn focus_input(&self) {
         self.input.grab_focus();
-    }
-
-    fn changed(&self) {
-        if let Some(f) = self.on_changed.borrow().as_ref() {
-            f();
-        }
     }
 
     /// Ask the input box's question.
@@ -297,7 +277,6 @@ impl ChatPane {
         self.append(&question);
         self.empty.set_visible(false);
         self.messages.borrow_mut().push(question);
-        self.changed();
         let answer = self.answer_label();
         let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move { run(weak, prompt, answer).await });
@@ -351,7 +330,6 @@ impl ChatPane {
             self.status.remove_css_class("dim-label");
             self.status.add_css_class("error");
         }
-        self.changed();
     }
 
     fn set_running(&self, running: bool) {
@@ -505,8 +483,7 @@ impl ChatPane {
         dialog.set_response_appearance("clear", adw::ResponseAppearance::Destructive);
         dialog.set_default_response(Some("cancel"));
         if dialog.choose_future(Some(&self.widget)).await == "clear" {
-            self.set_messages(vec![]);
-            self.changed();
+            self.clear();
         }
     }
 }

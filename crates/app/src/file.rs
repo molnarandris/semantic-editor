@@ -2,7 +2,6 @@
 //! version, the Typst version the document was written with, the header
 //! and the blocks (with their ids; other nodes' ids are regenerated on load);
 //! `remarks.json` the remarks (if any, see [`remarks_to_json`]);
-//! `chat.json` the chat with Claude (if any, not versioned, see [`crate::chat`]);
 //! `main.typ` is the document as Typst, written on every save so the
 //! unzipped folder compiles as is (not read back); every other entry is a
 //! project file at its path (`images/chain.png`), except the version
@@ -24,6 +23,7 @@ pub const FORMAT_VERSION: u32 = 1;
 const DOCUMENT: &str = "document.json";
 const MAIN: &str = "main.typ";
 const REMARKS: &str = "remarks.json";
+/// Written by a few builds of 2026-11-14 (the chat, now not kept); skipped.
 const CHAT: &str = "chat.json";
 
 /// A remark in `remarks.json`: on block `block`, or on the range between
@@ -256,13 +256,9 @@ pub fn snapshot(doc: &Document) -> Vec<(String, Vec<u8>)> {
         .collect()
 }
 
-/// The project zip of a document: its [`snapshot`], its `history` (if
-/// it has one) and its `chat`.
-pub fn to_zip(
-    doc: &Document,
-    history: Option<&History>,
-    chat: &[crate::chat::Message],
-) -> Result<Vec<u8>, String> {
+/// The project zip of a document: its [`snapshot`] and its `history` (if
+/// it has one).
+pub fn to_zip(doc: &Document, history: Option<&History>) -> Result<Vec<u8>, String> {
     let git = history
         .map(History::entries)
         .transpose()?
@@ -283,9 +279,6 @@ pub fn to_zip(
             if model::is_scratch(path) && safe_path(path) {
                 add(path, bytes)?;
             }
-        }
-        if let Some(json) = crate::chat::to_json(chat) {
-            add(CHAT, json.as_bytes())?;
         }
         for (path, bytes) in &git {
             add(&format!("{GIT_DIR}{path}"), bytes)?;
@@ -327,12 +320,9 @@ fn read_remarks(doc: &mut Document, bytes: Option<Vec<u8>>) -> Result<(), String
     remarks_from_json(doc, text)
 }
 
-/// A project zip's contents: its document with its files, its history (an
-/// empty one if it has none) and its chat.
-pub type Project = (Document, History, Vec<crate::chat::Message>);
-
-/// Read a project zip.
-pub fn from_zip(bytes: &[u8]) -> Result<Project, String> {
+/// Read a project zip: its document with its files, and its history (an
+/// empty one if it has none).
+pub fn from_zip(bytes: &[u8]) -> Result<(Document, History), String> {
     let not_sem = |e: zip::result::ZipError| format!("not a valid .sem file: {e}");
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(not_sem)?;
     let count = zip.len();
@@ -346,17 +336,12 @@ pub fn from_zip(bytes: &[u8]) -> Result<Project, String> {
     let (mut json, mut remarks) = (None, None);
     let mut files = model::Files::default();
     let mut git = vec![];
-    let mut chat = vec![];
     for i in 0..count {
         let (name, bytes) = read(i)?;
         match name.as_str() {
             DOCUMENT => json = Some(bytes),
             REMARKS => remarks = Some(bytes),
-            CHAT => {
-                let text = std::str::from_utf8(&bytes).map_err(|_| "chat.json is not UTF-8")?;
-                chat = crate::chat::from_json(text)?;
-            }
-            MAIN => {}
+            MAIN | CHAT => {}
             _ if name.ends_with('/') => {}
             _ if !safe_path(&name) => return Err(format!("not a valid .sem file: entry {name}")),
             _ => match name.strip_prefix(GIT_DIR) {
@@ -374,7 +359,7 @@ pub fn from_zip(bytes: &[u8]) -> Result<Project, String> {
         true => History::new()?,
         false => History::from_entries(&git)?,
     };
-    Ok((doc, history, chat))
+    Ok((doc, history))
 }
 
 #[cfg(test)]
@@ -493,6 +478,29 @@ mod tests {
         assert_eq!(raw(&opened), raw(&doc), "{raws:#?}");
     }
 
+    /// A `chat.json` written by an earlier build is skipped: not a
+    /// project file, and gone at the next save.
+    #[test]
+    fn old_chats_are_dropped() {
+        let doc = sample::document();
+        let zip = to_zip(&doc, None).unwrap();
+        let mut writer = zip::ZipWriter::new_append(Cursor::new(zip)).unwrap();
+        writer
+            .start_file(CHAT, SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(b"{\"messages\": []}").unwrap();
+        let zip = writer.finish().unwrap().into_inner();
+        let (back, _) = from_zip(&zip).unwrap();
+        assert!(back.files.get(CHAT).is_none(), "not a project file");
+        let again = to_zip(&back, None).unwrap();
+        let names: Vec<String> = zip::ZipArchive::new(Cursor::new(again))
+            .unwrap()
+            .file_names()
+            .map(|n| n.unwrap().into_owned())
+            .collect();
+        assert!(!names.iter().any(|n| n == CHAT));
+    }
+
     /// A project zip holds the document, its Typst and its files, and
     /// reads back as the same document with the same files.
     #[test]
@@ -503,15 +511,8 @@ mod tests {
         doc.files.insert("scratch/scan.png", vec![1, 2]);
         let history = History::new().unwrap();
         history.commit(&snapshot(&doc), "Ada", "Saved").unwrap();
-        let chat = vec![crate::chat::Message {
-            author: crate::chat::Author::User,
-            text: "Why?".into(),
-            quote: None,
-        }];
-        let zip = to_zip(&doc, Some(&history), &chat).unwrap();
-        let (back, back_history, back_chat) = from_zip(&zip).unwrap();
-        assert_eq!(back_chat, chat, "the chat is kept");
-        assert!(!back.files.iter().any(|(p, _)| p == CHAT));
+        let zip = to_zip(&doc, Some(&history)).unwrap();
+        let (back, back_history) = from_zip(&zip).unwrap();
         assert_eq!(
             back_history.versions().unwrap(),
             history.versions().unwrap()
@@ -520,14 +521,6 @@ mod tests {
         let old = from_snapshot(back_history.files_at(version).unwrap()).unwrap();
         assert_eq!(to_json(&old), to_json(&doc));
         assert_eq!(old.files, files, "no scratch file in a version");
-        assert!(
-            !back_history
-                .files_at(version)
-                .unwrap()
-                .iter()
-                .any(|(p, _)| p == CHAT),
-            "no chat in a version"
-        );
         // Scratch files are kept in the zip, not exported.
         assert_eq!(back.files.get("scratch/scan.png"), Some(&[1u8, 2][..]));
         assert!(
@@ -612,8 +605,8 @@ mod tests {
             author: "B".into(),
             date: "2026-11-14".into(),
         });
-        let zip = to_zip(&doc, None, &[]).unwrap();
-        let (mut back, _, _) = from_zip(&zip).unwrap();
+        let zip = to_zip(&doc, None).unwrap();
+        let (mut back, _) = from_zip(&zip).unwrap();
         assert_eq!(back.remarks.len(), 3);
         let (a, b) = back.remark_range(&back.remarks[0]).unwrap();
         assert_eq!((a.block, a.offset, b.offset), (para, 1, 4));

@@ -699,8 +699,9 @@ suggested changes, and later comparing versions like latexdiff. Decisions (user,
   streaming output (outside the Flatpak sandbox via `flatpak-spawn --host`; a
   permission in the Devel manifest), the paper's `.typ` export as context, a
   selection quoted as Typst source with where it is ("Theorem 3.2"). Claude writes
-  math in Typst syntax, rendered by the editor. The conversation is kept in the
-  `.sem`, not versioned (like scratch files). Claude gets no tools to change files.
+  math in Typst syntax, rendered by the editor. The conversation is throw-away:
+  not saved (user, 2026-11-14; at first it was kept in the `.sem`). Claude gets no
+  tools to change files.
   Every question runs `claude -p` once with the paper, the conversation so far and
   the question on stdin; no Claude Code session is kept (2026-11-14). C1: the tab,
   plain-text answers; C2: answers rendered by Typst (done 2026-11-14).

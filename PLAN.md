@@ -1653,3 +1653,8 @@ reported targets, so only those are still listed. On the paper: no problems left
 - Decision (user, 2026-11-14): the chat counts as an unsaved change (•, asked
   on close) and is written into the `.sem` on save; no autosave. Asked because
   the user felt the file changed without editing; kept as is.
+- Changed (user, same day): conversations are throw-away, not saved and not
+  an unsaved change. `chat.json` is no longer written; one written by the
+  builds before is skipped on load and dropped at the next save (test
+  `old_chats_are_dropped`). `ChatPane::clear` on every new document; the
+  JSON code and serde derives of `chat.rs` are gone.
