@@ -1642,3 +1642,11 @@ reported targets, so only those are still listed. On the paper: no problems left
 - Test `chat_answers_compile` (markup, lists, code, a wide formula kept inside
   the page). A real answer (Haiku) checked with the `typst` CLI: compiles.
   The pane is widget only: awaiting the user's test.
+- Follow-up (user, 2026-11-14): a proposed `#lemma[…]` came as a code block
+  (the prompt said "show the new text as Typst") and answers were wordier than
+  in Claude Code. The chat uses the user's account and default model (Opus
+  5.5; their settings set no model or style, `CLAUDE.md` is empty) but our
+  system prompt replaces Claude Code's, which asks for brevity. Now the prompt
+  asks for a few sentences, no preamble or closing summary, and Typst meant for
+  the paper written directly as markup, never in a code block. Checked with a
+  real question: `#lemma[…]` as markup, compiles, short.
