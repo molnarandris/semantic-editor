@@ -89,8 +89,9 @@ and their own file formats. This editor tries to give you both:
 - **Chat with Claude:** the Chat tab beside Remarks asks Claude about the
   paper through your logged-in [Claude Code](https://claude.com/claude-code) (`claude`
   on the host; no API key). Claude sees the whole paper as Typst; with text selected,
-  the question quotes it. Claude cannot change the paper. The conversation is saved in
-  the `.sem` file, not in its versions.
+  the question quotes it. Answers are typeset by Typst, formulas and the paper's own
+  notation included; *Copy* puts an answer's Typst on the clipboard. Claude cannot
+  change the paper. The conversation is saved in the `.sem` file, not in its versions.
 
 ### Files
 

@@ -12,6 +12,7 @@ use model::{Block, BlockNode, CursorPath, Document, Editor, NodeId};
 use typst_bridge::{
     Around, BLOCK_PAD_PT, BlockLayout, CompileJob, CompileResult, CounterState, HEADER_SPECIMEN,
     LabelTarget, Raster, SpanMap, Worker, outline_entry_rule, serialize_block, serialize_math_node,
+    snippet_rule,
 };
 
 use crate::caret::{self, Stop};
@@ -117,6 +118,16 @@ struct OutlineEntry {
     texture: Option<(gdk::Texture, f64)>,
 }
 
+/// Job ids of snippet renders (`SemEditor::render_snippet`): a counter
+/// with this bit set.
+const SNIPPET_BIT: u64 = 1 << 61;
+/// Snippets: logical pixels per pt.
+pub const SNIPPET_PX_PER_PT: f64 = 1.25;
+
+/// What a snippet render calls with: the texture and its device pixels per
+/// logical pixel, or the compile errors.
+pub type SnippetDone = Box<dyn FnOnce(Result<(gdk::Texture, f64), String>)>;
+
 /// The math call whose options tab shows (see `SemEditor::tab_call`).
 type TabCall = (Rc<[Stop]>, f64, NodeId, Vec<model::Step>);
 
@@ -141,6 +152,9 @@ pub struct SemEditor {
     views: RefCell<Vec<BlockView>>,
     preview: RefCell<Preview>,
     outline: RefCell<HashMap<NodeId, OutlineEntry>>,
+    /// Snippet renders waiting for their result, by job id.
+    snippets: RefCell<HashMap<u64, SnippetDone>>,
+    next_snippet: Cell<u64>,
     worker: OnceCell<Worker>,
     generation: Cell<u64>,
     /// Page width and pixels per point the current renders were requested at.
@@ -2282,6 +2296,71 @@ impl SemEditor {
         self.outline.borrow().get(&id)?.texture.clone()
     }
 
+    /// Render Typst `markup` (not part of the document) `width_pt` wide,
+    /// with the definitions of the whole document in force, in the
+    /// widget's text colour at 11pt; `done` gets the texture cropped to the
+    /// ink, or the errors.
+    pub(crate) fn render_snippet(&self, markup: &str, width_pt: f64, done: SnippetDone) {
+        let (header, files) = {
+            let ed = self.editor.borrow();
+            let doc = ed.doc();
+            // The last block's header holds the code blocks' definitions too.
+            let header = match self.views.borrow().last() {
+                Some(view) => view.around.header.clone(),
+                None => doc.header.as_str().into(),
+            };
+            (header, doc.files.clone())
+        };
+        let c = self.obj().color();
+        let hex = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+        let color = format!(
+            "rgb(\"#{:02x}{:02x}{:02x}\")",
+            hex(c.red()),
+            hex(c.green()),
+            hex(c.blue())
+        );
+        let prefix = snippet_rule(&color);
+        let n = self.next_snippet.get() + 1;
+        self.next_snippet.set(n);
+        let id = n | SNIPPET_BIT;
+        self.snippets.borrow_mut().insert(id, done);
+        let generation = self.generation.get() + 1;
+        self.generation.set(generation);
+        self.worker.get().expect("worker").submit(CompileJob {
+            block: NodeId(id),
+            generation,
+            around: Around {
+                header,
+                prefix,
+                files,
+                ..Around::default()
+            },
+            snippet: markup.to_string(),
+            map: SpanMap::default(),
+            width_pt,
+            pixel_per_pt: SNIPPET_PX_PER_PT * self.obj().scale_factor() as f64,
+            persist: false,
+            transient: true,
+        });
+    }
+
+    fn on_snippet_result(&self, result: CompileResult) {
+        let Some(done) = self.snippets.borrow_mut().remove(&result.block.0) else {
+            return;
+        };
+        done(
+            result
+                .outcome
+                .map_err(|e| e.join("\n"))
+                .and_then(|rendered| {
+                    let raster = rendered.raster;
+                    let bounds = raster.ink_bounds().ok_or("nothing to show")?;
+                    let scale = rendered.pixel_per_pt / SNIPPET_PX_PER_PT;
+                    Ok((texture(Arc::new(raster.crop(bounds))), scale))
+                }),
+        );
+    }
+
     fn on_preview_result(&self, result: CompileResult) {
         {
             let mut preview = self.preview.borrow_mut();
@@ -2311,6 +2390,10 @@ impl SemEditor {
     fn on_result(&self, result: CompileResult) {
         if result.block == PREVIEW_ID {
             self.on_preview_result(result);
+            return;
+        }
+        if result.block.0 & SNIPPET_BIT != 0 {
+            self.on_snippet_result(result);
             return;
         }
         if result.block.0 & OUTLINE_BIT != 0 {

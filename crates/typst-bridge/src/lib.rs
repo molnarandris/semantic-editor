@@ -18,7 +18,7 @@ pub use calls::{call_shape, math_call_shape};
 pub use code::{code_display, is_code, label_values_in_source, labels_in_source, refs_in_source};
 pub use compile::{
     Around, BLOCK_PAD_PT, Raster, block_document, compile, compile_pdf, outline_entry_rule,
-    render_page,
+    render_page, snippet_rule,
 };
 pub use counters::{
     CounterState, LabelTarget, chain_code, initial_state, label_report, missing_ref, ref_stub,

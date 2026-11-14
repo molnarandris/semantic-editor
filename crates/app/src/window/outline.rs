@@ -133,7 +133,7 @@ fn content(e: &Entry, render: Option<(gdk::Texture, f64)>) -> gtk::Widget {
     match render {
         Some((texture, scale)) => {
             let picture = Render::default();
-            picture.set(texture, scale, &e.title);
+            picture.set(texture, scale, Some(&e.title));
             picture.upcast()
         }
         None => plain_row(e).upcast(),
@@ -230,11 +230,12 @@ mod render {
                 _for_size: i32,
             ) -> (i32, i32, i32, i32) {
                 let (w, h) = self.size();
-                let size = match orientation {
-                    gtk::Orientation::Horizontal => w,
-                    _ => h,
-                };
-                (size, size, -1, -1)
+                // Narrower than its texture is allowed (it is then cut);
+                // a chat answer is rendered again for the new width.
+                match orientation {
+                    gtk::Orientation::Horizontal => (0, w, -1, -1),
+                    _ => (h, h, -1, -1),
+                }
             }
 
             fn snapshot(&self, snapshot: &gtk::Snapshot) {
@@ -276,10 +277,10 @@ mod render {
     impl Render {
         /// Show `texture` (`scale` device pixels per logical pixel), with
         /// `title` as its tooltip.
-        pub fn set(&self, texture: gdk::Texture, scale: f64, title: &str) {
+        pub fn set(&self, texture: gdk::Texture, scale: f64, title: Option<&str>) {
             self.imp().texture.replace(Some(texture));
             self.imp().scale.set(scale);
-            self.set_tooltip_text(Some(title));
+            self.set_tooltip_text(title);
             self.set_halign(gtk::Align::Start);
             self.set_valign(gtk::Align::Center);
             self.queue_resize();
@@ -287,7 +288,7 @@ mod render {
     }
 }
 
-use render::Render;
+pub(super) use render::Render;
 
 #[cfg(test)]
 mod tests {

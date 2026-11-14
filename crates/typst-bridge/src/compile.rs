@@ -64,6 +64,21 @@ pub fn outline_entry_rule(color: &str) -> String {
     )
 }
 
+/// Typst code before a chat answer (`SemEditor::render_snippet`): 11pt
+/// text in `color` (Typst code, `rgb("#202020")`), not justified (the
+/// column is narrow), a display formula too wide for it scaled down.
+pub fn snippet_rule(color: &str) -> String {
+    format!(
+        "#set text(size: 11pt, fill: {color})
+#set par(justify: false)
+#show math.equation.where(block: true): it => layout(size => {{
+  let w = measure(it).width
+  if w > size.width {{ scale(size.width / w * 100%, reflow: true, it) }} else {{ it }}
+}})
+"
+    )
+}
+
 /// Compile a complete Typst document. Errors are returned as messages.
 pub fn compile(world: &mut BridgeWorld, text: &str) -> Result<PagedDocument, Vec<String>> {
     world.set_main_text(text);
@@ -149,6 +164,29 @@ pub fn compile_pdf(source: &str, files: model::Files) -> Result<Vec<u8>, Vec<Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A chat answer as Claude writes it (Typst markup, math, code)
+    /// compiles after a header with `snippet_rule`, and has ink.
+    #[test]
+    fn chat_answers_compile() {
+        let around = Around {
+            header: "#set text(size: 12pt)\n#let RR = $bb(R)$\n".into(),
+            prefix: snippet_rule("rgb(\"#202020\")"),
+            ..Around::default()
+        };
+        let answer = "The proof uses *two* facts:\n\n- $f: RR -> RR$ is _monotone_,\n\
+                      - the bound $ sum_(i=1)^n a_i <= C $\n\nChange it to:\n\n\
+                      ```typ\n#theorem[$a = b$]\n```\n\n\
+                      $ f((x+y)/2) = f(1/2 x + (1 - 1/2) y) <= 1/2 f(x) + (1 - 1/2) f(y) $";
+        let (src, _) = block_document(&around, answer, 300.0);
+        let mut world = BridgeWorld::new();
+        let doc = compile(&mut world, &src).expect("compiles");
+        let raster = render_page(&doc.pages()[0], 1.0);
+        let (x, _, w, _) = raster.ink_bounds().expect("ink");
+        // The wide formula is scaled into the page's content box.
+        let pad = BLOCK_PAD_PT as u32;
+        assert!(x >= pad && x + w <= raster.width - pad, "{x} {w}");
+    }
 
     #[test]
     fn ink_bounds_and_crop() {

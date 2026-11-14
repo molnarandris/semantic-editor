@@ -2,7 +2,9 @@
 //! (see [`crate::chat`]), an input box below. A question asked while text
 //! is selected quotes the selection. The answer streams in as it is
 //! written; Stop ends it. If it fails before any answer, the question goes
-//! back into the input box.
+//! back into the input box. Answers are shown rendered by Typst (with the
+//! paper's definitions), as plain text while they stream in or if they do
+//! not compile; Copy puts an answer's Typst on the clipboard.
 
 use std::cell::{Cell, RefCell};
 use std::ffi::OsStr;
@@ -14,10 +16,20 @@ use gtk::{gio, glib};
 use crate::chat::{self, Author, Event, Message, Quote};
 
 type Paper = Box<dyn Fn() -> String>;
+/// Renders Typst markup at a width in px (`SemEditor::render_snippet`).
+type Render = Box<dyn Fn(&str, f64, RenderDone)>;
+type RenderDone = Box<dyn FnOnce(Result<(gtk::gdk::Texture, f64), String>)>;
 
 pub struct ChatPane {
     pub widget: gtk::Box,
     list: gtk::Box,
+    /// Tells the list's width, to render answers that wide.
+    sizer: gtk::DrawingArea,
+    /// The width answers were last rendered at, and the pending re-render.
+    width: Cell<i32>,
+    resize: RefCell<Option<glib::SourceId>>,
+    /// Each answer's view (body, then Copy) and its text.
+    answers: RefCell<Vec<(gtk::Box, String)>>,
     scroller: gtk::ScrolledWindow,
     empty: gtk::Label,
     quote_label: gtk::Label,
@@ -33,6 +45,7 @@ pub struct ChatPane {
     stopped: Cell<bool>,
     /// The paper's Typst, asked for on every question.
     paper: RefCell<Option<Paper>>,
+    render: RefCell<Option<Render>>,
     on_changed: RefCell<Option<Box<dyn Fn()>>>,
 }
 
@@ -63,6 +76,8 @@ impl ChatPane {
             .justify(gtk::Justification::Center)
             .margin_top(24)
             .build();
+        let sizer = gtk::DrawingArea::builder().hexpand(true).build();
+        list.append(&sizer);
         list.append(&empty);
         let scroller = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
@@ -129,6 +144,10 @@ impl ChatPane {
         let this = Rc::new(Self {
             widget,
             list,
+            sizer,
+            width: Cell::new(0),
+            resize: RefCell::default(),
+            answers: RefCell::default(),
             scroller,
             empty,
             quote_label,
@@ -140,6 +159,7 @@ impl ChatPane {
             running: RefCell::default(),
             stopped: Cell::new(false),
             paper: RefCell::default(),
+            render: RefCell::default(),
             on_changed: RefCell::default(),
         });
 
@@ -169,6 +189,12 @@ impl ChatPane {
         });
         this.input.add_controller(keys);
         let weak = Rc::downgrade(&this);
+        this.sizer.connect_resize(move |_, width, _| {
+            if let Some(this) = weak.upgrade() {
+                this.width_changed(width);
+            }
+        });
+        let weak = Rc::downgrade(&this);
         clear.connect_clicked(move |_| {
             if let Some(this) = weak.upgrade() {
                 glib::spawn_future_local(async move { this.confirm_clear().await });
@@ -180,6 +206,11 @@ impl ChatPane {
     /// Call `f` for the paper's Typst when a question is asked.
     pub fn connect_paper(&self, f: impl Fn() -> String + 'static) {
         *self.paper.borrow_mut() = Some(Box::new(f));
+    }
+
+    /// Call `f` to render an answer's Typst `width` px wide.
+    pub fn connect_render(&self, f: impl Fn(&str, f64, RenderDone) + 'static) {
+        *self.render.borrow_mut() = Some(Box::new(f));
     }
 
     /// Call `f` when the conversation changes.
@@ -201,6 +232,8 @@ impl ChatPane {
         while let Some(child) = self.list.first_child() {
             self.list.remove(&child);
         }
+        self.answers.borrow_mut().clear();
+        self.list.append(&self.sizer);
         self.list.append(&self.empty);
         for m in &messages {
             self.append(m);
@@ -304,12 +337,14 @@ impl ChatPane {
             }
             self.empty.set_visible(self.messages.borrow().is_empty());
         } else {
-            answer.set_label(text.trim());
-            self.messages.borrow_mut().push(Message {
+            self.list.remove(answer);
+            let m = Message {
                 author: Author::Claude,
                 text: text.trim().to_string(),
                 quote: None,
-            });
+            };
+            self.append(&m);
+            self.messages.borrow_mut().push(m);
         }
         if let Some(e) = &error {
             self.status.set_label(e);
@@ -368,9 +403,80 @@ impl ChatPane {
                 card.append(&text);
                 self.list.append(&card);
             }
-            Author::Claude => self.list.append(&text_label(&m.text)),
+            Author::Claude => {
+                let view = self.answer_view(&m.text);
+                self.list.append(&view);
+                self.render_answer(&view, &m.text);
+                self.answers.borrow_mut().push((view, m.text.clone()));
+            }
         }
         self.scroll_to_end();
+    }
+
+    /// An answer: its text (until rendered), Copy below.
+    fn answer_view(&self, text: &str) -> gtk::Box {
+        let view = gtk::Box::new(gtk::Orientation::Vertical, 2);
+        view.append(&text_label(text));
+        let copy = gtk::Button::builder()
+            .label("Copy")
+            .tooltip_text("Copy the Answer as Typst")
+            .halign(gtk::Align::End)
+            .css_classes(["flat", "caption"])
+            .build();
+        let text = text.to_string();
+        copy.connect_clicked(move |button| button.clipboard().set_text(&text));
+        view.append(&copy);
+        view
+    }
+
+    /// Render an answer's Typst into its view, as wide as the list; it
+    /// stays plain text if it does not compile.
+    fn render_answer(&self, view: &gtk::Box, text: &str) {
+        let width = self.sizer.width();
+        let render = self.render.borrow();
+        let (Some(render), true) = (render.as_ref(), width > 0) else {
+            return; // Rendered once the list has a width.
+        };
+        self.width.set(width);
+        let view = view.clone();
+        render(
+            text,
+            width as f64,
+            Box::new(move |result| {
+                let Ok((texture, scale)) = result else {
+                    return;
+                };
+                let picture = super::outline::Render::default();
+                picture.set(texture, scale, None);
+                if let Some(body) = view.first_child() {
+                    view.remove(&body);
+                }
+                view.prepend(&picture);
+            }),
+        );
+    }
+
+    /// The list is `width` px wide now: render the answers again for it,
+    /// once it stays so for a moment (while the window is resized).
+    fn width_changed(self: &Rc<Self>, width: i32) {
+        if width <= 0 || width == self.width.get() {
+            return;
+        }
+        if let Some(pending) = self.resize.take() {
+            pending.remove();
+        }
+        let weak = Rc::downgrade(self);
+        let id = glib::timeout_add_local_once(std::time::Duration::from_millis(300), move || {
+            let Some(this) = weak.upgrade() else {
+                return;
+            };
+            this.resize.replace(None);
+            let answers = this.answers.borrow().clone();
+            for (view, text) in &answers {
+                this.render_answer(view, text);
+            }
+        });
+        self.resize.replace(Some(id));
     }
 
     /// An empty answer at the end, filled as it streams in.

@@ -1620,3 +1620,25 @@ reported targets, so only those are still listed. On the paper: no problems left
 - Checked end to end from inside the sandbox with the app's arguments (answer
   in Typst math, no tools, no MCP). The pane is widget only: awaiting the user's
   test. Next C2: render answers with Typst.
+
+## C2 — Chat answers typeset by Typst (2026-11-14)
+
+- `SemEditor::render_snippet(markup, width_px, done)`: a transient job on the
+  editor's worker (job id: a counter with `SNIPPET_BIT`), around it the last
+  block's header (the document header and every code block, so the paper's
+  definitions work) and the files; `typst_bridge::snippet_rule`: 11pt in the
+  widget's text colour, no justification, a display formula wider than the
+  column scaled down (`layout` + `measure` + `scale(reflow: true)`). Result
+  cropped to the ink, 1.25 logical px per pt.
+- `ChatPane`: an answer streams in as plain text; when complete it is
+  rendered and the picture (the outline's `Render`, now with an optional
+  tooltip and no minimum width) replaces the text; if it does not compile it
+  stays plain text. Under each answer *Copy* (its Typst). A zero-height
+  `DrawingArea` in the list reports the width (`resize`); answers are rendered
+  again 300 ms after the width changes, and first when the list gets a width
+  (a conversation loaded while the sidebar is hidden).
+- System prompt: the answer is compiled with the paper's definitions; refer to
+  parts by name and number, no `@` references or labels.
+- Test `chat_answers_compile` (markup, lists, code, a wide formula kept inside
+  the page). A real answer (Haiku) checked with the `typst` CLI: compiles.
+  The pane is widget only: awaiting the user's test.

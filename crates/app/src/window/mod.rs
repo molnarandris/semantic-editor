@@ -270,6 +270,12 @@ impl Window {
             None => String::new(),
         });
         let weak = Rc::downgrade(self);
+        self.chat.connect_render(move |markup, width, done| {
+            if let Some(this) = weak.upgrade() {
+                this.editor.render_snippet(markup, width, done);
+            }
+        });
+        let weak = Rc::downgrade(self);
         self.chat.connect_changed(move || {
             if let Some(this) = weak.upgrade() {
                 this.update_title();

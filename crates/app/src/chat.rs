@@ -59,8 +59,11 @@ its author. The paper is written in Typst; its source is given between \
 <paper> and </paper>. Answer to the point. Format your answers as Typst \
 markup, not Markdown: *bold*, _emphasis_, `code`, lists with - or +. Write \
 all mathematics in Typst math syntax, never LaTeX: inline as $x^2$, display \
-math as $ sum_(i=1)^n a_i $ with spaces inside the dollars. You cannot change \
-the paper or any file; to propose a change, show the new text as Typst.";
+math as $ sum_(i=1)^n a_i $ with spaces inside the dollars. Your answer is \
+compiled with the paper's definitions, so its own functions and notation work. \
+Refer to parts of the paper by name and number (Theorem 2, Section 3), never \
+with @ references or <labels>, which do not exist in your answer. You cannot \
+change the paper or any file; to propose a change, show the new text as Typst.";
 
 /// Where a quoted selection is: the section heading before its block (if
 /// any) and the whole top-level block's Typst, which Claude can find in
