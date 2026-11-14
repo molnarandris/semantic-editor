@@ -993,8 +993,9 @@ impl SemEditor {
         }
     }
 
-    /// Open remarks, under the text: a range is shaded yellow; a whole
-    /// block gets a yellow bar in the paper's left margin.
+    /// Open remarks, under the text: a range is shaded yellow; every remark
+    /// gets a yellow bar in the paper's left margin (a range's beside its
+    /// lines, a whole block's beside the block).
     fn snapshot_remarks(&self, snapshot: &gtk::Snapshot, x0: f64, scroll: f64) {
         let zoom = self.zoom.get();
         let shade = gdk::RGBA::new(1.0, 0.82, 0.15, 0.35);
@@ -1015,23 +1016,36 @@ impl SemEditor {
             }
             (ranges, blocks)
         };
+        // Every remark gets a bar in the margin: a range beside its lines.
+        let mut bars = vec![];
         for (first, last) in &ranges {
-            for rect in self.range_rects(first, last, x0, scroll) {
-                snapshot.append_color(&shade, &rect);
+            let rects = self.range_rects(first, last, x0, scroll);
+            for rect in &rects {
+                snapshot.append_color(&shade, rect);
             }
+            bars.extend(Self::rects_extent(&rects));
         }
         for id in blocks {
-            let Some((y, h)) = self.block_extent(id) else {
-                continue;
-            };
+            if let Some((y, h)) = self.block_extent(id) {
+                bars.push((y - scroll, h));
+            }
+        }
+        for (y, h) in bars {
             let rect = graphene::Rect::new(
                 (x0 - PAPER_PAD_PT * zoom / 2.0 - 1.5) as f32,
-                (y - scroll) as f32,
+                y as f32,
                 3.0,
                 h as f32,
             );
             snapshot.append_color(&bar, &rect);
         }
+    }
+
+    /// The vertical span (top, height) of `rects`, if any.
+    fn rects_extent(rects: &[graphene::Rect]) -> Option<(f64, f64)> {
+        let top = rects.iter().map(|r| r.y()).reduce(f32::min)?;
+        let bottom = rects.iter().map(|r| r.y() + r.height()).reduce(f32::max)?;
+        Some((top as f64, (bottom - top) as f64))
     }
 
     /// The open remarks drawn at widget point `(x, y)` (on a shaded range
@@ -1049,20 +1063,23 @@ impl SemEditor {
                 .cloned()
                 .collect()
         };
+        let on_bar = |extent: Option<(f64, f64)>| {
+            let bar = x0 - PAPER_PAD_PT * zoom / 2.0;
+            (x - bar).abs() <= 6.0 && extent.is_some_and(|(top, h)| (top..=top + h).contains(&y))
+        };
         let mut found = vec![];
         for remark in &remarks {
             let range = self.editor.borrow().doc().remark_range(remark);
             let hit = match (remark.anchor, range) {
-                (_, Some((first, last))) => self
-                    .range_rects(&first, &last, x0, scroll)
-                    .iter()
-                    .any(|r| r.contains_point(&graphene::Point::new(x as f32, y as f32))),
+                (_, Some((first, last))) => {
+                    let rects = self.range_rects(&first, &last, x0, scroll);
+                    on_bar(Self::rects_extent(&rects))
+                        || rects
+                            .iter()
+                            .any(|r| r.contains_point(&graphene::Point::new(x as f32, y as f32)))
+                }
                 (model::Anchor::Block(id), None) => {
-                    let bar = x0 - PAPER_PAD_PT * zoom / 2.0;
-                    (x - bar).abs() <= 6.0
-                        && self
-                            .block_extent(id)
-                            .is_some_and(|(top, h)| (top - scroll..=top - scroll + h).contains(&y))
+                    on_bar(self.block_extent(id).map(|(top, h)| (top - scroll, h)))
                 }
                 _ => false,
             };

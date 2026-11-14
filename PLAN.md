@@ -1557,3 +1557,6 @@ reported targets, so only those are still listed. On the paper: no problems left
   text as a tooltip, until the sidebar (R3).
 - Remarks count for unsaved changes (`saved_state`). README: feature and key.
 - Drawing is unchecked by tests (widget only): awaiting the user's test.
+- Follow-up (2026-11-14): the user saw no margin bar because their remark was on
+  a selection, which was only shaded. Now every remark gets the bar: a range's
+  spans its shaded lines (`rects_extent`); pointing at it shows the remark too.

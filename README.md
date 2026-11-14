@@ -82,7 +82,7 @@ and their own file formats. This editor tries to give you both:
 - Undo and redo of everything. Zoom with Ctrl+plus and Ctrl+minus.
 - **Remarks** (Ctrl+Alt+M): a note on the selected text, or on the whole block the caret
   is in (a theorem). They are kept beside the text, not in it: the selected text is
-  shaded yellow, a remarked block gets a yellow bar in the margin, and pointing at
+  shaded yellow, every remark gets a yellow bar in the margin, and pointing at
   either shows the remark. Remarks follow the text as you edit it.
 
 ### Files
