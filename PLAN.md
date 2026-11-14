@@ -1650,3 +1650,6 @@ reported targets, so only those are still listed. On the paper: no problems left
   asks for a few sentences, no preamble or closing summary, and Typst meant for
   the paper written directly as markup, never in a code block. Checked with a
   real question: `#lemma[…]` as markup, compiles, short.
+- Decision (user, 2026-11-14): the chat counts as an unsaved change (•, asked
+  on close) and is written into the `.sem` on save; no autosave. Asked because
+  the user felt the file changed without editing; kept as is.
