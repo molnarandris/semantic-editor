@@ -1613,7 +1613,7 @@ reported targets, so only those are still listed. On the paper: no problems left
   the error shows under it. Clear (with a confirmation). The selection's quote
   (`SemEditor::selection_source`, `Window::selection_quote`: section heading
   and the top-level block's Typst) shows above the input. *Ask Claude…*
-  (Ctrl+Alt+K) opens the tab. Hidden in an old version's window. The chat
+  (menu) opens the tab; no shortcut (the user does not want one). Hidden in an old version's window. The chat
   counts for unsaved changes.
 - Checked end to end from inside the sandbox with the app's arguments (answer
   in Typst math, no tools, no MCP). The pane is widget only: awaiting the user's
