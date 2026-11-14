@@ -692,8 +692,8 @@ suggested changes, and later comparing versions like latexdiff. Decisions (user,
   remark falls back to the whole block, never lost. A right sidebar, tab Remarks:
   cards next to what they point at, highlighted in the text, click jumps either
   way; author, replies, Resolve. Stored in the `.sem` beside the document (committed
-  with it), not in the Typst text: the export stays clean. A one-time program
-  converts the `#audit[…]` calls of the user's only document into remarks.
+  with it), not in the Typst text: the export stays clean. (A one-time conversion
+  of the `#audit[…]` calls was dropped, 2026-11-14: the user does it by hand.)
 - **C — Chat.** Tab Chat in the right sidebar. Through the user's logged-in Claude
   Code, as the Obsidian plugin Claudian does: the app runs `claude -p` with JSON
   streaming output (outside the Flatpak sandbox via `flatpak-spawn --host`; a
