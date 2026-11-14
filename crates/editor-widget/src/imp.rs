@@ -831,6 +831,14 @@ impl SemEditor {
         self.after_jump();
     }
 
+    /// Select remark `id`'s text (or go to its block) and show it.
+    pub(crate) fn select_remark(&self, id: u64) {
+        if self.editor.borrow_mut().select_remark(id) {
+            self.goal_x.set(None);
+            self.after_jump();
+        }
+    }
+
     /// Select the structure of breadcrumb entry `path_len`.
     pub(crate) fn select_crumb(&self, path_len: usize) {
         let changed = self.editor.borrow_mut().select_crumb(path_len);

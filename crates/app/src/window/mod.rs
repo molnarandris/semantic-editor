@@ -6,6 +6,7 @@ mod block_editor;
 mod files;
 mod old_version;
 mod outline;
+mod remarks;
 mod title_editor;
 mod versions;
 
@@ -23,6 +24,7 @@ use crate::sample;
 use block_editor::BlockEditor;
 use old_version::OldVersion;
 use outline::Outline;
+use remarks::{RemarkAction, RemarksPane, Shown};
 use versions::VersionsPane;
 
 thread_local! {
@@ -38,6 +40,9 @@ pub struct Window {
     toasts: adw::ToastOverlay,
     outline: Outline,
     versions: VersionsPane,
+    remarks: RemarksPane,
+    /// Holds the remarks sidebar on the right.
+    split_remarks: adw::OverlaySplitView,
     /// The sidebar's Outline / Versions switcher (hidden for an old
     /// version).
     sidebar_switcher: adw::InlineViewSwitcher,
@@ -96,6 +101,11 @@ impl Window {
             .tooltip_text("Main Menu")
             .build();
         header.pack_end(&menu_button);
+        let show_remarks = gtk::ToggleButton::builder()
+            .icon_name("sidebar-show-right-symbolic")
+            .tooltip_text("Remarks")
+            .build();
+        header.pack_end(&show_remarks);
 
         let editor = SemEditor::new();
         let scroller = gtk::ScrolledWindow::builder()
@@ -106,6 +116,21 @@ impl Window {
             .build();
         let toasts = adw::ToastOverlay::new();
         toasts.set_child(Some(&scroller));
+
+        // The remarks on the right.
+        let remarks = RemarksPane::new();
+        let split_remarks = adw::OverlaySplitView::builder()
+            .sidebar(&remarks.widget)
+            .sidebar_position(gtk::PackType::End)
+            .content(&toasts)
+            .max_sidebar_width(300.0)
+            .show_sidebar(false)
+            .build();
+        show_remarks
+            .bind_property("active", &split_remarks, "show-sidebar")
+            .bidirectional()
+            .sync_create()
+            .build();
 
         // The sidebar: the outline and the versions, a switcher on top.
         let outline = Outline::new();
@@ -130,7 +155,7 @@ impl Window {
         sidebar.append(&pages);
         let split = adw::OverlaySplitView::builder()
             .sidebar(&sidebar)
-            .content(&toasts)
+            .content(&split_remarks)
             .max_sidebar_width(260.0)
             .build();
         show_outline
@@ -165,6 +190,8 @@ impl Window {
             toasts,
             outline,
             versions,
+            remarks,
+            split_remarks,
             sidebar_switcher: switcher,
             banner,
             origin: RefCell::new(None),
@@ -202,6 +229,24 @@ impl Window {
                 this.sync_block_editor();
                 this.outline.update(&this.editor);
                 this.update_scratch();
+                this.update_remarks();
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.remarks.connect_action(move |action| {
+            let Some(this) = weak.upgrade() else {
+                return;
+            };
+            match action {
+                RemarkAction::Select(id) => {
+                    this.editor.select_remark(id);
+                    this.editor.grab_focus();
+                }
+                RemarkAction::Reply(id) => spawn(this.reply_remark(id)),
+                RemarkAction::Resolve(id, resolved) => {
+                    this.editor.set_remark_resolved(id, resolved)
+                }
+                RemarkAction::Delete(id) => this.editor.delete_remark(id),
             }
         });
         let weak = Rc::downgrade(self);
@@ -377,6 +422,23 @@ impl Window {
         // Emits caret-moved, which updates the title and status bar.
         self.editor.set_document(doc);
         self.update_versions();
+        let open = self.editor.document().remarks.iter().any(|r| !r.resolved);
+        self.split_remarks.set_show_sidebar(open);
+    }
+
+    /// Show the remarks in the right sidebar, the caret's selected.
+    fn update_remarks(&self) {
+        let shown: Vec<Shown> = {
+            let doc = self.editor.document();
+            doc.remarks_in_order()
+                .into_iter()
+                .map(|r| Shown {
+                    remark: r.clone(),
+                    detached: doc.block(r.anchor.block()).is_none(),
+                })
+                .collect()
+        };
+        self.remarks.update(shown, &self.editor.remarks_at_caret());
     }
 
     /// Show the scratch files in the sidebar, with whether they are used.
@@ -448,6 +510,35 @@ impl Window {
     /// Ask for a remark and put it on the selection, or on the block the
     /// caret is in.
     async fn add_remark(self: Rc<Self>) {
+        let text = self
+            .ask_remark_text(
+                "Add Remark",
+                "On the selected text, or on the block the caret is in.",
+                "_Add",
+            )
+            .await;
+        if let Some(text) = text {
+            if self.editor.add_remark(&text, &files::author(), &today()) {
+                self.split_remarks.set_show_sidebar(true);
+            } else {
+                self.toast("Remarks cannot be added to an old version");
+            }
+        }
+        self.editor.grab_focus();
+    }
+
+    /// Ask for an answer to remark `id` and add it.
+    async fn reply_remark(self: Rc<Self>, id: u64) {
+        let text = self.ask_remark_text("Reply", "", "_Reply").await;
+        if let Some(text) = text {
+            self.editor
+                .reply_remark(id, &text, &files::author(), &today());
+        }
+    }
+
+    /// Ask for a remark's or reply's text (several lines); `None` if
+    /// cancelled or empty.
+    async fn ask_remark_text(&self, heading: &str, body: &str, button: &str) -> Option<String> {
         let text = gtk::TextView::builder()
             .wrap_mode(gtk::WrapMode::WordChar)
             .top_margin(6)
@@ -461,32 +552,20 @@ impl Window {
             .min_content_width(320)
             .has_frame(true)
             .build();
-        let dialog = adw::AlertDialog::new(
-            Some("Add Remark"),
-            Some("On the selected text, or on the block the caret is in."),
-        );
+        let dialog = adw::AlertDialog::new(Some(heading), (!body.is_empty()).then_some(body));
         dialog.set_extra_child(Some(&scrolled));
-        dialog.add_responses(&[("cancel", "_Cancel"), ("add", "_Add")]);
-        dialog.set_response_appearance("add", adw::ResponseAppearance::Suggested);
-        dialog.set_default_response(Some("add"));
+        dialog.add_responses(&[("cancel", "_Cancel"), ("ok", button)]);
+        dialog.set_response_appearance("ok", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("ok"));
         dialog.set_close_response("cancel");
         text.grab_focus();
         let answer = dialog.choose_future(Some(&self.window)).await;
         let buffer = text.buffer();
-        let remark = buffer
+        let text = buffer
             .text(&buffer.start_iter(), &buffer.end_iter(), false)
             .trim()
             .to_string();
-        if answer == "add" && !remark.is_empty() {
-            let date = gtk::glib::DateTime::now_local()
-                .and_then(|d| d.format("%Y-%m-%d"))
-                .map(|d| d.to_string())
-                .unwrap_or_default();
-            if !self.editor.add_remark(&remark, &files::author(), &date) {
-                self.toast("Remarks cannot be added to an old version");
-            }
-        }
-        self.editor.grab_focus();
+        (answer == "ok" && !text.is_empty()).then_some(text)
     }
 
     /// Ask for a version's name ("arXiv submission").
@@ -586,6 +665,14 @@ fn saved_state(doc: &Document) -> (String, Vec<BlockNode>, Files, Vec<Remark>) {
         doc.files.clone(),
         doc.remarks.clone(),
     )
+}
+
+/// Today as `YYYY-MM-DD`, for remarks.
+fn today() -> String {
+    glib::DateTime::now_local()
+        .and_then(|d| d.format("%Y-%m-%d"))
+        .map(|d| d.to_string())
+        .unwrap_or_default()
 }
 
 /// An empty document with the default header.

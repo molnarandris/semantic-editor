@@ -83,7 +83,9 @@ and their own file formats. This editor tries to give you both:
 - **Remarks** (Ctrl+Alt+M): a note on the selected text, or on the whole block the caret
   is in (a theorem). They are kept beside the text, not in it: the selected text is
   shaded yellow, every remark gets a yellow bar in the margin, and pointing at
-  either shows the remark. Remarks follow the text as you edit it.
+  either shows the remark. Remarks follow the text as you edit it. The Remarks sidebar
+  on the right lists them in the order of the text: click one to select its text, reply
+  to it, resolve it; the remarks the caret is in are highlighted there.
 
 ### Files
 

@@ -595,7 +595,11 @@ mod tests {
         assert_eq!(back.remarks[1].anchor, model::Anchor::Block(block));
         assert_eq!(back.remarks[1].text, "Block.");
         // (The range's text node gets a new id on load: compare the others.)
-        assert_eq!(back.remarks[1..], doc.remarks[1..], "replies and resolved kept");
+        assert_eq!(
+            back.remarks[1..],
+            doc.remarks[1..],
+            "replies and resolved kept"
+        );
         assert_eq!(back.remarks[2].anchor, model::Anchor::Block(gone));
         assert!(back.fresh_id() > gone);
         back.check_invariants().unwrap();

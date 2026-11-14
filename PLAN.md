@@ -1572,3 +1572,19 @@ reported targets, so only those are still listed. On the paper: no problems left
   (open remarks whose range holds the caret, ends included, or whose block
   does); `select_remark` (selects the range, or caret at the block's start).
 - Tests `remarks_for_the_sidebar`, `remarks_roundtrip` (replies, resolved).
+
+## R3b — The Remarks sidebar (2026-11-14)
+
+- A right sidebar (`adw::OverlaySplitView` at the end, inside the outline's),
+  toggled by a header button; shown on opening a document with open remarks
+  and after adding one. `window/remarks.rs`, `RemarksPane`.
+- A card per remark in text order (`remarks_in_order`): author, date, text,
+  replies indented; "Its text was deleted." for a detached one. Open remarks
+  first; resolved ones below under *Resolved*, dimmed.
+- Clicking a card selects its range (or goes to its block) and focuses the
+  editor; on every caret move the cards of `remarks_at_caret` are selected
+  and scrolled into view. The pane rebuilds only when the remarks change.
+- Buttons: Reply (dialog, as for adding; `ask_remark_text`), Resolve; on a
+  resolved card Reopen and Delete. None in an old version's window.
+- Not yet: the cards beside their text (they are a list), editing a remark,
+  remark changes in undo. Widget only: awaiting the user's test.

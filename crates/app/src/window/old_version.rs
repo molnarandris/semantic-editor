@@ -72,6 +72,7 @@ impl Window {
             stem: self.stem(),
         });
         view.editor.set_read_only(true);
+        view.remarks.set_read_only(true);
         view.set_document(doc, None, None);
         *view.history.borrow_mut() = None;
         for name in EDITING_ACTIONS {

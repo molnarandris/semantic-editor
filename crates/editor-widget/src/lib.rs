@@ -149,6 +149,40 @@ impl SemEditor {
         added
     }
 
+    /// The open remarks the caret is in (see `Editor::remarks_at_caret`).
+    pub fn remarks_at_caret(&self) -> Vec<u64> {
+        self.imp().editor.borrow().remarks_at_caret()
+    }
+
+    /// Select remark `id`'s text (or go to its block) and show it.
+    pub fn select_remark(&self, id: u64) {
+        self.imp().select_remark(id);
+    }
+
+    /// Answer remark `id`.
+    pub fn reply_remark(&self, id: u64, text: &str, author: &str, date: &str) {
+        let imp = self.imp();
+        if imp.editor.borrow_mut().reply_remark(id, text, author, date) {
+            imp.after_command(false);
+        }
+    }
+
+    /// Resolve or reopen remark `id`.
+    pub fn set_remark_resolved(&self, id: u64, resolved: bool) {
+        let imp = self.imp();
+        if imp.editor.borrow_mut().set_remark_resolved(id, resolved) {
+            imp.after_command(false);
+        }
+    }
+
+    /// Delete remark `id`.
+    pub fn delete_remark(&self, id: u64) {
+        let imp = self.imp();
+        if imp.editor.borrow_mut().delete_remark(id) {
+            imp.after_command(false);
+        }
+    }
+
     /// Select the structure a breadcrumb entry stands for.
     pub fn select_crumb(&self, crumb: &Crumb) {
         self.imp().select_crumb(crumb.path_len);
