@@ -1605,8 +1605,10 @@ reported targets, so only those are still listed. On the paper: no problems left
   paper never meets the argument length limit. `parse_line`: text deltas, the
   result (error text when `is_error`). System prompt: Typst markup and Typst
   math, no LaTeX, no Markdown.
-- Right sidebar: Remarks | Chat switcher (`adw::InlineViewSwitcher`), wider
-  (up to 380). `window/chat.rs`, `ChatPane`: messages (the user's in a card,
+- Right sidebar: Remarks | Chat switcher (`adw::InlineViewSwitcher`), wider:
+  40 % of the window, 320–520 px (the user found it too narrow; libadwaita
+  1.10's split views cannot be dragged wider, and a `gtk::Paned` would leave
+  libadwaita, so not now). `window/chat.rs`, `ChatPane`: messages (the user's in a card,
   the quote dimmed above), input box (Enter asks, Shift+Enter new line), the
   button turns into Stop while Claude writes; the answer streams in. If it fails
   or is stopped before any text, the question goes back into the input box and

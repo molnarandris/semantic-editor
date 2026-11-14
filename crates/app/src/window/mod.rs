@@ -144,8 +144,10 @@ impl Window {
             .sidebar(&right)
             .sidebar_position(gtk::PackType::End)
             .content(&toasts)
-            .max_sidebar_width(380.0)
-            .sidebar_width_fraction(0.3)
+            // libadwaita's split views cannot be resized by dragging.
+            .min_sidebar_width(320.0)
+            .max_sidebar_width(520.0)
+            .sidebar_width_fraction(0.4)
             .show_sidebar(false)
             .build();
         show_remarks
