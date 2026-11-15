@@ -1166,8 +1166,14 @@ impl Editor {
         let Some(p) = self.row_pos() else {
             return false;
         };
-        if !p.nested() && p.base == 1 && p.len == 0 {
-            return self.make_display(&p);
+        // At the very start of a formula (`$$` makes an empty one display):
+        // display ⇄ inline, as in TeXmacs.
+        if !p.nested() && p.offset == 0 {
+            match p.base {
+                0 => return self.make_inline(&p),
+                1 => return self.make_display(&p),
+                _ => {}
+            }
         }
         self.leave_formula(&p)
     }
@@ -1185,6 +1191,10 @@ impl Editor {
         let Some(inlines) = block.kind.inlines() else {
             return self.leave_formula(p);
         };
+        let Inline::Math(row) = &inlines[i].kind else {
+            return false;
+        };
+        let nodes = row.nodes.clone();
         let n = inlines.len();
         let mut tail: Vec<InlineNode> = inlines[i + 1..].to_vec();
         let before_empty = i == 1 && text_of(&inlines[0]).is_empty();
@@ -1201,7 +1211,7 @@ impl Editor {
             index: i,
             count: n - i,
         }];
-        let display = self.doc.display(vec![]);
+        let display = self.doc.display(nodes);
         let after = cursor(display.id, vec![], 0);
         let mut blocks = vec![display];
         if !tail_empty {
@@ -1216,6 +1226,78 @@ impl Editor {
             ops.push(delete_block(place));
         }
         self.commit(ops, after, Last::Other)
+    }
+
+    /// `$` at the start of a display formula: it goes inline, joining the
+    /// paragraphs before and after it (undoing [`Self::make_display`]'s
+    /// split). Its label goes with the display (an inline formula has no
+    /// number).
+    fn make_inline(&mut self, p: &RowPos) -> bool {
+        let place = p.place;
+        let Some(Block::DisplayMath(row)) = self.doc.at(place).map(|b| &b.kind) else {
+            return self.leave_formula(p);
+        };
+        let nodes = row.nodes.clone();
+        let paragraph =
+            |b: Option<&BlockNode>| b.filter(|b| matches!(b.kind, Block::Paragraph(_))).cloned();
+        let before = paragraph(self.doc.sibling(place, -1));
+        let after = paragraph(self.doc.sibling(place, 1));
+        let math = self.doc.math(nodes);
+        // The text after the formula, a space from it.
+        let mut tail = match &after {
+            Some(a) => a.kind.inlines().expect("paragraph").clone(),
+            None => vec![self.doc.text("")],
+        };
+        if let Inline::Text(t) = &mut tail[0].kind
+            && !t.is_empty()
+            && !t.starts_with(collapses)
+        {
+            t.insert(0, ' ');
+        }
+        // The blocks go first so their nodes never exist twice.
+        let mut ops = vec![];
+        if after.is_some() {
+            ops.push(delete_block(Place {
+                index: place.index + 1,
+                ..place
+            }));
+        }
+        ops.push(delete_block(place));
+        let caret = match before {
+            Some(b) => {
+                let inlines = b.kind.inlines().expect("paragraph");
+                let last = inlines.last().expect("paragraph invariant");
+                let head = text_of(last);
+                if !head.is_empty() && !head.ends_with(collapses) {
+                    ops.push(Op::Insert {
+                        seq: Seq::Text(last.id),
+                        index: head.chars().count(),
+                        items: Items::Text(" ".into()),
+                    });
+                }
+                let mut items = vec![math];
+                items.extend(tail);
+                ops.push(Op::Insert {
+                    seq: Seq::Inlines(b.id),
+                    index: inlines.len(),
+                    items: Items::Inlines(items),
+                });
+                cursor(b.id, vec![Step::Index(inlines.len())], 0)
+            }
+            None => {
+                let mut inlines = vec![self.doc.text(""), math];
+                inlines.extend(tail);
+                let para = self.doc.paragraph(inlines);
+                let caret = cursor(para.id, vec![Step::Index(1)], 0);
+                ops.push(Op::Insert {
+                    seq: place.seq(),
+                    index: place.index,
+                    items: Items::Blocks(vec![para]),
+                });
+                caret
+            }
+        };
+        self.commit(ops, caret, Last::Other)
     }
 }
 

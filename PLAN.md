@@ -1686,3 +1686,21 @@ reported targets, so only those are still listed. On the paper: no problems left
   a changed bibliography or style renders anew. Shown at its logical size
   (`Snapshot::to_paintable`), sharp on HiDPI.
 - Awaiting the user's test.
+
+## `$` at the start of a formula: display ⇄ inline (2026-11-15)
+
+- User's choice (2026-11-15): no menu item; as in TeXmacs, `$` with the caret
+  at the very start of a formula (its first position, not in a structure)
+  switches it. Elsewhere `$` still leaves the formula; `$$` (an empty inline
+  formula made display) is the same rule.
+- Inline → display: `make_display` now carries the formula over (it made an
+  empty display before); the paragraph splits as before.
+- Display → inline (`make_inline`): the exact reverse, so `$` twice changes
+  nothing: the formula joins the end of the paragraph before (a space between)
+  and the paragraph after joins too; without a paragraph before, a new one.
+  The model cannot tell a paragraph that continues after a display from a new
+  one (the export writes a blank line between blocks either way), so a
+  following paragraph that was separate is joined as well; Enter splits it.
+  A label goes with the display (inline formulas have no number); undo brings
+  it back. The caret stays at the formula's start.
+- Test `dollar_at_the_start_toggles_display`. Awaiting the user's test.

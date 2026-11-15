@@ -1155,6 +1155,49 @@ fn dollar_makes_inline_and_display_formulas() {
     assert_eq!(display_of(&e, 2), "a");
 }
 
+/// `$` at the very start of a formula: inline ⇄ display, the caret
+/// staying there; going inline joins the paragraphs around it.
+#[test]
+fn dollar_at_the_start_toggles_display() {
+    let mut e = sample();
+    caret_at(&mut e, 0, 1, 0);
+    e.insert_text("$");
+    assert_eq!(texts(&e)[..3], ["ab ", "$$", "cd"]);
+    assert_eq!(display_of(&e, 1), "x");
+    assert_eq!((e.caret().path.clone(), e.caret().offset), (vec![], 0));
+    e.insert_text("$");
+    assert_eq!(texts(&e)[..2], ["ab $ cd", "ef"]);
+    assert_eq!(inline_of(&e, 0, 1), "x");
+    assert_eq!(e.caret().path, vec![Step::Index(1)]);
+    assert_eq!(e.caret().offset, 0);
+    e.undo();
+    assert_eq!(texts(&e)[..3], ["ab ", "$$", "cd"]);
+    e.undo();
+    assert_eq!(texts(&e)[..2], ["ab $ cd", "ef"]);
+
+    // A labelled display formula between paragraphs: inline, unlabelled.
+    let mut d = sample().doc().clone();
+    d.blocks[2].label = "eq:y".into();
+    let disp = d.blocks[2].id;
+    let mut e = Editor::new(d);
+    e.set_caret(CursorPath {
+        block: disp,
+        path: vec![],
+        offset: 0,
+    });
+    e.insert_text("$");
+    assert_eq!(texts(&e)[1..], ["ef $ gh"]);
+    assert_eq!(inline_of(&e, 1, 1), "y");
+    assert!(e.doc().labels().is_empty());
+
+    // Not inside it: `$` leaves the formula as before.
+    let mut e = sample();
+    caret_at(&mut e, 0, 1, 1);
+    e.insert_text("$");
+    assert_eq!(texts(&e)[0], "ab $ cd");
+    assert_eq!(e.caret().path, vec![Step::Index(2)]);
+}
+
 #[test]
 fn scripts_and_slot_removal() {
     let mut e = empty_display();
