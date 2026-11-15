@@ -416,6 +416,29 @@ mod tests {
             l.box_of(fid).unwrap().h
         };
         assert!((height(true) - height(false)).abs() < 0.01);
+        // And no space around it that the export does not have: `a ket(psi)
+        // b` as wide in the editor as exported.
+        let gap = |style: crate::Style| {
+            let mut d = Document::empty();
+            let (a, psi, b) = (d.ident("a"), d.ident("psi"), d.ident("b"));
+            let (aid, bid) = (a.id, b.id);
+            let arg = d.row(vec![psi]);
+            let ket = d.call("ket", vec![arg]);
+            let m = d.math(vec![a, ket, b]);
+            let block = d.paragraph(vec![m]);
+            let (snippet, map) = crate::serialize_block_styled(&block, style);
+            let around = Around {
+                header: "#let ket(x) = $lr(|#x chevron.r)$\n".into(),
+                ..Around::default()
+            };
+            let mut world = BridgeWorld::new();
+            let (src, offset) = block_document(&around, &snippet, 300.0);
+            let doc = compile(&mut world, &src).unwrap();
+            let l = raw_layout(&world, &doc.pages()[0], offset).resolve(&map);
+            l.box_of(bid).unwrap().x - l.box_of(aid).unwrap().right()
+        };
+        let (edit, export) = (gap(crate::Style::Edit), gap(crate::Style::Readable));
+        assert!((edit - export).abs() < 0.01, "{edit} vs {export}");
     }
 
     #[test]

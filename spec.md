@@ -723,8 +723,8 @@ To fix one group at a time, not at once. Answers already found are noted.
   `.desktop` file, an icon) (done); web links open in the browser (done: Ctrl+click, as
   references; hovering shows the address); hovering a citation
   shows the reference (done); a display formula turns inline and back (done:
-  `$` at the very start of a formula, as in TeXmacs); extra space after
-  `ket(x)`'s ⟩.
+  `$` at the very start of a formula, as in TeXmacs); extra space before and after
+  `ket(x)` (done).
 - **Typing `#`**: in Typst `#` starts code anywhere in markup, not only at a line
   start; a literal hash is `\#`. The editor should do the same.
 - **A failed call** shows its source (red), not a single red dot, so a typo can be

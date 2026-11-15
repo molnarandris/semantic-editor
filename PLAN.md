@@ -1722,3 +1722,14 @@ reported targets, so only those are still listed. On the paper: no problems left
   (no "Ctrl+click to open": the user finds it inconsistent, nothing else
   says how to use it).
 - Awaiting the user's test.
+
+## No extra space around calls of the header's functions (2026-11-15)
+
+- User: in the sample, `ket(psi)` had space before and after it in the
+  editor. Measured with the Typst CLI: the definition adds none; the editor's
+  wrapping did. `class("normal", #sem-code() ket(psi) #sem-code())`: a space
+  after code in a formula is a space. Now written without them,
+  `#sem-code()ket(psi)#sem-code()`. Test: `a ket(psi) b` has the same gap
+  from `a` to `b` in the editor as exported (in
+  `calls_of_header_functions_cover_their_drawing`; 28.1 vs 20.8pt before).
+- Awaiting the user's test.

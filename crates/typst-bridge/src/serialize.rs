@@ -871,10 +871,12 @@ impl Writer {
                 // its definition: in the editor, empty `sem-code` boxes on
                 // both sides carry the call's span, so its box covers all of
                 // it. `class` keeps it one piece (for scripts) in the
-                // formula's style (a box around it would not).
+                // formula's style (a box around it would not). No spaces
+                // next to the boxes: after code they are spaces in the
+                // formula.
                 let wrap = w.style == Style::Edit && !crate::calls::in_math_library(name);
                 if wrap {
-                    w.out.push_str("class(\"normal\", #sem-code() ");
+                    w.out.push_str("class(\"normal\", #sem-code()");
                 }
                 w.args += 1;
                 w.out.push_str(name);
@@ -889,7 +891,7 @@ impl Writer {
                 w.out.push(')');
                 w.args -= 1;
                 if wrap {
-                    w.out.push_str(" #sem-code())");
+                    w.out.push_str("#sem-code())");
                 }
             }
             MathKind::Diagram(src) if w.style == Style::Edit => {
