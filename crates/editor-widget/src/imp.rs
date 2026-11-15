@@ -1930,12 +1930,20 @@ impl SemEditor {
             let Some(obj) = weak.upgrade() else {
                 return;
             };
-            // Shown at its size in logical pixels, sharp on any screen.
+            // Shown at its size in logical pixels, sharp on any screen, all
+            // white (the header may colour citations or links).
             let paintable = result.ok().and_then(|(texture, scale)| {
                 let w = texture.width() as f32 / scale as f32;
                 let h = texture.height() as f32 / scale as f32;
                 let snapshot = gtk::Snapshot::new();
+                let mut keep_alpha = [0.0; 16];
+                keep_alpha[15] = 1.0;
+                snapshot.push_color_matrix(
+                    &graphene::Matrix::from_float(keep_alpha),
+                    &graphene::Vec4::new(1.0, 1.0, 1.0, 0.0),
+                );
                 snapshot.append_texture(&texture, &graphene::Rect::new(0.0, 0.0, w, h));
+                snapshot.pop();
                 snapshot.to_paintable(Some(&graphene::Size::new(w, h)))
             });
             obj.imp().cite_tips.borrow_mut().insert(cached, paintable);

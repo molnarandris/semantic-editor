@@ -1685,6 +1685,10 @@ reported targets, so only those are still listed. On the paper: no problems left
   for the tooltip again when done; the picture is cached by header and code, so
   a changed bibliography or style renders anew. Shown at its logical size
   (`Snapshot::to_paintable`), sharp on HiDPI.
+- Fix (user, 2026-11-15): the text came out dark blue on the dark tooltip
+  (the header colours citations; its rules beat the snippet's white). The
+  picture is now painted white through a colour matrix (colour dropped, alpha
+  kept), whatever the header does.
 - Awaiting the user's test.
 
 ## `$` at the start of a formula: display ⇄ inline (2026-11-15)
