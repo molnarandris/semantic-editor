@@ -1733,3 +1733,15 @@ reported targets, so only those are still listed. On the paper: no problems left
   from `a` to `b` in the editor as exported (in
   `calls_of_header_functions_cover_their_drawing`; 28.1 vs 20.8pt before).
 - Tested by the user (2026-11-15): works.
+
+## Calls being typed in the code font, in the middle of text too (2026-11-15)
+
+- User: `#name` typed at the start of a paragraph shows in the code font,
+  in the middle of a paragraph in the text font; they prefer the first.
+- Edit style: `calls_being_typed` finds, in any text, `#`, `#name` and
+  `#name(…` (to its `)` or the end; a lone `#` only at the end, not `#1`,
+  `# x`, `#(x`), and `Writer::text` wraps each in `CODE_TEXT`. The paragraph
+  rule (`typing_call`, the whole paragraph only) is gone: the text rule covers
+  it. Export unchanged (`\#`). A `#name` left as text (never turned into a
+  call) also shows in the code font in the editor. Tests
+  `calls_being_typed_in_code_font` (mid-text cases), `golden_snapshots`.

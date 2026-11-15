@@ -54,31 +54,51 @@ pub const CETZ_IMPORT: &str = concat!("#import \"@preview/cetz:", cetz_version!(
 /// Opens the code font of a call being typed (closed by `]`).
 const CODE_TEXT: &str = "#text(font: \"DejaVu Sans Mono\", size: 0.9em, fill: rgb(\"#6b6390\"))[";
 
-/// Whether a paragraph is a block call being typed: `#`, `#name` or
-/// `#name(…`, as the whole paragraph (what typing space or `(` turns into a
-/// call, see `Editor::insert_text`).
-fn typing_call(inlines: &[InlineNode]) -> bool {
-    let [
-        InlineNode {
-            kind: Inline::Text(s),
-            ..
-        },
-    ] = inlines
-    else {
-        return false;
-    };
-    let Some(rest) = s.strip_prefix('#') else {
-        return false;
-    };
-    let end = rest
-        .find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '-'))
-        .unwrap_or(rest.len());
-    let (name, after) = rest.split_at(end);
-    let starts_ok = name
-        .chars()
-        .next()
-        .is_none_or(|c| c.is_alphabetic() || c == '_');
-    starts_ok && (after.is_empty() || !name.is_empty() && after.starts_with('('))
+/// The calls being typed in a text, as ranges of char indices: `#`,
+/// `#name` and `#name(…` (to its `)`, or to the end), anywhere in it, as
+/// typing space, `[` or `(` turns them into calls (`Editor::insert_text`).
+/// A lone `#` only at the end (where it is being typed); `#1`, `# x` and
+/// `#(x` are none.
+fn calls_being_typed(chars: &[char]) -> Vec<(usize, usize)> {
+    let is_name = |c: char| c.is_alphanumeric() || c == '_' || c == '-';
+    let mut runs = vec![];
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] != '#' {
+            i += 1;
+            continue;
+        }
+        let mut j = i + 1;
+        while j < chars.len() && is_name(chars[j]) {
+            j += 1;
+        }
+        let name = &chars[i + 1..j];
+        let ok = match name.first() {
+            None => j == chars.len(),
+            Some(&c) => c.is_alphabetic() || c == '_',
+        };
+        if !ok {
+            i = j.max(i + 1);
+            continue;
+        }
+        if !name.is_empty() && chars.get(j) == Some(&'(') {
+            let mut depth = 0;
+            while j < chars.len() {
+                match chars[j] {
+                    '(' => depth += 1,
+                    ')' => depth -= 1,
+                    _ => {}
+                }
+                j += 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+        }
+        runs.push((i, j));
+        i = j;
+    }
+    runs
 }
 
 /// Inlines holding only an empty text.
@@ -325,11 +345,6 @@ impl Writer {
             }
             // A call being typed (`#align(cen`) shows in a code font in the
             // editor: space or `(` will make it a call.
-            Block::Paragraph(inlines) if w.style == Style::Edit && typing_call(inlines) => {
-                w.out.push_str(CODE_TEXT);
-                w.text_block(inlines, false);
-                w.out.push(']');
-            }
             Block::Paragraph(inlines) => w.text_block(inlines, true),
             Block::DisplayMath(row) => {
                 w.out.push_str("$ ");
@@ -610,10 +625,18 @@ impl Writer {
         // An empty line after a line break shows a transparent `x` in the
         // editor, at the position after the break, so the caret has a place.
         let mut placeholder = false;
+        // Calls being typed show in the code font, in the editor only.
+        let code = match self.style {
+            Style::Edit => calls_being_typed(&chars),
+            _ => vec![],
+        };
         for (i, &c) in chars.iter().enumerate() {
             starts.push(self.out.len());
             if std::mem::take(&mut placeholder) {
                 self.out.push_str("x]");
+            }
+            if code.iter().any(|&(start, _)| start == i) {
+                self.out.push_str(CODE_TEXT);
             }
             let next = chars.get(i + 1).copied();
             let escape = match c {
@@ -644,6 +667,9 @@ impl Writer {
                     self.out.push(c);
                 }
                 _ => self.out.push(c),
+            }
+            if code.iter().any(|&(_, end)| end == i + 1) {
+                self.out.push(']');
             }
         }
         starts.push(self.out.len());
@@ -1425,7 +1451,8 @@ mod tests {
         cases.push((
             "text escapes",
             d.paragraph(vec![t]),
-            "1\\. Use \\*bold\\* and \\_x\\_ \\#code \\$5 \\@ref \\<l> \\[a\\] a\\~b \\// c \\-- d \\-? e/f - g",
+            // `#code` in the code font of calls being typed, in the editor.
+            "1\\. Use \\*bold\\* and \\_x\\_ #text(font: \"DejaVu Sans Mono\", size: 0.9em, fill: rgb(\"#6b6390\"))[\\#code] \\$5 \\@ref \\<l> \\[a\\] a\\~b \\// c \\-- d \\-? e/f - g",
         ));
         let t = d.text("- not a list");
         cases.push(("leading dash", d.paragraph(vec![t]), "\\- not a list"));
@@ -1693,8 +1720,9 @@ mod tests {
         assert_eq!(serialize_block_styled(&item, Style::Readable).0, "+ third");
     }
 
-    /// A call being typed shows in a code font, only in the editor's
-    /// renders; other paragraphs with `#` do not.
+    /// A call being typed shows in a code font, at the start of a
+    /// paragraph as in the middle of it, only in the editor's renders; other
+    /// `#`s do not.
     #[test]
     fn calls_being_typed_in_code_font() {
         let mut d = Document::empty();
@@ -1703,7 +1731,6 @@ mod tests {
             ("#ali", true),
             ("#align(cen", true),
             ("#align(center)", true),
-            ("a #b", false),
             ("#1", false),
             ("#(x", false),
             ("# x", false),
@@ -1717,6 +1744,25 @@ mod tests {
                     .0
                     .contains("#text")
             );
+            let mut world = BridgeWorld::new();
+            let (doc, _) = block_document(&Around::default(), &src, 300.0);
+            compile(&mut world, &doc).unwrap();
+        }
+        // In the middle of a text: only the call, up to its `)`.
+        for (s, code) in [
+            ("a #b c", Some("\\#b]")),
+            ("x#fn(a, (b)) y", Some("\\#fn(a, (b))]")),
+            ("end #", Some("\\#]")),
+            ("a #1 b", None),
+            ("a # b", None),
+        ] {
+            let t = d.text(s);
+            let p = d.paragraph(vec![t]);
+            let (src, _) = serialize_block(&p);
+            match code {
+                Some(code) => assert!(src.contains(&format!("{CODE_TEXT}{code}")), "{s:?}: {src}"),
+                None => assert!(!src.contains(CODE_TEXT), "{s:?}: {src}"),
+            }
             let mut world = BridgeWorld::new();
             let (doc, _) = block_document(&Around::default(), &src, 300.0);
             compile(&mut world, &doc).unwrap();
