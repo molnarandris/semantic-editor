@@ -714,6 +714,53 @@ suggested changes, and later comparing versions like latexdiff. Decisions (user,
   by word, formulas whole; a diff PDF (latexdiff). Differences can be turned into
   suggestions to accept or reject one by one.
 
+### Comments and bugs (user, 2026-11-15)
+
+To fix one group at a time, not at once. Answers already found are noted.
+
+- **Small things**: the buttons on top of the sidebars are ugly (maybe at the
+  bottom?); `.sem` files open with the editor (a MIME type, `MimeType=` in the
+  `.desktop` file, an icon); web links open in the browser; hovering a citation
+  shows the reference; a display formula turns inline and back; extra space after
+  `ket(x)`'s ⟩.
+- **Typing `#`**: in Typst `#` starts code anywhere in markup, not only at a line
+  start; a literal hash is `\#`. The editor should do the same.
+- **A failed call** shows its source (red), not a single red dot, so a typo can be
+  fixed in place.
+- **Greedy lines**: only the paragraph being typed in breaks greedily, until the
+  caret leaves it; everything else follows the header (Typst's default, or the
+  header's `#set par(linebreaks: …)`). Open: a way to turn the greedy breaking off.
+- **Syntax highlighting** in the header, code and figure editors: GtkSourceView
+  with Typesetter's Typst language file (GPL, like this project).
+- **Pictures** (answer): a picture deleted from the document stays in it for undo
+  but is left out of `main.typ`, the export and the next saved version; earlier
+  versions in the history keep it.
+- **Formulas**:
+  - Text in a formula has visible bounds and can be turned back into code. Idea:
+    text only starts with `"`; anything else is Typst, shown as text while typing
+    and read as code on space or when the caret leaves; an error turns it into text
+    with a red background.
+  - The header's functions (`bigbx`) cannot be typed in a formula; maybe offer
+    `times.big` / box symbols instead.
+  - Copy and paste of a formula holding `#bigbx`: subscripts come out wrong.
+  - Symbol completion while typing a name (`times` → its variants), most used
+    first.
+  - Matrices: nearly there.
+- **Remarks** (rework of R):
+  - A selection spanning a display formula attaches the remark only to the text
+    before it (the paragraph is split at the formula).
+  - Remark text typed with the editor's syntax and rendered by Typst.
+  - No prominent author, no date, no replies; the card shows the remarked text
+    rendered on top, since the text has no mark.
+  - Maybe shown in the margin beside the document instead of a sidebar (undecided).
+  - Separate file (answer): remarks are already kept in their own `remarks.json`
+    in the `.sem`, beside `document.json`.
+- **Block calls with arguments** (answer): `#align(center)[…]` is ordinary Typst,
+  not a generalisation of theorems; like theorems it is compiled whole, so it looks
+  as in the export.
+- **Chat**: clickable references to the paper's parts; Claude can add remarks;
+  systematic edits shown as changes to accept (low priority; this is S).
+
 ### Later
 
 - Project files: images, `#include`, local imports, bibliography files.
