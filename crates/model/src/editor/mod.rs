@@ -484,7 +484,7 @@ impl Editor {
             return None;
         }
         let text = match (&at.inlines.get(at.index)?.kind, raw) {
-            (Inline::Text(text), false) | (Inline::Raw(text), true) => text,
+            (Inline::Text(text), false) | (Inline::Raw(text) | Inline::Code(text), true) => text,
             _ => return None,
         };
         Some(TextPos {
@@ -688,7 +688,8 @@ impl Editor {
         let Some(at) = self.doc.inline_at(block, &old.path) else {
             return;
         };
-        let empty_raw = matches!(&at.inlines[at.index].kind, Inline::Raw(s) if s.is_empty());
+        let empty_raw =
+            matches!(&at.inlines[at.index].kind, Inline::Raw(s) | Inline::Code(s) if s.is_empty());
         let (call, inside) = if empty_raw && old.path.len() == at.prefix + 1 {
             (old.path.clone(), old.path.clone())
         } else if at.prefix > 0 && is_empty_text(at.inlines) {
@@ -1290,6 +1291,9 @@ impl Editor {
             (None, None) if self.opts_pos().is_some() => {
                 "options, as Typst code (size: 80%) · Enter or Esc → leave"
             }
+            (None, None) if self.open_code().is_some() => {
+                "Typst code, drawn when the caret leaves it · Esc → leave"
+            }
             (None, None) if self.raw_pos().is_some() => "code, kept as typed · ` or Esc → end it",
             (None, None) if let Some(hint) = self.inline_call_hint() => hint,
             (None, None) if let Some(hint) = self.call_hint() => hint,
@@ -1338,6 +1342,13 @@ impl Editor {
         }
         let parent = self.doc.place(self.caret.block)?.parent?;
         Some((self.doc.env_around(parent)?, true))
+    }
+
+    /// The code piece in text the caret is in: its source shows, to edit.
+    pub fn open_code(&self) -> Option<NodeId> {
+        let pos = self.raw_pos()?;
+        let inline = &pos.inlines[pos.inline];
+        matches!(inline.kind, Inline::Code(_)).then_some(inline.id)
     }
 
     /// The innermost inline the caret is inside of, to outline it: inline
@@ -1528,7 +1539,7 @@ fn delete_block(place: Place) -> Op {
 
 fn text_of(inline: &InlineNode) -> &str {
     match &inline.kind {
-        Inline::Text(s) | Inline::Raw(s) => s,
+        Inline::Text(s) | Inline::Raw(s) | Inline::Code(s) => s,
         Inline::Math(_) | Inline::Call { .. } | Inline::Ref(_) => "",
     }
 }

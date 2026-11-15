@@ -2158,6 +2158,7 @@ impl SemEditor {
                 self.show_code.get(),
                 &submitted,
                 self.editing.get(),
+                ed.open_code(),
             )
         };
         for job in jobs {

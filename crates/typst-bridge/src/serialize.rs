@@ -251,6 +251,9 @@ struct Writer {
     number: Option<usize>,
     /// The markup delimiters (`*`, `_`) the writer is inside of.
     markup: Vec<char>,
+    /// The code piece in text whose source shows (Edit style): the caret is
+    /// in it.
+    open: Option<NodeId>,
 }
 
 /// Whether inline call `i` of `inlines` (bold or italic) can be written as
@@ -556,6 +559,13 @@ impl Writer {
             self.node(inline.id, |w| match &inline.kind {
                 Inline::Text(s) => w.text(inline.id, s, line_start, i + 1 == inlines.len()),
                 Inline::Raw(s) => w.raw(inline.id, s),
+                Inline::Code(s) => {
+                    let next = match inlines.get(i + 1).map(|n| &n.kind) {
+                        Some(Inline::Text(t)) => t.chars().next(),
+                        _ => None,
+                    };
+                    w.code(inline.id, s, next);
+                }
                 Inline::Ref(label) => {
                     let next = match inlines.get(i + 1).map(|n| &n.kind) {
                         Some(Inline::Text(t)) => t.as_str(),
@@ -716,6 +726,39 @@ impl Writer {
     /// Inline code, `` `…` ``, with every char mapped. Empty code shows a
     /// transparent `x` in the editor; code holding a backtick is written as
     /// a `raw` call.
+    /// A code piece in text, `#source` (`s` without its `#`), followed by
+    /// `next`. Exported as is, with a `;` before a char that would continue
+    /// the expression (it ends it and vanishes). In the editor, when open
+    /// its source shows in the code font, each char in place; else what it
+    /// draws, between empty `sem-code` boxes that carry its span.
+    fn code(&mut self, id: NodeId, s: &str, next: Option<char>) {
+        let end = |w: &mut Self| {
+            if next.is_some_and(|c| !c.is_whitespace()) {
+                w.out.push(';');
+            }
+        };
+        match self.style {
+            Style::Edit if self.open == Some(id) => {
+                self.out.push_str(CODE_TEXT);
+                self.out.push_str("\\#");
+                self.text(id, s, false, false);
+                self.out.push(']');
+            }
+            Style::Edit => {
+                self.out.push_str("#sem-code()#");
+                self.out.push_str(if s.is_empty() { "none" } else { s });
+                self.out.push_str("#sem-code()");
+                end(self);
+            }
+            Style::Readable if s.is_empty() => {}
+            Style::Readable => {
+                self.out.push('#');
+                self.out.push_str(s);
+                end(self);
+            }
+        }
+    }
+
     fn raw(&mut self, id: NodeId, s: &str) {
         let mut starts = Vec::with_capacity(s.len() + 1);
         if s.is_empty() && self.style == Style::Edit {
@@ -1206,13 +1249,23 @@ pub fn serialize_block(block: &BlockNode) -> (String, SpanMap) {
 
 /// Serialize one block in the given style.
 pub fn serialize_block_styled(block: &BlockNode, style: Style) -> (String, SpanMap) {
-    serialize_with(block, style, None)
+    serialize_with(block, style, None, None)
 }
 
 /// Serialize one block for the editor; a numbered list item shows `number`
 /// (its place in the list, as the block is rendered on its own).
 pub fn serialize_block_numbered(block: &BlockNode, number: Option<usize>) -> (String, SpanMap) {
-    serialize_with(block, Style::Edit, number)
+    serialize_with(block, Style::Edit, number, None)
+}
+
+/// [`serialize_block_numbered`], with the source of code piece `open` (the
+/// caret is in it) showing instead of what it draws.
+pub fn serialize_block_open(
+    block: &BlockNode,
+    number: Option<usize>,
+    open: Option<NodeId>,
+) -> (String, SpanMap) {
+    serialize_with(block, Style::Edit, number, open)
 }
 
 /// A standalone snippet showing only math node `node` (an inline diagram
@@ -1226,6 +1279,7 @@ pub fn serialize_math_node(node: &MathNode) -> String {
         indent: String::new(),
         number: None,
         markup: vec![],
+        open: None,
     };
     if matches!(node.kind, MathKind::Diagram(_))
         || matches!(&node.kind, MathKind::Code(s) if s.contains("cetz"))
@@ -1258,7 +1312,12 @@ pub(crate) fn uses_cetz(block: &BlockNode, diagrams: bool) -> bool {
             .is_some_and(|body| body.iter().any(|b| uses_cetz(b, diagrams)))
 }
 
-fn serialize_with(block: &BlockNode, style: Style, number: Option<usize>) -> (String, SpanMap) {
+fn serialize_with(
+    block: &BlockNode,
+    style: Style,
+    number: Option<usize>,
+    open: Option<NodeId>,
+) -> (String, SpanMap) {
     let mut out = String::new();
     // Standalone block documents import CeTZ themselves; a diagram block
     // does so in its own code.
@@ -1274,6 +1333,7 @@ fn serialize_with(block: &BlockNode, style: Style, number: Option<usize>) -> (St
         indent: String::new(),
         number,
         markup: vec![],
+        open,
     };
     w.block(block);
     (w.out, w.map)

@@ -204,7 +204,7 @@ fn text_in(doc: &mut Document, id: NodeId) -> Result<SeqMut<'_>, OpError> {
         };
     }
     match doc.inline_mut(id).map(|i| &mut i.kind) {
-        Some(Inline::Text(s) | Inline::Raw(s)) => Ok(SeqMut::Text(s)),
+        Some(Inline::Text(s) | Inline::Raw(s) | Inline::Code(s)) => Ok(SeqMut::Text(s)),
         Some(_) => Err(OpError::KindMismatch),
         None => Err(OpError::NotFound(Seq::Text(id))),
     }

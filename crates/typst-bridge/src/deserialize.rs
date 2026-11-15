@@ -537,6 +537,17 @@ impl Importer<'_> {
             Some(b) => b,
             None if label.is_empty() => {
                 let inlines = self.inlines(rest)?;
+                // Code alone (`#v(1cm)`, `#pagebreak()`) is a raw block, as
+                // a block of its own: not a paragraph's code piece.
+                let blank =
+                    |i: &InlineNode| matches!(&i.kind, Inline::Text(t) if t.trim().is_empty());
+                if let [a, code, b] = &inlines[..]
+                    && matches!(code.kind, Inline::Code(_))
+                    && blank(a)
+                    && blank(b)
+                {
+                    return None;
+                }
                 self.doc.paragraph(inlines)
             }
             None => return None,
@@ -773,15 +784,27 @@ impl Importer<'_> {
                     inline = Some(self.doc.math(nodes));
                 }
                 SyntaxKind::Hash => {
-                    let call = nodes
-                        .get(i + 1)
-                        .filter(|c| c.kind() == SyntaxKind::FuncCall)?;
-                    let (name, args, contents) = call_parts(self.src, call)?;
-                    let [content] = &contents[..] else {
-                        return None;
+                    // A call with one content argument; other code (`#h(1em)`,
+                    // `#sym.dagger`, `#x`): a code piece.
+                    let expr = nodes.get(i + 1)?;
+                    let call = match expr.kind() {
+                        SyntaxKind::FuncCall => call_parts(self.src, expr),
+                        _ => None,
                     };
-                    let body = self.inlines(&content_markup(content))?;
-                    inline = Some(self.doc.inline_call(&name, &args, body));
+                    inline = Some(match call {
+                        Some((name, args, contents)) if contents.len() == 1 => {
+                            let body = self.inlines(&content_markup(&contents[0]))?;
+                            self.doc.inline_call(&name, &args, body)
+                        }
+                        _ if matches!(
+                            expr.kind(),
+                            SyntaxKind::FuncCall | SyntaxKind::FieldAccess | SyntaxKind::Ident
+                        ) =>
+                        {
+                            self.doc.code_inline(&self.src[expr.range()])
+                        }
+                        _ => return None,
+                    });
                     i += 1;
                     if nodes
                         .get(i + 1)
@@ -1234,6 +1257,30 @@ $ f(x) &= cases(1 "if" x > 0, 0) \
 #h(1cm) raw paragraph.
 "#;
 
+    /// Code in text that is not a call with a body comes in as code
+    /// pieces, and goes out as it was.
+    #[test]
+    fn code_pieces_in_text() {
+        let src = "A #h(1em) gap, #sym.dagger;b and #emph[x].\n";
+        let doc = renders_the_same(src);
+        let Block::Paragraph(inlines) = &doc.blocks[0].kind else {
+            panic!("{:?}", doc.blocks[0].kind);
+        };
+        let codes: Vec<&str> = inlines
+            .iter()
+            .filter_map(|i| match &i.kind {
+                model::Inline::Code(s) => Some(s.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(codes, ["h(1em)", "sym.dagger"]);
+        let exported = serialize_document(&doc);
+        assert!(
+            exported.contains("A #h(1em) gap, #sym.dagger;b and _x_."),
+            "{exported}"
+        );
+    }
+
     #[test]
     fn a_paper_imports_and_renders_the_same() {
         let doc = renders_the_same(PAPER);
@@ -1244,10 +1291,14 @@ $ f(x) &= cases(1 "if" x > 0, 0) \
             .iter()
             .filter(|b| matches!(b.kind, Block::RawTypst(_)))
             .count();
-        assert_eq!(
-            raw, 2,
-            "the mid-document rule and the h(1cm) paragraph: {kinds:?}"
-        );
+        assert_eq!(raw, 1, "the mid-document rule: {kinds:?}");
+        // `#h(1cm) raw paragraph.`: a paragraph with a code piece.
+        assert!(doc.blocks.iter().any(|b| {
+            b.kind.inlines().is_some_and(|v| {
+                v.iter()
+                    .any(|i| matches!(&i.kind, model::Inline::Code(s) if s == "h(1cm)"))
+            })
+        }));
         assert_eq!(doc.blocks[0].label, "intro");
         let labels: Vec<&str> = doc.labels().into_iter().map(|(l, _)| l).collect();
         assert_eq!(labels, ["intro", "eq:a"]);
@@ -1442,7 +1493,7 @@ $ f(x) &= cases(1 "if" x > 0, 0) \
     fn unknown_parts_stay_raw() {
         for src in [
             "$ mat(1, 2; 3, 4) $",
-            "Text #h(1em) more",
+            // (`Text #h(1em) more` is a paragraph with a code piece now.)
             "#lorem(5)",
             "Text // comment",
             "#v(1em)\n#set text(red)\nText",

@@ -726,7 +726,12 @@ To fix one group at a time, not at once. Answers already found are noted.
   `$` at the very start of a formula, as in TeXmacs); extra space before and after
   `ket(x)` (done).
 - **Typing `#`**: in Typst `#` starts code anywhere in markup, not only at a line
-  start; a literal hash is `\#`. The editor should do the same.
+  start; a literal hash is `\#`. The editor should do the same. Decided (user,
+  2026-11-15): the `#name` being typed looks the same in the middle of text as
+  at a paragraph's start (done); code in text becomes a *code piece* (done,
+  step 1); a call that fails turns into a code piece showing its source on red,
+  to fix in place (step 2), then the same in formulas (step 3). Undo right
+  after the conversion leaves the `#…` as text.
 - **A failed call** shows its source (red), not a single red dot, so a typo can be
   fixed in place.
 - **Greedy lines**: only the paragraph being typed in breaks greedily, until the

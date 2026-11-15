@@ -176,6 +176,10 @@ fn plain(inlines: &[InlineNode]) -> String {
     for inline in inlines {
         match &inline.kind {
             Inline::Text(s) | Inline::Raw(s) => out.push_str(s),
+            Inline::Code(s) => {
+                out.push('#');
+                out.push_str(s);
+            }
             Inline::Ref(label) => {
                 out.push('@');
                 out.push_str(label);

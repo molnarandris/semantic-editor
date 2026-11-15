@@ -161,10 +161,10 @@ fn walk_inlines<'a>(inlines: &'a [InlineNode], path: &[Step]) -> Result<Target<'
     };
     let inline = inlines.get(*i).ok_or(0usize)?;
     match &inline.kind {
-        Inline::Text(text) | Inline::Raw(text) if path.len() == 1 => {
+        Inline::Text(text) | Inline::Raw(text) | Inline::Code(text) if path.len() == 1 => {
             Ok(Target::Text { inline, text })
         }
-        Inline::Text(_) | Inline::Raw(_) => Err(1),
+        Inline::Text(_) | Inline::Raw(_) | Inline::Code(_) => Err(1),
         // An atom: no position inside.
         Inline::Ref(_) => Err(0),
         Inline::Math(row) => walk_row(row, &path[1..]).map_err(|n| n + 1),
@@ -382,7 +382,7 @@ impl Document {
                 let mut path = prefix.to_vec();
                 path.push(Step::Index(i));
                 match &inline.kind {
-                    Inline::Text(s) | Inline::Raw(s) => {
+                    Inline::Text(s) | Inline::Raw(s) | Inline::Code(s) => {
                         for k in 0..=s.chars().count() {
                             out.push(CursorPath {
                                 block,
@@ -509,9 +509,9 @@ impl Document {
                             i = *j;
                         }
                         (Inline::Math(_), _) => break,
-                        (Inline::Raw(_), _) => {
+                        (Inline::Raw(_) | Inline::Code(_), _) => {
                             crumbs.push(Crumb {
-                                label: "code",
+                                label: inlines[i].label(),
                                 path_len: consumed + 1,
                             });
                             return crumbs;

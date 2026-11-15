@@ -1745,3 +1745,30 @@ reported targets, so only those are still listed. On the paper: no problems left
   it. Export unchanged (`\#`). A `#name` left as text (never turned into a
   call) also shows in the code font in the editor. Tests
   `calls_being_typed_in_code_font` (mid-text cases), `golden_snapshots`.
+
+## Code pieces in text, step 1 (2026-11-15)
+
+- `Inline::Code(String)`: Typst code in text, the source without its `#`.
+  The model treats it as inline code (`Inline::Raw`): the caret moves through
+  its chars, typing is kept as typed, Backspace, Esc, empty pieces go
+  (`pos_in(true)` takes both). `Editor::open_code()`: the piece the caret is
+  in; its own hint.
+- Typing: `#code ` in text (`#name(args)`, dotted `#a.b`, or `#name` for a
+  function that takes no content; `code_head`) makes a piece in one undo step;
+  the space stays, the caret after it. `#name ` for a function taking content
+  and `#name[` still make calls; unbalanced `(` stays text.
+- Writing (`Writer::code`): exported `#code`, with `;` before a non-space
+  char (it ends the expression and vanishes). Editor, closed: what it draws
+  between empty `sem-code` boxes that carry its span; open (the caret in it,
+  `serialize_block_open`, passed down by `stale_blocks_editing`): `\#` and
+  the source in `CODE_TEXT`, each char mapped like text. Every caret move goes
+  through `after_command`, so entering or leaving a piece re-renders its block.
+  While open, an error in it cannot break the paragraph (it is text then).
+- Import and paste: `#` + a call without one content argument, a field
+  access or a name in text is a code piece; code alone on its own lines stays
+  a raw block (`#title()`, `#v(1cm)`), as before.
+- Tests: `hash_code_in_text`, `code_pieces_in_text` (layout: export, box when
+  closed, every char placed when open; import round trip),
+  `block_calls_by_function` (`#pagebreak x` is a piece now),
+  `unknown_parts_stay_raw` (`Text #h(1em) more` no longer raw), the sample's
+  export/import. Awaiting the user's test.

@@ -101,7 +101,8 @@ fn all_cursors(doc: &Document) -> Vec<CursorPath> {
                             })
                         }),
                         Inline::Math(r) => row(&mut out, b.id, vec![Step::Index(i)], r),
-                        Inline::Call { .. } | Inline::Raw(_) | Inline::Ref(_) => {}
+                        Inline::Call { .. } | Inline::Raw(_) | Inline::Code(_) | Inline::Ref(_) => {
+                        }
                     }
                 }
             }

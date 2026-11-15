@@ -521,7 +521,7 @@ fn list_stops(
     let mut per: Vec<Vec<Option<Stop>>> = inlines
         .iter()
         .map(|i| match &i.kind {
-            Inline::Text(s) | Inline::Raw(s) => vec![None; s.chars().count() + 1],
+            Inline::Text(s) | Inline::Raw(s) | Inline::Code(s) => vec![None; s.chars().count() + 1],
             Inline::Math(_) | Inline::Call { .. } | Inline::Ref(_) => vec![],
         })
         .collect();
@@ -586,7 +586,7 @@ fn list_stops(
                     slot.get_or_insert(s);
                 }
             }
-            Inline::Text(_) | Inline::Raw(_) => {
+            Inline::Text(_) | Inline::Raw(_) | Inline::Code(_) => {
                 let slots = &mut per[i];
                 let glyphs = l.glyphs.iter().filter(|g| g.node == inline.id);
                 // A position takes the glyph that starts there (so a wrapped
@@ -625,8 +625,11 @@ fn list_stops(
                         slot.get_or_insert(s);
                     }
                 }
-                // Inline code: the texts around it end and start at its box.
-                if let (Inline::Raw(_), Some(r)) = (&inline.kind, l.box_of(inline.id)) {
+                // Inline code and code pieces: the texts around them end and
+                // start at their box.
+                if let (Inline::Raw(_) | Inline::Code(_), Some(r)) =
+                    (&inline.kind, l.box_of(inline.id))
+                {
                     let line = line_near(l, r);
                     if i > 0 {
                         let offset = per[i - 1].len().saturating_sub(1);

@@ -30,6 +30,7 @@ fn inline_text(v: &[InlineNode]) -> String {
             Inline::Text(s) => s.clone(),
             Inline::Math(_) => "$".into(),
             Inline::Raw(s) => format!("`{s}`"),
+            Inline::Code(s) => format!("{{#{s}}}"),
             Inline::Ref(s) => format!("@{{{s}}}"),
             Inline::Call { name, args, body } => match name.as_str() {
                 "strong" => format!("*{}*", inline_text(body)),
@@ -463,7 +464,7 @@ fn fake_calls(_: &[&str], name: &str) -> Option<CallShape> {
 
 /// Block calls by what the function takes: `(` gives a title only to a
 /// function that takes one, else starts source arguments; a function that
-/// takes no content stays text; an unknown one may take a title.
+/// takes no content is a code piece; an unknown one may take a title.
 #[test]
 fn block_calls_by_function() {
     let fresh = || {
@@ -492,7 +493,7 @@ fn block_calls_by_function() {
 
     let mut e = fresh();
     e.insert_text("#pagebreak x");
-    assert_eq!(texts(&e), ["#pagebreak x"]);
+    assert_eq!(texts(&e), ["{#pagebreak} x"], "a code piece, no block call");
     // Unbalanced arguments stay text.
     let mut e = fresh();
     e.insert_text("#align(a)) x");
@@ -1153,6 +1154,51 @@ fn dollar_makes_inline_and_display_formulas() {
     assert_eq!(texts(&e)[1..4], ["e", "$$", "f"]);
     e.insert_text("a");
     assert_eq!(display_of(&e, 2), "a");
+}
+
+/// `#code ` in text makes a code piece: with arguments or dots, or a
+/// function taking no content; the space stays, the caret after it; one
+/// undo makes it text again. The caret in it opens it; typing edits it.
+#[test]
+fn hash_code_in_text() {
+    let fresh = || {
+        let mut e = Editor::new(Document::new());
+        e.set_call_resolver(fake_calls);
+        e
+    };
+    let mut e = fresh();
+    e.insert_text("a #h(1em) b #sym.dagger c");
+    assert_eq!(texts(&e), ["a {#h(1em)} b {#sym.dagger} c"]);
+    e.doc().check_invariants().unwrap();
+    assert_eq!(e.open_code(), None);
+
+    let mut e = fresh();
+    e.insert_text("a #pagebreak ");
+    assert_eq!(texts(&e), ["a {#pagebreak} "]);
+    e.undo();
+    assert_eq!(texts(&e), ["a #pagebreak"]);
+
+    // A function taking content still makes a call; unbalanced stays text.
+    let mut e = fresh();
+    e.insert_text("a #cl x");
+    assert_eq!(texts(&e), ["a #cl[x]"]);
+    let mut e = fresh();
+    e.insert_text("a #f(x b");
+    assert_eq!(texts(&e), ["a #f(x b"]);
+
+    // Into it from the right: open, edited as typed.
+    let mut e = fresh();
+    e.insert_text("a #h(1em) b");
+    e.move_left();
+    e.move_left();
+    assert_eq!(e.open_code(), None, "before the space");
+    e.move_left();
+    assert!(e.open_code().is_some());
+    for _ in 0..4 {
+        e.backspace();
+    }
+    e.insert_text("2em)");
+    assert_eq!(texts(&e), ["a {#h(2em)} b"]);
 }
 
 /// `$` at the very start of a formula: inline ⇄ display, the caret

@@ -27,7 +27,7 @@ use typst_bridge::bib::{
 use typst_bridge::{
     Around, CounterState, LabelTarget, SpanMap, Style, chain_code, code_display, initial_state,
     is_code, label_report, label_values_in_source, labels_in_source, missing_ref, ref_stub,
-    refs_in_source, serialize_block_numbered, serialize_block_styled, stand_in, tracked_counters,
+    refs_in_source, serialize_block_open, serialize_block_styled, stand_in, tracked_counters,
 };
 
 /// What was last submitted for a block, and how its counters ended.
@@ -321,7 +321,7 @@ pub fn stale_blocks(
     submitted: &[Submitted],
 ) -> Vec<Job> {
     let files = model::Files::default();
-    stale_blocks_editing(blocks, header, &files, show_code, submitted, None)
+    stale_blocks_editing(blocks, header, &files, show_code, submitted, None, None)
 }
 
 /// Typst code making a paragraph break its lines greedily, as word
@@ -332,7 +332,8 @@ pub const GREEDY_LINES: &str = "#set par(linebreaks: \"simple\")\n";
 
 /// [`stale_blocks`], with the project's `files`, and `editing` the
 /// top-level block being typed in: its lines are broken greedily
-/// ([`GREEDY_LINES`]) until the caret leaves it.
+/// ([`GREEDY_LINES`]) until the caret leaves it; `open` the code piece the
+/// caret is in, whose source shows.
 pub fn stale_blocks_editing(
     blocks: &[BlockNode],
     header: &str,
@@ -340,6 +341,7 @@ pub fn stale_blocks_editing(
     show_code: bool,
     submitted: &[Submitted],
     editing: Option<NodeId>,
+    open: Option<NodeId>,
 ) -> Vec<Job> {
     let code: Vec<Option<&str>> = blocks.iter().map(code_of).collect();
     let all_code: String = code
@@ -508,7 +510,7 @@ pub fn stale_blocks_editing(
                 cited_before.push(key.clone());
             }
         }
-        let (snippet, map) = serialize_block_numbered(block, (number > 0).then_some(number));
+        let (snippet, map) = serialize_block_open(block, (number > 0).then_some(number), open);
         let prev = submitted.get(index);
         let current =
             prev.is_some_and(|p| *p.around == around && p.snippet == snippet && *p.map == map);
@@ -1228,7 +1230,7 @@ mod tests {
         e.insert_text("Second.");
         let d = e.doc().clone();
         let (first, second) = (d.blocks[0].id, d.blocks[1].id);
-        let jobs = stale_blocks_editing(&d.blocks, "", &d.files, false, &[], Some(second));
+        let jobs = stale_blocks_editing(&d.blocks, "", &d.files, false, &[], Some(second), None);
         let around = |i: usize| &jobs.iter().find(|j| j.index == i).unwrap().around;
         assert!(!around(0).prefix.contains(GREEDY_LINES));
         assert!(around(1).prefix.contains(GREEDY_LINES));
@@ -1246,6 +1248,7 @@ mod tests {
             false,
             &submitted(&views),
             Some(first),
+            None,
         );
         let indices: Vec<usize> = again.iter().map(|j| j.index).collect();
         assert_eq!(indices, [0, 1], "both change how they break");

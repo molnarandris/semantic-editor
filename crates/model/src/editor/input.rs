@@ -204,6 +204,34 @@ impl Editor {
             };
             return self.commit(vec![op], after, Last::Other);
         }
+        // `#code ` in text: a code piece (`#h(1em)`, `#sym.dagger`), unless
+        // a call with content starts (`#name ` for a function taking it);
+        // the space stays, the caret after it. Undo leaves it text.
+        if s == " "
+            && let Some((start, code)) = code_head(&chars[..pos.offset])
+            && (code.contains(['(', '.']) || self.call_shape(&code).is_some_and(|c| !c.body))
+        {
+            let (i, c) = (pos.inline, pos.offset);
+            let tail: String = chars[c..].iter().collect();
+            let space = if tail.starts_with(collapses) { "" } else { " " };
+            let after = pos.at(i + 2, space.len());
+            let (text_id, owner) = (pos.inlines[i].id, pos.owner);
+            let piece = self.doc.code_inline(&code);
+            let rest = self.doc.text(&format!("{space}{tail}"));
+            let ops = vec![
+                Op::Delete {
+                    seq: Seq::Text(text_id),
+                    index: start,
+                    count: chars.len() - start,
+                },
+                Op::Insert {
+                    seq: Seq::Inlines(owner),
+                    index: i + 1,
+                    items: Items::Inlines(vec![piece, rest]),
+                },
+            ];
+            return self.commit(ops, after, Last::Other);
+        }
         // `#name ` or `#name[` (with `(args)`) in text: an inline call.
         if (s == " " || s == "[")
             && let Some((start, name, args)) = inline_call_head(&chars[..pos.offset])
@@ -1334,6 +1362,46 @@ pub(super) fn inline_call_head(chars: &[char]) -> Option<(usize, String, Option<
     let start = chars.iter().rposition(|&c| c == '#')?;
     let (name, args) = call_head(&chars[start..])?;
     Some((start, name, args))
+}
+
+/// The code that `chars` ends with, `#name`, `#a.b.c` or either with
+/// balanced `(args)`: where its `#` is, and the code without it.
+pub(super) fn code_head(chars: &[char]) -> Option<(usize, String)> {
+    let start = chars.iter().rposition(|&c| c == '#')?;
+    let code = &chars[start + 1..];
+    let is_name = |c: char| c.is_alphanumeric() || c == '_' || c == '-';
+    let mut i = 0;
+    loop {
+        let first = *code.get(i)?;
+        if !(first.is_alphabetic() || first == '_') {
+            return None;
+        }
+        while code.get(i).is_some_and(|&c| is_name(c)) {
+            i += 1;
+        }
+        if code.get(i) != Some(&'.') {
+            break;
+        }
+        i += 1;
+    }
+    if code.get(i) == Some(&'(') {
+        let mut depth = 0;
+        for &c in &code[i..] {
+            match c {
+                '(' => depth += 1,
+                ')' => depth -= 1,
+                _ => {}
+            }
+            i += 1;
+            if depth == 0 {
+                break;
+            }
+        }
+        if depth != 0 {
+            return None;
+        }
+    }
+    (i == code.len()).then(|| (start, code.iter().collect()))
 }
 
 /// Whether Typst allows `c` in a label (`<eq:main-1.2>`).

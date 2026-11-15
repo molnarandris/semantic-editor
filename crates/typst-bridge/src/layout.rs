@@ -441,6 +441,49 @@ mod tests {
         assert!((edit - export).abs() < 0.01, "{edit} vs {export}");
     }
 
+    /// A code piece in text: exported as `#code` (a `;` before text that
+    /// would continue it); in the editor closed, what it draws in its box;
+    /// open, its source with every char in place.
+    #[test]
+    fn code_pieces_in_text() {
+        let mut d = Document::empty();
+        let (a, code, b) = (d.text("a "), d.code_inline("sym.dagger"), d.text("b"));
+        let (code_id, b_id) = (code.id, b.id);
+        let p = d.paragraph(vec![a, code, b]);
+        let readable = crate::serialize_block_styled(&p, crate::Style::Readable).0;
+        assert_eq!(readable, "a #sym.dagger;b");
+        let layout = |open: Option<model::NodeId>| {
+            let (snippet, map) = crate::serialize_block_open(&p, None, open);
+            let mut world = BridgeWorld::new();
+            let (src, offset) = block_document(&Around::default(), &snippet, 300.0);
+            let doc = compile(&mut world, &src).unwrap_or_else(|e| panic!("{e:?}\n{src}"));
+            raw_layout(&world, &doc.pages()[0], offset).resolve(&map)
+        };
+        let closed = layout(None);
+        let r = closed.box_of(code_id).expect("a box for the piece");
+        assert!(r.w > 2.0 && r.w < 10.0, "a dagger wide: {r:?}");
+        // (The markers' stroke reaches 0.25pt beyond the piece.)
+        assert!(closed.box_of(b_id).unwrap().x >= r.right() - 0.3);
+        let open = layout(Some(code_id));
+        let mut chars: Vec<usize> = open
+            .glyphs
+            .iter()
+            .filter(|g| g.node == code_id)
+            .flat_map(|g| g.chars.clone())
+            .collect();
+        chars.sort();
+        chars.dedup();
+        assert_eq!(
+            chars,
+            (0..10).collect::<Vec<_>>(),
+            "every char of sym.dagger"
+        );
+        assert!(
+            open.box_of(code_id).unwrap().w > 4.0 * r.w,
+            "the source is wider"
+        );
+    }
+
     #[test]
     fn math_nodes_get_nested_boxes() {
         let mut d = Document::empty();
