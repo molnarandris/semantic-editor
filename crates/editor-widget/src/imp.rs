@@ -560,7 +560,7 @@ impl SemEditor {
                 return true;
             }
             if let Some(url) = imp.link_at(x, y) {
-                tooltip.set_text(Some(&format!("{url}\nCtrl+click to open")));
+                tooltip.set_text(Some(&url));
                 return true;
             }
             imp.citation_tip(x, y, tooltip)

@@ -1719,5 +1719,6 @@ reported targets, so only those are still listed. On the paper: no problems left
   `link_at`. Ctrl+click on a link opens it with `gtk::UriLauncher` (the
   OpenURI portal in the Flatpak; no permission needed), like Ctrl+click on a
   reference follows it, so no new shortcut. Hovering a link shows its address
-  and "Ctrl+click to open".
+  (no "Ctrl+click to open": the user finds it inconsistent, nothing else
+  says how to use it).
 - Awaiting the user's test.
