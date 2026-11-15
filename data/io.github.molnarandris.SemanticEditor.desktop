@@ -8,3 +8,4 @@ Type=Application
 Categories=Science;Math;
 Keywords=Typst;math;notes;TeXmacs;
 StartupNotify=true
+MimeType=application/x-semantic-editor;
