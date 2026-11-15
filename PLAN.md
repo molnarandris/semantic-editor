@@ -1658,3 +1658,15 @@ reported targets, so only those are still listed. On the paper: no problems left
   builds before is skipped on load and dropped at the next save (test
   `old_chats_are_dropped`). `ChatPane::clear` on every new document; the
   JSON code and serde derives of `chat.rs` are gone.
+
+## `.sem` files open with the editor (2026-11-15)
+
+- `data/io.github.molnarandris.SemanticEditor.mime.xml`: the type
+  `application/x-semantic-editor`, a subclass of `application/zip`, glob
+  `*.sem` (weight 80, so the name decides, not the zip's magic bytes). The
+  manifest installs it as `share/mime/packages/${FLATPAK_ID}.xml`, which
+  Flatpak exports; the `.desktop` file names it in `MimeType=`. The app already
+  opens the files it is given (`HANDLES_OPEN`).
+- Checked with a scratch MIME database: `gio info` reports a `.sem` as the new
+  type. Making the editor the default app is the user's step (Files → Open
+  With, or `xdg-mime default`).
