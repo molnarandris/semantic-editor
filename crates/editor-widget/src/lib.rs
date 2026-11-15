@@ -165,7 +165,9 @@ impl SemEditor {
         done: impl FnOnce(Result<(gtk::gdk::Texture, f64), String>) + 'static,
     ) {
         let width_pt = width_px / imp::SNIPPET_PX_PER_PT;
-        self.imp().render_snippet(markup, width_pt, Box::new(done));
+        let color = self.color();
+        self.imp()
+            .render_snippet(markup, width_pt, color, Box::new(done));
     }
 
     /// The open remarks the caret is in (see `Editor::remarks_at_caret`).

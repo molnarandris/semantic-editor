@@ -1093,7 +1093,8 @@ fn math_opts(opts: &str) -> String {
     out.join(", ")
 }
 
-pub(crate) fn quoted(s: &str) -> String {
+/// `s` as a Typst string literal.
+pub fn quoted(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
     for c in s.chars() {

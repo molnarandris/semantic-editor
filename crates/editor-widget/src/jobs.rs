@@ -262,6 +262,28 @@ fn bibliography_of(block: &BlockNode) -> Option<(String, Vec<String>)> {
     }
 }
 
+/// Typst code for the full reference that citation `key` points to (shown
+/// on hovering the citation), as the bibliography lists it: in its style,
+/// numbered as in the document (the document's citations hidden before
+/// it). None if `key` is not in the bibliography.
+pub fn full_citation(blocks: &[BlockNode], key: &str) -> Option<String> {
+    let (call, keys) = blocks.iter().find_map(bibliography_of)?;
+    if !keys.iter().any(|k| k == key) {
+        return None;
+    }
+    let mut cited = vec![];
+    for block in blocks {
+        refs_in(block, &mut cited);
+    }
+    cited.retain(|r| keys.contains(r));
+    Some(format!(
+        "{}#cite(label({}), form: \"full\"){}",
+        hidden_cites(&cited),
+        typst_bridge::serialize::quoted(key),
+        hidden_bibliography(&call)
+    ))
+}
+
 /// Whether a block may read or change counters.
 pub fn counter_sensitive(block: &BlockNode) -> bool {
     match &block.kind {
@@ -1412,5 +1434,39 @@ mod tests {
         // Three edits plus the new paragraph (Enter at the end leaves the
         // first paragraph's source unchanged): no diagram at all.
         assert_eq!(worker.compiles() - initial, 4);
+    }
+
+    /// Hovering a citation: its full reference, numbered as in the
+    /// document; nothing for a key the bibliography lacks.
+    #[test]
+    fn full_citations() {
+        let bib = "@article{alpha, title = {First Paper}, author = {Alpha, Ann}, \
+                   journal = {J. Tests}, year = {2020}}\n\
+                   @article{beta, title = {Second Paper}, author = {Beta, Bob}, \
+                   journal = {J. Tests}, year = {2021}}";
+        let doc = typst_bridge::import_typ(&format!(
+            "First @beta.\n\nThen @alpha.\n\n#bibliography(bytes(```bib\n{bib}\n```.text))\n"
+        ));
+        assert_eq!(full_citation(&doc.blocks, "gamma"), None);
+        let code = full_citation(&doc.blocks, "alpha").unwrap();
+        let (src, _) = typst_bridge::block_document(&Around::default(), &code, 300.0);
+        let mut world = typst_bridge::BridgeWorld::new();
+        let out = typst_bridge::compile(&mut world, &src).unwrap_or_else(|e| panic!("{e:?}"));
+        fn walk(frame: &typst::layout::Frame, out: &mut String) {
+            for (_, item) in frame.items() {
+                match item {
+                    typst::layout::FrameItem::Group(g) => walk(&g.frame, out),
+                    typst::layout::FrameItem::Text(t) => out.push_str(&t.text),
+                    _ => {}
+                }
+            }
+        }
+        let mut text = String::new();
+        walk(&out.pages()[0].frame, &mut text);
+        assert!(text.starts_with("[2]"), "{text:?}");
+        assert!(
+            text.contains("First Paper") && !text.contains("Second"),
+            "{text:?}"
+        );
     }
 }

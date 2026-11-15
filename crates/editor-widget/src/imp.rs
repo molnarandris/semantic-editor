@@ -123,6 +123,8 @@ struct OutlineEntry {
 const SNIPPET_BIT: u64 = 1 << 61;
 /// Snippets: logical pixels per pt.
 pub const SNIPPET_PX_PER_PT: f64 = 1.25;
+/// The width of a citation's full reference on hovering it, in points.
+const CITATION_TIP_PT: f64 = 320.0;
 
 /// What a snippet render calls with: the texture and its device pixels per
 /// logical pixel, or the compile errors.
@@ -155,6 +157,10 @@ pub struct SemEditor {
     /// Snippet renders waiting for their result, by job id.
     snippets: RefCell<HashMap<u64, SnippetDone>>,
     next_snippet: Cell<u64>,
+    /// Full references shown on hovering citations, by the header and the
+    /// Typst code rendered (`jobs::full_citation`); None while rendering or
+    /// if it failed.
+    cite_tips: RefCell<HashMap<String, Option<gdk::Paintable>>>,
     worker: OnceCell<Worker>,
     generation: Cell<u64>,
     /// Page width and pixels per point the current renders were requested at.
@@ -543,14 +549,16 @@ impl SemEditor {
         });
         obj.add_controller(focus);
 
-        // A remark's text when the pointer is on its shading or bar.
+        // A remark's text when the pointer is on its shading or bar; a
+        // citation's full reference.
         obj.set_has_tooltip(true);
         obj.connect_query_tooltip(|obj, x, y, _keyboard, tooltip| {
-            let Some(text) = obj.imp().remark_at(x as f64, y as f64) else {
-                return false;
-            };
-            tooltip.set_text(Some(&text));
-            true
+            let imp = obj.imp();
+            if let Some(text) = imp.remark_at(x as f64, y as f64) {
+                tooltip.set_text(Some(&text));
+                return true;
+            }
+            imp.citation_tip(x as f64, y as f64, tooltip)
         });
 
         let click = gtk::GestureClick::new();
@@ -1898,6 +1906,45 @@ impl SemEditor {
         ed.doc().ref_label(id).map(str::to_string)
     }
 
+    /// Show in `tooltip` the full reference of the citation at widget point
+    /// `(x, y)`, rendered by Typst in the tooltip's white. The first time it
+    /// is rendered in the background and the tooltip asked for again.
+    fn citation_tip(&self, x: f64, y: f64, tooltip: &gtk::Tooltip) -> bool {
+        let Some(key) = self.ref_at(x, y) else {
+            return false;
+        };
+        let Some(code) = jobs::full_citation(&self.editor.borrow().doc().blocks, &key) else {
+            return false;
+        };
+        let cached = format!("{}\n{code}", self.snippet_header());
+        if let Some(tip) = self.cite_tips.borrow().get(&cached) {
+            let Some(paintable) = tip else {
+                return false;
+            };
+            tooltip.set_custom(Some(&gtk::Picture::for_paintable(paintable)));
+            return true;
+        }
+        self.cite_tips.borrow_mut().insert(cached.clone(), None);
+        let weak = self.obj().downgrade();
+        let done = move |result: Result<(gdk::Texture, f64), String>| {
+            let Some(obj) = weak.upgrade() else {
+                return;
+            };
+            // Shown at its size in logical pixels, sharp on any screen.
+            let paintable = result.ok().and_then(|(texture, scale)| {
+                let w = texture.width() as f32 / scale as f32;
+                let h = texture.height() as f32 / scale as f32;
+                let snapshot = gtk::Snapshot::new();
+                snapshot.append_texture(&texture, &graphene::Rect::new(0.0, 0.0, w, h));
+                snapshot.to_paintable(Some(&graphene::Size::new(w, h)))
+            });
+            obj.imp().cite_tips.borrow_mut().insert(cached, paintable);
+            obj.trigger_tooltip_query();
+        };
+        self.render_snippet(&code, CITATION_TIP_PT, gdk::RGBA::WHITE, Box::new(done));
+        false
+    }
+
     fn locate(&self, x: f64, y: f64) -> Option<CursorPath> {
         if let Some(c) = self.tab_at(x, y) {
             return Some(c);
@@ -2296,22 +2343,27 @@ impl SemEditor {
         self.outline.borrow().get(&id)?.texture.clone()
     }
 
+    /// The header snippets are rendered with: the last block's, which holds
+    /// the code blocks' definitions too.
+    fn snippet_header(&self) -> Arc<str> {
+        match self.views.borrow().last() {
+            Some(view) => view.around.header.clone(),
+            None => self.editor.borrow().doc().header.as_str().into(),
+        }
+    }
+
     /// Render Typst `markup` (not part of the document) `width_pt` wide,
-    /// with the definitions of the whole document in force, in the
-    /// widget's text colour at 11pt; `done` gets the texture cropped to the
-    /// ink, or the errors.
-    pub(crate) fn render_snippet(&self, markup: &str, width_pt: f64, done: SnippetDone) {
-        let (header, files) = {
-            let ed = self.editor.borrow();
-            let doc = ed.doc();
-            // The last block's header holds the code blocks' definitions too.
-            let header = match self.views.borrow().last() {
-                Some(view) => view.around.header.clone(),
-                None => doc.header.as_str().into(),
-            };
-            (header, doc.files.clone())
-        };
-        let c = self.obj().color();
+    /// with the definitions of the whole document in force, in colour `c`
+    /// at 11pt; `done` gets the texture cropped to the ink, or the errors.
+    pub(crate) fn render_snippet(
+        &self,
+        markup: &str,
+        width_pt: f64,
+        c: gdk::RGBA,
+        done: SnippetDone,
+    ) {
+        let header = self.snippet_header();
+        let files = self.editor.borrow().doc().files.clone();
         let hex = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
         let color = format!(
             "rgb(\"#{:02x}{:02x}{:02x}\")",

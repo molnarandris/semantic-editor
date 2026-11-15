@@ -1670,3 +1670,19 @@ reported targets, so only those are still listed. On the paper: no problems left
 - Checked with a scratch MIME database: `gio info` reports a `.sem` as the new
   type. Making the editor the default app is the user's step (Files → Open
   With, or `xdg-mime default`).
+
+## Hovering a citation shows its reference (2026-11-15)
+
+- `jobs::full_citation(blocks, key)`: `#cite(label(key), form: "full")`, the
+  document's citations hidden before it (so the number is the document's) and
+  the bibliography hidden after it (so its style). None for a key not in the
+  bibliography. Test `full_citations`: "[2] … First Paper" for the second key
+  cited.
+- The widget's tooltip: after the remarks, `citation_tip` (the reference at the
+  pointer from `ref_at`, as Ctrl+click). The first hover renders it as a
+  snippet (`render_snippet`, now with a colour: white, as libadwaita's
+  tooltips are dark in both themes; 320pt wide, cropped to the ink) and asks
+  for the tooltip again when done; the picture is cached by header and code, so
+  a changed bibliography or style renders anew. Shown at its logical size
+  (`Snapshot::to_paintable`), sharp on HiDPI.
+- Awaiting the user's test.
