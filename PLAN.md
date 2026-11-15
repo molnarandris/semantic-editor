@@ -1689,7 +1689,7 @@ reported targets, so only those are still listed. On the paper: no problems left
   (the header colours citations; its rules beat the snippet's white). The
   picture is now painted white through a colour matrix (colour dropped, alpha
   kept), whatever the header does.
-- Awaiting the user's test.
+- Tested by the user (2026-11-15): works.
 
 ## `$` at the start of a formula: display ⇄ inline (2026-11-15)
 
@@ -1707,7 +1707,7 @@ reported targets, so only those are still listed. On the paper: no problems left
   following paragraph that was separate is joined as well; Enter splits it.
   A label goes with the display (inline formulas have no number); undo brings
   it back. The caret stays at the formula's start.
-- Test `dollar_at_the_start_toggles_display`. Awaiting the user's test.
+- Test `dollar_at_the_start_toggles_display`. Tested by the user (2026-11-15): works.
 
 ## Web links open in the browser (2026-11-15)
 
@@ -1721,7 +1721,7 @@ reported targets, so only those are still listed. On the paper: no problems left
   reference follows it, so no new shortcut. Hovering a link shows its address
   (no "Ctrl+click to open": the user finds it inconsistent, nothing else
   says how to use it).
-- Awaiting the user's test.
+- Tested by the user (2026-11-15): works.
 
 ## No extra space around calls of the header's functions (2026-11-15)
 
@@ -1732,4 +1732,4 @@ reported targets, so only those are still listed. On the paper: no problems left
   `#sem-code()ket(psi)#sem-code()`. Test: `a ket(psi) b` has the same gap
   from `a` to `b` in the editor as exported (in
   `calls_of_header_functions_cover_their_drawing`; 28.1 vs 20.8pt before).
-- Awaiting the user's test.
+- Tested by the user (2026-11-15): works.
