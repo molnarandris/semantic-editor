@@ -720,7 +720,8 @@ To fix one group at a time, not at once. Answers already found are noted.
 
 - **Small things**: the buttons on top of the sidebars are ugly (maybe at the
   bottom?); `.sem` files open with the editor (a MIME type, `MimeType=` in the
-  `.desktop` file, an icon) (done); web links open in the browser; hovering a citation
+  `.desktop` file, an icon) (done); web links open in the browser (done: Ctrl+click, as
+  references; hovering shows the address); hovering a citation
   shows the reference (done); a display formula turns inline and back (done:
   `$` at the very start of a formula, as in TeXmacs); extra space after
   `ket(x)`'s ⟩.

@@ -302,6 +302,24 @@ fn call_body_mut(inlines: &mut [InlineNode], id: NodeId) -> Option<&mut Vec<Inli
     None
 }
 
+/// The value of the string literal that `args` (a call's arguments as
+/// Typst source) start with: `"https://a.org", …` gives `https://a.org`.
+/// Escapes other than `\"` and `\\` are not read.
+fn string_literal(args: &str) -> Option<String> {
+    let mut chars = args.trim_start().strip_prefix('"')?.chars();
+    let mut out = String::new();
+    loop {
+        match chars.next()? {
+            '"' => return Some(out),
+            '\\' => match chars.next()? {
+                c @ ('"' | '\\') => out.push(c),
+                _ => return None,
+            },
+            c => out.push(c),
+        }
+    }
+}
+
 /// The inline `id` in this list, in calls too.
 fn find_inline_mut(inlines: &mut [InlineNode], id: NodeId) -> Option<&mut InlineNode> {
     for inline in inlines {
@@ -1339,6 +1357,42 @@ impl Document {
         find(block.kind.text_inlines()?, id)
     }
 
+    /// The web address of the link that is or holds inline `id`,
+    /// `#link("https://…")[…]`: `http`, `https` and `mailto` only (not a
+    /// link to a label or a local file).
+    pub fn link_url(&self, id: NodeId) -> Option<String> {
+        /// The arguments of the innermost link around `id` (`link` around
+        /// this list), if `id` is in it.
+        fn find<'a>(
+            v: &'a [InlineNode],
+            id: NodeId,
+            link: Option<&'a str>,
+        ) -> Option<Option<&'a str>> {
+            for inline in v {
+                let here = match &inline.kind {
+                    Inline::Call { name, args, .. } if name == "link" => Some(args.as_str()),
+                    _ => link,
+                };
+                if inline.id == id {
+                    return Some(here);
+                }
+                if let Some(body) = inline.body()
+                    && let Some(found) = find(body, id, here)
+                {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        let block = self.block(self.inline_block(id)?)?;
+        let args = find(block.kind.text_inlines()?, id, None)??;
+        let url = string_literal(args)?;
+        ["http://", "https://", "mailto:"]
+            .iter()
+            .any(|scheme| url.starts_with(scheme))
+            .then_some(url)
+    }
+
     /// Every label in document order, with the block it labels.
     pub fn labels(&self) -> Vec<(&str, &BlockNode)> {
         let mut all = vec![];
@@ -1725,5 +1779,39 @@ beta-2:
         back.check_invariants().unwrap();
         assert_eq!(back.blocks[0].id, doc.blocks[0].id);
         assert_eq!(back.blocks[0].kind.body().unwrap()[0].id, inner);
+    }
+
+    /// The web address of a link, from its text or from text in a call in
+    /// it; none outside links, for labels or local files.
+    #[test]
+    fn link_urls() {
+        let mut doc = Document::empty();
+        let word = doc.text("site");
+        let word_id = word.id;
+        let bold = doc.inline_call("strong", "", vec![word]);
+        let web = doc.inline_call("link", r#""https://a.org/?q=\"x\"""#, vec![bold]);
+        let (inner, label, file) = (doc.text("here"), doc.text("there"), doc.text("file"));
+        let ids = (inner.id, label.id, file.id);
+        let to_label = doc.inline_call("link", "<sec:intro>", vec![label]);
+        let to_file = doc.inline_call("link", r#""file:///etc/passwd""#, vec![file]);
+        let (t0, t1, t2, t3) = (
+            doc.text("See "),
+            doc.text(" "),
+            doc.text(" "),
+            doc.text("."),
+        );
+        let plain = t0.id;
+        let mail = doc.inline_call("link", r#""mailto:a@b.org""#, vec![inner]);
+        let t4 = doc.text(" ");
+        let p = doc.paragraph(vec![t0, web, t1, to_label, t2, mail, t4, to_file, t3]);
+        doc.blocks = vec![p];
+        assert_eq!(
+            doc.link_url(word_id).as_deref(),
+            Some("https://a.org/?q=\"x\"")
+        );
+        assert_eq!(doc.link_url(ids.0).as_deref(), Some("mailto:a@b.org"));
+        assert_eq!(doc.link_url(ids.1), None);
+        assert_eq!(doc.link_url(ids.2), None);
+        assert_eq!(doc.link_url(plain), None);
     }
 }

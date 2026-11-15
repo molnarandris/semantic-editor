@@ -550,15 +550,20 @@ impl SemEditor {
         obj.add_controller(focus);
 
         // A remark's text when the pointer is on its shading or bar; a
-        // citation's full reference.
+        // citation's full reference; a web link's address.
         obj.set_has_tooltip(true);
         obj.connect_query_tooltip(|obj, x, y, _keyboard, tooltip| {
             let imp = obj.imp();
-            if let Some(text) = imp.remark_at(x as f64, y as f64) {
+            let (x, y) = (x as f64, y as f64);
+            if let Some(text) = imp.remark_at(x, y) {
                 tooltip.set_text(Some(&text));
                 return true;
             }
-            imp.citation_tip(x as f64, y as f64, tooltip)
+            if let Some(url) = imp.link_at(x, y) {
+                tooltip.set_text(Some(&format!("{url}\nCtrl+click to open")));
+                return true;
+            }
+            imp.citation_tip(x, y, tooltip)
         });
 
         let click = gtk::GestureClick::new();
@@ -581,6 +586,9 @@ impl SemEditor {
                     // comes back).
                     imp.goal_x.set(None);
                     imp.after_jump();
+                } else if ctrl && let Some(url) = imp.link_at(x, y) {
+                    // Ctrl+click on a web link: open it.
+                    imp.open_link(&url);
                 } else if let Some(env) = imp.heading_at(x, y)
                     && imp.editor.borrow_mut().edit_title(env)
                 {
@@ -1887,23 +1895,34 @@ impl SemEditor {
         Some((self.block_stops(index), bx, by))
     }
 
-    /// The label of the reference drawn at widget point `(x, y)`, if any.
-    fn ref_at(&self, x: f64, y: f64) -> Option<String> {
+    /// The smallest node drawn at widget point `(x, y)`, if any.
+    fn node_at(&self, x: f64, y: f64) -> Option<NodeId> {
         let zoom = self.zoom.get();
         let cy = y + self.scroll();
         let tops = self.block_tops();
         let index = tops.iter().rposition(|&t| t <= cy)?;
         let bx = (x - self.page_x(self.obj().width() as f64)) / zoom;
         let by = (cy - tops[index]) / zoom;
-        let id = self
-            .views
-            .borrow()
-            .get(index)?
-            .layout
-            .as_ref()?
-            .hit(bx, by)?;
+        self.views.borrow().get(index)?.layout.as_ref()?.hit(bx, by)
+    }
+
+    /// The label of the reference drawn at widget point `(x, y)`, if any.
+    fn ref_at(&self, x: f64, y: f64) -> Option<String> {
+        let id = self.node_at(x, y)?;
         let ed = self.editor.borrow();
         ed.doc().ref_label(id).map(str::to_string)
+    }
+
+    /// The web address of the link drawn at widget point `(x, y)`, if any.
+    fn link_at(&self, x: f64, y: f64) -> Option<String> {
+        let id = self.node_at(x, y)?;
+        self.editor.borrow().doc().link_url(id)
+    }
+
+    /// Open `url` in the browser (through the portal in the Flatpak).
+    fn open_link(&self, url: &str) {
+        let window = self.obj().root().and_downcast::<gtk::Window>();
+        gtk::UriLauncher::new(url).launch(window.as_ref(), gtk::gio::Cancellable::NONE, |_| {});
     }
 
     /// Show in `tooltip` the full reference of the citation at widget point

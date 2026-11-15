@@ -1708,3 +1708,16 @@ reported targets, so only those are still listed. On the paper: no problems left
   A label goes with the display (inline formulas have no number); undo brings
   it back. The caret stays at the formula's start.
 - Test `dollar_at_the_start_toggles_display`. Awaiting the user's test.
+
+## Web links open in the browser (2026-11-15)
+
+- `Document::link_url(id)`: the address of the innermost `#link("…")[…]`
+  holding inline `id` (its first argument, a string literal; only `\"` and
+  `\\` escapes read), for `http`, `https` and `mailto` only: a link to a label
+  or a `file://` never opens. Test `link_urls`.
+- Widget: `node_at` (the hit test `ref_at` used) shared by `ref_at` and
+  `link_at`. Ctrl+click on a link opens it with `gtk::UriLauncher` (the
+  OpenURI portal in the Flatpak; no permission needed), like Ctrl+click on a
+  reference follows it, so no new shortcut. Hovering a link shows its address
+  and "Ctrl+click to open".
+- Awaiting the user's test.
