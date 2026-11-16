@@ -358,7 +358,14 @@ impl Editor {
 
     /// What function `name` takes as a block call, if known.
     pub(super) fn call_shape(&self, name: &str) -> Option<CallShape> {
-        self.calls?(&self.defining_sources(), name)
+        match self.calls {
+            Some(calls) => calls(&self.defining_sources(), name),
+            // Nothing to look it up with: it may take anything.
+            None => Some(CallShape {
+                body: true,
+                title: true,
+            }),
+        }
     }
 
     /// What `name` takes called in math, if it is a function there.
@@ -1492,6 +1499,7 @@ impl Editor {
         let (name, args) = input::call_head(&pos.chars())?;
         Some(match (self.call_shape(&name), args) {
             (Some(c), _) if !c.body => "this function takes no content",
+            (None, _) => "not defined: space → code · [ → a call with content",
             (_, Some(_)) => "space → block call with these arguments",
             (Some(c), None) if !c.title => {
                 "space → block call · ( → its arguments, e.g. #align(center)"

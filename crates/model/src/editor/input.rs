@@ -166,7 +166,8 @@ impl Editor {
         // call `#name[…]` with the caret in its body; `#name(` one with a
         // title, caret in it, unless the function takes no title: then the
         // `(` starts its other arguments, `#align(center) `. Nothing for a
-        // name known to take no content.
+        // name known to take no content; a name defined nowhere only with
+        // `[` (else it is code, shown failing).
         if (s == " " || s == "(" || s == "[")
             && pos.inlines.len() == 1
             && !pos.nested()
@@ -174,7 +175,10 @@ impl Editor {
             && matches!(pos.block.kind, Block::Paragraph(_))
             && let Some((name, args)) = call_head(&chars)
             && let shape = self.call_shape(&name)
-            && shape.is_none_or(|c| c.body)
+            && match s {
+                "[" => shape.is_none_or(|c| c.body),
+                _ => shape.is_some_and(|c| c.body),
+            }
             && (s != "(" || args.is_none() && shape.is_none_or(|c| c.title))
         {
             let place = pos.place;
@@ -206,10 +210,11 @@ impl Editor {
         }
         // `#code ` in text: a code piece (`#h(1em)`, `#sym.dagger`), unless
         // a call with content starts (`#name ` for a function taking it);
-        // the space stays, the caret after it. Undo leaves it text.
+        // the space stays, the caret after it. Undo leaves it text. A name
+        // defined nowhere is a piece too, which then shows failing.
         if s == " "
             && let Some((start, code)) = code_head(&chars[..pos.offset])
-            && (code.contains(['(', '.']) || self.call_shape(&code).is_some_and(|c| !c.body))
+            && (code.contains(['(', '.']) || self.call_shape(&code).is_none_or(|c| !c.body))
         {
             let (i, c) = (pos.inline, pos.offset);
             let tail: String = chars[c..].iter().collect();

@@ -31,11 +31,17 @@ fn defined(sources: &[&str], name: &str) -> Option<Option<Params>> {
 }
 
 /// The shape of function `name` called as a block, by `sources`, else by
-/// the standard library. `None` if unknown: bound to something that is not
-/// written as a function here, imported from a package, or not defined.
+/// the standard library. Bound to something not written as a function here
+/// (`#let thm = thmbox(…)`) or imported: it may take anything, content and
+/// a title. `None` if defined nowhere.
 pub fn call_shape(sources: &[&str], name: &str) -> Option<CallShape> {
     if let Some(found) = defined(sources, name) {
-        let p = found?;
+        let Some(p) = found else {
+            return Some(CallShape {
+                body: true,
+                title: true,
+            });
+        };
         return Some(CallShape {
             body: p.positional >= 1 || p.sink,
             title: p.positional >= 2 || p.sink,
@@ -108,6 +114,20 @@ fn defined_in(source: &str, name: &str) -> Option<Option<Params>> {
     let root = parse(source);
     let mut found = None;
     for node in root.children() {
+        // Imported (`: *` may bring it): bound, but not written here.
+        if let Some(import) = node.cast::<ast::ModuleImport>() {
+            let binds = match import.imports() {
+                Some(ast::Imports::Wildcard) => true,
+                Some(ast::Imports::Items(items)) => {
+                    items.iter().any(|i| i.bound_name().as_str() == name)
+                }
+                None => false,
+            };
+            if binds {
+                found = Some(None);
+            }
+            continue;
+        }
         let Some(binding) = node.cast::<ast::LetBinding>() else {
             continue;
         };
@@ -155,9 +175,15 @@ mod tests {
         assert_eq!(s("theorem"), shape(true, true));
         assert_eq!(s("proof"), shape(true, false));
         assert_eq!(s("pair"), shape(true, true));
-        assert_eq!(s("n"), None, "not written as a function");
-        assert_eq!(s("thm"), None);
-        assert_eq!(s("nonsense"), None);
+        // Not written as a function here: it may take anything.
+        assert_eq!(s("n"), shape(true, true));
+        assert_eq!(s("thm"), shape(true, true));
+        assert_eq!(s("nonsense"), None, "defined nowhere");
+        let imports = "#import \"@preview/a:1.0.0\": *\n#import \"b.typ\": x, y as z";
+        assert_eq!(call_shape(&[imports], "nonsense"), shape(true, true));
+        let named = "#import \"b.typ\": x, y as z";
+        assert_eq!(call_shape(&[named], "z"), shape(true, true));
+        assert_eq!(call_shape(&[named], "y"), None, "renamed");
         assert_eq!(s("align"), shape(true, false));
         assert_eq!(s("pagebreak"), shape(false, false));
         assert_eq!(s("sym"), shape(false, false), "a module, not a function");

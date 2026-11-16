@@ -464,7 +464,8 @@ fn fake_calls(_: &[&str], name: &str) -> Option<CallShape> {
 
 /// Block calls by what the function takes: `(` gives a title only to a
 /// function that takes one, else starts source arguments; a function that
-/// takes no content is a code piece; an unknown one may take a title.
+/// takes no content is a code piece; one defined nowhere is code too (it
+/// shows failing), except with `[`.
 #[test]
 fn block_calls_by_function() {
     let fresh = || {
@@ -477,7 +478,13 @@ fn block_calls_by_function() {
     assert_eq!(texts(&e), ["#lemma(Key)[Text]"]);
     let mut e = fresh();
     e.insert_text("#unknown(Key) Text");
-    assert_eq!(texts(&e), ["#unknown(Key)[Text]"]);
+    assert_eq!(texts(&e), ["{#unknown(Key)} Text"]);
+    let mut e = fresh();
+    e.insert_text("#unknown x");
+    assert_eq!(texts(&e), ["{#unknown} x"]);
+    let mut e = fresh();
+    e.insert_text("#unknown[x");
+    assert_eq!(texts(&e), ["#unknown[x]"]);
 
     let mut e = fresh();
     e.insert_text("#align(center + horizon) Text");
@@ -1178,10 +1185,14 @@ fn hash_code_in_text() {
     e.undo();
     assert_eq!(texts(&e), ["a #pagebreak"]);
 
-    // A function taking content still makes a call; unbalanced stays text.
+    // A function taking content still makes a call (one defined nowhere
+    // only with `[`: a typo is code, shown failing); unbalanced stays text.
     let mut e = fresh();
-    e.insert_text("a #cl x");
-    assert_eq!(texts(&e), ["a #cl[x]"]);
+    e.insert_text("a #proof x");
+    assert_eq!(texts(&e), ["a #proof[x]"]);
+    let mut e = fresh();
+    e.insert_text("a #sym.dager x #cl x #cl[y");
+    assert_eq!(texts(&e), ["a {#sym.dager} x {#cl} x #cl[y]"]);
     let mut e = fresh();
     e.insert_text("a #f(x b");
     assert_eq!(texts(&e), ["a #f(x b"]);
