@@ -145,8 +145,9 @@ and their own file formats. This editor tries to give you both:
 - Editing the arguments of an existing call, and support for more Typst packages.
 - Sharp zooming (vector rendering) and Typst syntax highlighting in the source dialog.
 
-Design notes, milestones and the full wishlist are in [`spec.md`](spec.md). What was
-built and why is in [`PLAN.md`](PLAN.md).
+What the editor should do is in [`spec.md`](spec.md), how it is built and why in
+[`NOTES.md`](NOTES.md), and what is planned in [`TODO.md`](TODO.md). Bugs and
+requests: GitHub issues.
 
 ## Building
 
@@ -187,7 +188,7 @@ caret positions from the layout. The document model, not the Typst source, is th
 of truth.
 
 Most of the code was written with [Claude Code](https://claude.com/claude-code), following
-the specification and reviews in `spec.md` and `PLAN.md`.
+the specification in `spec.md` and the notes in `NOTES.md`.
 
 ## License
 
