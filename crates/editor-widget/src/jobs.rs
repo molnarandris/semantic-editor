@@ -347,10 +347,17 @@ pub struct Sources<'a> {
     pub failed: &'a [NodeId],
 }
 
-/// The source of inline `id` that a compile error is blamed on, if it can
-/// show its source when it fails: a code piece, or a call's name and
-/// arguments. A failed one is shown so until this changes.
+/// The source of node `id` that a compile error is blamed on, if it can
+/// show its source when it fails: a code piece, or the name and arguments
+/// of a call (inline or a block). A failed one is shown so until this
+/// changes.
 pub fn failing_source(doc: &model::Document, id: NodeId) -> Option<String> {
+    if let Some(block) = doc.block(id) {
+        return match &block.kind {
+            Block::Env { name, args, .. } => Some(format!("{name}({args})")),
+            _ => None,
+        };
+    }
     match &doc.inline(id)?.kind {
         Inline::Code(s) => Some(s.clone()),
         Inline::Call { name, args, .. } => Some(format!("{name}({args})")),

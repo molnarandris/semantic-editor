@@ -536,6 +536,23 @@ mod tests {
         chars.dedup();
         assert_eq!(chars, (0..9).collect::<Vec<_>>(), "every char of nosuch(1)");
         assert!(layout.glyphs.iter().any(|g| g.node == x_id), "the body");
+
+        // A block call: blamed, then its body renders.
+        let x = d.text("x");
+        let x_id = x.id;
+        let body = d.paragraph(vec![x]);
+        let env = d.env("nosuch", vec![body]);
+        let (snippet, map) = crate::serialize_block(&env);
+        let mut world = BridgeWorld::new();
+        let (src, offset) = block_document(&Around::default(), &snippet, 300.0);
+        let errors = compile_located(&mut world, &src).unwrap_err();
+        let at = errors[0].at.iter().find(|&&at| at >= offset).unwrap();
+        assert_eq!(map.innermost(at - offset), Some(env.id));
+        let (snippet, map) = crate::serialize_block_open(&env, None, None, &[env.id]);
+        let (src, offset) = block_document(&Around::default(), &snippet, 300.0);
+        let doc = compile(&mut world, &src).unwrap_or_else(|e| panic!("{e:?}\n{src}"));
+        let layout = raw_layout(&world, &doc.pages()[0], offset).resolve(&map);
+        assert!(layout.glyphs.iter().any(|g| g.node == x_id), "the body");
     }
 
     #[test]

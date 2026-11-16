@@ -393,6 +393,27 @@ impl Writer {
                 title,
                 body,
             } => {
+                // Failed to compile: the call's source on red around its
+                // title and body, which stay text.
+                if w.style == Style::Edit && w.failed.contains(&block.id) {
+                    let args = if args.is_empty() {
+                        String::new()
+                    } else {
+                        format!("({args})")
+                    };
+                    w.out.push_str(&failed_source(&format!("#{name}{args}")));
+                    if !title.is_empty() {
+                        w.out.push_str(&failed_source("["));
+                        w.text_block(title, false);
+                        w.out.push_str(&failed_source("]"));
+                    }
+                    w.out.push_str(&failed_source("["));
+                    w.nl();
+                    w.blocks(body);
+                    w.nl();
+                    w.out.push_str(&failed_source("]"));
+                    return;
+                }
                 w.out.push('#');
                 w.out.push_str(name);
                 // A figure's caption, the last block of its body, is its

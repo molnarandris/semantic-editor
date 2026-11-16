@@ -1797,3 +1797,15 @@ reported targets, so only those are still listed. On the paper: no problems left
 - Test `failed_pieces_show_their_source` (a code piece and a call, blamed one
   after the other, then the block compiles with every char of the piece in
   place). Awaiting the user's test.
+- Fixes (user, 2026-11-16): (1) a mistyped name (`#sym.dager `, `#nosuch `)
+  became a call with empty brackets, or alone in a paragraph a block call
+  that never rendered (red dot, typing seemed dead). `call_shape` now tells
+  a name defined nowhere (`None`) from one bound in a way the editor cannot
+  read (`#let thm = thmbox(…)`, imports, `: *`: takes content and a title);
+  typing a space after a name defined nowhere makes a code piece, which then
+  shows failing; `[` still makes a call. Without a lookup installed (tests)
+  every name may take anything, as before. Tests `block_calls_by_function`,
+  `hash_code_in_text`, `shapes_from_lets_and_the_library`. (2) A failing
+  block call (`#nosuch[…]`) shows `#name(args)`, its title's and body's
+  brackets on red, title and body still text (test in
+  `failed_pieces_show_their_source`).
