@@ -245,6 +245,17 @@ fn row_stops(
         if let Some(r) = r {
             right = r.right();
         }
+        if let MathKind::Code(source) = &node.kind {
+            let mut p = path.clone();
+            p.extend([Step::Index(k), Step::Code]);
+            let base = out.last().map_or(line, |s| s.line);
+            let n = source.chars().count();
+            let place = |offset, x, g: Rect, baseline| Stop {
+                depth: depth + 1,
+                ..stop(block, p.clone(), offset, x, g.y, g.bottom(), baseline)
+            };
+            out.extend(code_stops(node.id, n, l, r.unwrap_or(rb), base, place));
+        }
         if let Some(opts) = node.kind.tab() {
             let mut p = path.clone();
             p.extend([Step::Index(k), Step::Opts]);
@@ -282,6 +293,40 @@ fn row_stops(
     } else {
         at(path, row.nodes.len(), right)
     });
+}
+
+/// The stops in the source of code atom `id` (`len` chars), made by
+/// `place(offset, x, height, baseline)`: where its glyphs put each char
+/// once it is rendered open, else spread over its box `r` on `line` (the
+/// render before it opened).
+fn code_stops(
+    id: model::NodeId,
+    len: usize,
+    l: &BlockLayout,
+    r: Rect,
+    line: f64,
+    place: impl Fn(usize, f64, Rect, f64) -> Stop,
+) -> Vec<Stop> {
+    let mut slots: Vec<Option<Stop>> = vec![None; len + 1];
+    for g in l.glyphs.iter().filter(|g| g.node == id) {
+        let n = g.chars.len().max(1);
+        for k in 0..=n {
+            let x = g.rect.x + g.rect.w * k as f64 / n as f64;
+            if let Some(slot) = slots.get_mut(g.chars.start + k) {
+                slot.get_or_insert(place(g.chars.start + k, x, g.rect, g.baseline));
+            }
+        }
+    }
+    slots
+        .into_iter()
+        .enumerate()
+        .map(|(k, s)| {
+            s.unwrap_or_else(|| {
+                let x = r.x + r.w * k as f64 / len.max(1) as f64;
+                place(k, x, r, line)
+            })
+        })
+        .collect()
 }
 
 /// The stops of `block` in layout `l`: the whole rendered block (`top`), or
@@ -1124,6 +1169,43 @@ mod tests {
         let (src, offset) = block_document(&Around::default(), &snippet, width);
         let doc = compile(&mut world, &src).unwrap();
         raw_layout(&world, &doc.pages()[0], offset).resolve(&map)
+    }
+
+    /// Code in a formula, open: a stop at every char of its source, in
+    /// order, between the stops before and after the atom; the stops are
+    /// the model's positions.
+    #[test]
+    fn stops_in_code_in_formulas() {
+        let mut d = Document::empty();
+        let (x, code, y) = (d.ident("x"), d.code("sym.dagger"), d.ident("y"));
+        let id = code.id;
+        let block = d.display(vec![x, code, y]);
+        let (snippet, map) = typst_bridge::serialize_block_open(&block, None, Some(id), &[]);
+        let mut world = BridgeWorld::new();
+        let (src, offset) = block_document(&Around::default(), &snippet, 300.0);
+        let doc = compile(&mut world, &src).unwrap();
+        let l = raw_layout(&world, &doc.pages()[0], offset).resolve(&map);
+        let s = super::stops(&block, Some(&l));
+        let got: Vec<_> = s
+            .iter()
+            .filter(|s| !s.label)
+            .map(|s| s.cursor.clone())
+            .collect();
+        assert_eq!(got, d.positions(&block));
+        let code: Vec<f64> = s
+            .iter()
+            .filter(|s| s.cursor.path.ends_with(&[Step::Code]))
+            .map(|s| s.x)
+            .collect();
+        assert_eq!(code.len(), 11);
+        assert!(code.windows(2).all(|w| w[1] > w[0]), "{code:?}");
+        let before = s
+            .iter()
+            .find(|s| s.cursor.offset == 1 && s.cursor.path.is_empty());
+        let after = s
+            .iter()
+            .find(|s| s.cursor.offset == 2 && s.cursor.path.is_empty());
+        assert!(before.unwrap().x < code[0] && code[10] <= after.unwrap().x + 0.5);
     }
 
     /// A picture in a figure: stops at its box's edges, its options tab's

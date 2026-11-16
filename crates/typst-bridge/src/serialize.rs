@@ -960,10 +960,24 @@ impl Writer {
             MathKind::Ident(s) => w.out.push_str(&ident_source(s, w.style)),
             MathKind::Num(s) => w.out.push_str(&num_source(s)),
             MathKind::Slot => w.out.push_str(SLOT),
-            // Failed to compile: its source on red, in a box like the code.
-            MathKind::Code(src) if w.style == Style::Edit && w.failed.contains(&node.id) => {
+            // Open (the caret in it) or failed to compile: its source in a
+            // box, each char in place (on red if failed).
+            MathKind::Code(src)
+                if w.style == Style::Edit
+                    && (w.open == Some(node.id) || w.failed.contains(&node.id)) =>
+            {
+                let failed = w.failed.contains(&node.id);
                 w.out.push_str("#sem-code[");
-                w.out.push_str(&failed_source(&format!("#{src}")));
+                if failed {
+                    w.out.push_str(FAILED);
+                }
+                w.out.push_str(CODE_TEXT);
+                w.out.push_str("\\#");
+                w.text(node.id, src, false, false);
+                w.out.push(']');
+                if failed {
+                    w.out.push(']');
+                }
                 w.out.push_str("];");
             }
             MathKind::Code(src) if w.style == Style::Edit => {

@@ -89,6 +89,9 @@ impl Editor {
         if self.opts_pos().is_some() {
             return self.leave_opts();
         }
+        if self.math_code_pos().is_some() {
+            return self.leave_math_code();
+        }
         let Some(p) = self.row_pos() else {
             if self.raw_pos().is_some() {
                 return self.leave_raw();
@@ -131,6 +134,9 @@ impl Editor {
         }
         if self.opts_pos().is_some() {
             return self.leave_opts();
+        }
+        if self.math_code_pos().is_some() {
+            return self.leave_math_code();
         }
         if let Some(pos) = self.raw_pos() {
             self.caret = pos.at(pos.inline + 1, 0);

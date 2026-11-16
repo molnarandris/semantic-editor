@@ -1048,7 +1048,7 @@ fn show(row: &crate::tree::MathRow) -> String {
         .map(|n| match &n.kind {
             MathKind::Sym(s) | MathKind::Ident(s) | MathKind::Num(s) => s.clone(),
             MathKind::Slot => "□".into(),
-            MathKind::Code(_) => "#code".into(),
+            MathKind::Code(s) => format!("#{s}"),
             MathKind::Diagram(_) => "#diagram".into(),
             MathKind::Primes(n) => "'".repeat(*n),
             MathKind::Text(t) => format!("\"{t}\""),
@@ -1210,6 +1210,54 @@ fn hash_code_in_text() {
     }
     e.insert_text("2em)");
     assert_eq!(texts(&e), ["a {#h(2em)} b"]);
+}
+
+/// Code in a formula is edited in place: ←/→ walk through its source
+/// (open while the caret is in it), typing keeps every char, Backspace
+/// takes chars, Esc leaves it just after; emptied, it goes. Undo works.
+#[test]
+fn code_in_formulas_is_edited_in_place() {
+    let mut d = Document::empty();
+    let (x, code, y) = (d.ident("x"), d.code("sym.dager"), d.ident("y"));
+    let code_id = code.id;
+    d.blocks = vec![d.display(vec![x, code, y])];
+    let mut e = Editor::new(d);
+    let id = e.doc().blocks[0].id;
+    e.set_caret(cursor(id, vec![], 1));
+    assert_eq!(e.open_code(), None);
+    e.move_right();
+    assert_eq!(e.caret(), &cursor(id, vec![Step::Index(1), Step::Code], 0));
+    assert_eq!(e.open_code(), Some(code_id));
+    assert_eq!(e.source_target(), Some(code_id));
+    for _ in 0..7 {
+        e.move_right();
+    }
+    e.insert_text("g");
+    assert_eq!(display_of(&e, 0), "x #sym.dagger y");
+    e.move_right();
+    e.move_right();
+    e.insert_text(", (");
+    assert_eq!(display_of(&e, 0), "x #sym.dagger, ( y", "kept as typed");
+    e.backspace();
+    e.backspace();
+    e.backspace();
+    e.escape();
+    assert_eq!(e.caret(), &cursor(id, vec![], 2));
+    assert_eq!(e.open_code(), None);
+    assert_eq!(display_of(&e, 0), "x #sym.dagger y");
+    while e.undo() {}
+    assert_eq!(display_of(&e, 0), "x #sym.dager y");
+
+    // Emptied and left, it goes.
+    e.set_caret(cursor(id, vec![Step::Index(1), Step::Code], 9));
+    for _ in 0..9 {
+        e.backspace();
+    }
+    assert_eq!(display_of(&e, 0), "x # y");
+    e.escape();
+    assert_eq!(display_of(&e, 0), "x y");
+    assert_eq!(e.caret(), &cursor(id, vec![], 1));
+    e.doc().check_invariants().unwrap();
 }
 
 /// `$` at the very start of a formula: inline ⇄ display, the caret

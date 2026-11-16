@@ -112,7 +112,9 @@ structure as soon as it is unambiguous.
   Letters form identifiers; finished words become Typst symbols or calls. `/`, `^`,
   `_` take the previous operand; `(` groups; `,` moves between arguments; `'`
   primes; `"` text; `&` and `\` + space for aligned lines. Tab visits empty slots.
-  Options of math calls are edited in a tab above the call.
+  Options of math calls are edited in a tab above the call. Code in a formula
+  (`#sym.brace.l`) is walked through by ←/→ and edited in place, its source showing
+  while the caret is in it; Esc leaves it.
 - **Structure**: ←/→ walk all positions, entering and leaving structures;
   environments have positions just before and after them; footnote text is reached
   after its paragraph, where it is shown. Backspace on a structure selects it first,

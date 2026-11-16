@@ -6,7 +6,8 @@ in GitHub issues; the ones below were found before that and are to be moved ther
 ## Waiting for the user's test
 
 - Code pieces that fail show their source on red (inline pieces, inline calls,
-  block calls); a name defined nowhere typed with a space is code.
+  block calls, code in formulas); a name defined nowhere typed with a space is
+  code. Code in formulas is edited in place (←/→ into it, Esc out).
 - The cleanup of 2026-11-16 (widget split into modules, `jobs::Targets`): no
   behaviour change intended; worth a general look around.
 - Not confirmed yet, from earlier rounds: remarks sidebar (R2–R3), chat (C1–C2),
@@ -17,21 +18,21 @@ in GitHub issues; the ones below were found before that and are to be moved ther
 
 From the user's list of 2026-11-15, one group at a time:
 
-1. Failing code in formulas: math code atoms editable in place, red when failing.
-2. A way to turn greedy line breaking off.
-3. Syntax highlighting in the header, code and figure editors (GtkSourceView with
+1. A way to turn greedy line breaking off.
+2. Syntax highlighting in the header, code and figure editors (GtkSourceView with
    Typesetter's Typst language file, GPL).
-4. Formulas: text with visible bounds that can turn back into code (idea: only `"`
+3. Formulas: typing `#` in a formula to start code (code atoms come from import
+   and paste); text with visible bounds that can turn back into code (idea: only `"`
    starts text; anything else is Typst, read as code on space); the header's
    functions (`bigbx`) cannot be typed (offer `times.big` / box symbols?); copy and
    paste of a formula holding `#bigbx` breaks subscripts; symbol completion while
    typing a name, most used first; matrices.
-5. Remarks rework: a selection across a display formula remarks only the text before
+4. Remarks rework: a selection across a display formula remarks only the text before
    it; remark text in the editor's syntax, rendered by Typst; no prominent author,
    date or replies; the card shows the remarked text rendered; maybe in the margin
    instead of a sidebar (undecided).
-6. Chat: clickable references to the paper's parts; Claude can add remarks.
-7. Sidebar buttons look bad (postponed by the user, not important).
+5. Chat: clickable references to the paper's parts; Claude can add remarks.
+6. Sidebar buttons look bad (postponed by the user, not important).
 
 Then the planned features:
 

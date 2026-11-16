@@ -81,6 +81,9 @@ impl Editor {
         if self.opts_pos().is_some() {
             return self.opts_char(c);
         }
+        if self.math_code_pos().is_some() {
+            return self.math_code_char(c);
+        }
         self.selected = None;
         // Just before/after an environment: typing starts a paragraph there.
         if let Some((place, offset)) = self.edge() {
@@ -607,6 +610,52 @@ impl Editor {
         let mut after = self.caret.clone();
         after.offset = offset + 1;
         self.commit(vec![op], after, Last::Typing { space: false })
+    }
+
+    /// A char typed in the source of a code atom in a formula: kept as
+    /// typed.
+    fn math_code_char(&mut self, c: char) -> bool {
+        self.selected = None;
+        let Some((node, offset, _)) = self.math_code_pos() else {
+            return false;
+        };
+        if c.is_control() {
+            return false;
+        }
+        let op = Op::Insert {
+            seq: Seq::Text(node),
+            index: offset,
+            items: Items::Text(c.into()),
+        };
+        let mut after = self.caret.clone();
+        after.offset = offset + 1;
+        self.commit(vec![op], after, Last::Typing { space: c == ' ' })
+    }
+
+    /// Leave the source of the code atom the caret is in: caret just after
+    /// the atom. An empty one goes.
+    pub(super) fn leave_math_code(&mut self) -> bool {
+        let Some((node, _, len)) = self.math_code_pos() else {
+            return false;
+        };
+        let n = self.caret.path.len();
+        let Step::Index(k) = self.caret.path[n - 2] else {
+            return false;
+        };
+        let row_path = self.caret.path[..n - 2].to_vec();
+        if len == 0 {
+            let Some(row) = self.doc.find_node(node).map(|(r, _)| r.id) else {
+                return false;
+            };
+            let op = Op::Delete {
+                seq: Seq::Row(row),
+                index: k,
+                count: 1,
+            };
+            let after = cursor(self.caret.block, row_path, k);
+            return self.commit(vec![op], after, Last::Other);
+        }
+        self.jump(cursor(self.caret.block, row_path, k + 1))
     }
 
     /// Leave the options tab the caret is in: into the call's first

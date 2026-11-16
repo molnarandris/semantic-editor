@@ -482,6 +482,15 @@ impl Editor {
         }
     }
 
+    /// The atom's node id, the offset and the source's length when the
+    /// caret is in the source of a code atom in a formula.
+    pub(super) fn math_code_pos(&self) -> Option<(NodeId, usize, usize)> {
+        match self.doc.resolve(&self.caret)? {
+            Target::Code { id, text } => Some((id, self.caret.offset, text.chars().count())),
+            _ => None,
+        }
+    }
+
     fn pos_in(&self, raw: bool) -> Option<TextPos<'_>> {
         let c = &self.caret;
         let place = self.doc.place(c.block)?;
@@ -967,9 +976,9 @@ impl Editor {
                         Fragment::Inlines(vec![d.text(&chars(text, start, end))])
                     }
                     Target::Raw { block, .. } => Fragment::Blocks(vec![block.clone()]),
-                    Target::Label { text, .. } | Target::Opts { text, .. } => {
-                        Fragment::Plain(chars(text, start, end))
-                    }
+                    Target::Label { text, .. }
+                    | Target::Opts { text, .. }
+                    | Target::Code { text, .. } => Fragment::Plain(chars(text, start, end)),
                     _ => return None,
                 }
             }
@@ -1040,6 +1049,9 @@ impl Editor {
         {
             let row = self.row_id_at(*block, path)?;
             return self.row_nodes(row).get(*start).and_then(code);
+        }
+        if let Some((id, ..)) = self.math_code_pos() {
+            return Some(id);
         }
         let p = self.row_pos()?;
         let nodes = self.row_nodes(p.row);
@@ -1351,8 +1363,12 @@ impl Editor {
         Some((self.doc.env_around(parent)?, true))
     }
 
-    /// The code piece in text the caret is in: its source shows, to edit.
+    /// The code piece in text or code atom in a formula the caret is in:
+    /// its source shows, to edit.
     pub fn open_code(&self) -> Option<NodeId> {
+        if let Some((id, ..)) = self.math_code_pos() {
+            return Some(id);
+        }
         let pos = self.raw_pos()?;
         let inline = &pos.inlines[pos.inline];
         matches!(inline.kind, Inline::Code(_)).then_some(inline.id)

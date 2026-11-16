@@ -42,6 +42,7 @@ impl Editor {
                     Ok(Target::Text { inline, .. }) => Seq::Text(inline.id),
                     Ok(Target::Label { block, .. }) => Seq::Label(block.id),
                     Ok(Target::Opts { id, .. }) => Seq::Opts(id),
+                    Ok(Target::Code { id, .. }) => Seq::Text(id),
                     // Raw Typst (its start to its end): the block goes.
                     Ok(Target::Raw { .. }) => {
                         let Some(place) = self.doc.place(block) else {
@@ -301,6 +302,24 @@ impl Editor {
             }
             let op = Op::Delete {
                 seq: Seq::Opts(node),
+                index: offset - 1,
+                count: 1,
+            };
+            let mut after = self.caret.clone();
+            after.offset = offset - 1;
+            return self.commit(vec![op], after, Last::Deleting);
+        }
+        // Code in a formula, as inline code: chars go; at its start, empty
+        // code goes, else ←.
+        if let Some((node, offset, len)) = self.math_code_pos() {
+            if offset == 0 {
+                return match len {
+                    0 => self.leave_math_code(),
+                    _ => self.move_left(),
+                };
+            }
+            let op = Op::Delete {
+                seq: Seq::Text(node),
                 index: offset - 1,
                 count: 1,
             };
@@ -709,6 +728,18 @@ impl Editor {
             }
             let op = Op::Delete {
                 seq: Seq::Opts(node),
+                index: offset,
+                count: 1,
+            };
+            let after = self.caret.clone();
+            return self.commit(vec![op], after, Last::Deleting);
+        }
+        if let Some((node, offset, len)) = self.math_code_pos() {
+            if offset == len {
+                return self.move_right();
+            }
+            let op = Op::Delete {
+                seq: Seq::Text(node),
                 index: offset,
                 count: 1,
             };
