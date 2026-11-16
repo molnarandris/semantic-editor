@@ -3,15 +3,12 @@
 Where the work stands. Delete items when done (git keeps the history). Bugs belong
 in GitHub issues; the ones below were found before that and are to be moved there.
 
-## Now
-
-- Code cleanup after the review of 2026-11-16: split `editor-widget/src/imp.rs` by
-  concern; break up `jobs::stale_blocks_editing`; small duplications.
-
 ## Waiting for the user's test
 
 - Code pieces that fail show their source on red (inline pieces, inline calls,
   block calls); a name defined nowhere typed with a space is code.
+- The cleanup of 2026-11-16 (widget split into modules, `jobs::Targets`): no
+  behaviour change intended; worth a general look around.
 - Not confirmed yet, from earlier rounds: remarks sidebar (R2–R3), chat (C1–C2),
   version history UI, projects and pictures, labels/outline/footnote navigation,
   selection/copy/paste decisions.
