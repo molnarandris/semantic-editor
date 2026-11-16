@@ -57,6 +57,15 @@ const CODE_TEXT: &str = "#text(font: \"DejaVu Sans Mono\", size: 0.9em, fill: rg
 /// Opens content on a red background: code that failed to compile.
 const FAILED: &str = "#highlight(fill: rgb(\"#f7c6c6\"))[";
 
+/// A call's head in markup: `#name`, or `#name(args)` with arguments.
+fn call_head(name: &str, args: &str) -> String {
+    if args.is_empty() {
+        format!("#{name}")
+    } else {
+        format!("#{name}({args})")
+    }
+}
+
 /// `source` (a call's head or end) in the code font on red, unmapped.
 fn failed_source(source: &str) -> String {
     let escaped = source.replace('\\', "\\\\").replace('"', "\\\"");
@@ -396,12 +405,7 @@ impl Writer {
                 // Failed to compile: the call's source on red around its
                 // title and body, which stay text.
                 if w.style == Style::Edit && w.failed.contains(&block.id) {
-                    let args = if args.is_empty() {
-                        String::new()
-                    } else {
-                        format!("({args})")
-                    };
-                    w.out.push_str(&failed_source(&format!("#{name}{args}")));
+                    w.out.push_str(&failed_source(&call_head(name, args)));
                     if !title.is_empty() {
                         w.out.push_str(&failed_source("["));
                         w.text_block(title, false);
@@ -630,24 +634,13 @@ impl Writer {
                             w.out.push(m);
                         }
                         _ if w.style == Style::Edit && w.failed.contains(&inline.id) => {
-                            let args = if args.is_empty() {
-                                String::new()
-                            } else {
-                                format!("({args})")
-                            };
-                            let head = failed_source(&format!("#{name}{args}["));
+                            let head = failed_source(&format!("{}[", call_head(name, args)));
                             w.out.push_str(&head);
                             w.text_block(body, false);
                             w.out.push_str(&failed_source("]"));
                         }
                         _ => {
-                            w.out.push('#');
-                            w.out.push_str(name);
-                            if !args.is_empty() {
-                                w.out.push('(');
-                                w.out.push_str(args);
-                                w.out.push(')');
-                            }
+                            w.out.push_str(&call_head(name, args));
                             w.out.push('[');
                             w.text_block(body, false);
                             w.out.push(']');
