@@ -69,6 +69,16 @@ struct BlockView {
     stops: OnceCell<Rc<[Stop]>>,
 }
 
+/// A code piece or call that failed to compile (`jobs::failing_source`).
+struct Failed {
+    /// Its top-level block.
+    block: NodeId,
+    /// Its source when it failed.
+    source: String,
+    /// The error.
+    message: String,
+}
+
 impl BlockView {
     fn new(id: NodeId) -> Self {
         Self {
@@ -157,6 +167,9 @@ pub struct SemEditor {
     /// Snippet renders waiting for their result, by job id.
     snippets: RefCell<HashMap<u64, SnippetDone>>,
     next_snippet: Cell<u64>,
+    /// Code pieces and calls that failed to compile, shown as their source
+    /// on red while it is as it was then.
+    failed: RefCell<HashMap<NodeId, Failed>>,
     /// Full references shown on hovering citations, by the header and the
     /// Typst code rendered (`jobs::full_citation`); None while rendering or
     /// if it failed.
@@ -827,6 +840,14 @@ impl SemEditor {
                 Some((i, error.lines().next().unwrap_or("").to_string()))
             })
             .collect();
+        // Pieces that failed: their block renders, the piece as source.
+        for f in self.failed.borrow().values() {
+            if let Some(i) = blocks.iter().position(|b| b.id == f.block)
+                && !found.iter().any(|(j, _)| *j == i)
+            {
+                found.push((i, f.message.lines().next().unwrap_or("").to_string()));
+            }
+        }
         let targets: Vec<&LabelTarget> = views.iter().flat_map(|v| &v.targets).collect();
         found.extend(jobs::label_problems(&ed.doc().header, blocks, &targets));
         // Stable: per block, compile errors first; one entry per block.
@@ -2139,6 +2160,12 @@ impl SemEditor {
                 view.snippet.clear();
             }
         }
+        // Pieces edited since they failed are tried again.
+        let failed: Vec<NodeId> = {
+            let mut failed = self.failed.borrow_mut();
+            failed.retain(|&id, f| jobs::failing_source(ed.doc(), id).as_ref() == Some(&f.source));
+            failed.keys().copied().collect()
+        };
         let jobs = {
             let submitted: Vec<_> = views
                 .iter()
@@ -2158,7 +2185,10 @@ impl SemEditor {
                 self.show_code.get(),
                 &submitted,
                 self.editing.get(),
-                ed.open_code(),
+                jobs::Sources {
+                    open: ed.open_code(),
+                    failed: &failed,
+                },
             )
         };
         for job in jobs {
@@ -2500,6 +2530,7 @@ impl SemEditor {
             view.stops = OnceCell::new();
             let latest = result.generation == view.submitted;
             let mut retargeted = false;
+            let mut blamed = false;
             let end = match result.outcome {
                 Ok(rendered) => {
                     view.texture = Some(texture(rendered.raster));
@@ -2514,6 +2545,9 @@ impl SemEditor {
                     rendered.end_state
                 }
                 Err(errors) => {
+                    if latest {
+                        blamed = self.blame(view, &errors, &result.error_at);
+                    }
                     view.error = Some(errors.join("\n"));
                     None
                 }
@@ -2524,13 +2558,14 @@ impl SemEditor {
             if current {
                 view.end = end.or_else(|| view.start.clone());
             }
-            current || retargeted
+            current || retargeted || blamed
         };
         if heading {
             self.submit_outline_entry(result.block);
         }
         if chained {
-            // The next counter-sensitive block can go now.
+            // The next counter-sensitive block can go now; a block with a
+            // failed piece goes again, the piece showing its source.
             self.submit_blocks(false);
         }
         let obj = self.obj();
@@ -2547,6 +2582,35 @@ impl SemEditor {
             }
             self.update_im_location();
         }
+    }
+
+    /// Blame the failed compile of `view` (`errors`, each `at` a place in
+    /// its snippet) on the code pieces and calls there; true if one was
+    /// newly blamed (then the block shows it as source).
+    fn blame(&self, view: &BlockView, errors: &[String], at: &[Option<usize>]) -> bool {
+        let ed = self.editor.borrow();
+        let mut failed = self.failed.borrow_mut();
+        let mut blamed = false;
+        for (message, at) in errors.iter().zip(at) {
+            let Some(id) = at.and_then(|at| view.map.innermost(at)) else {
+                continue;
+            };
+            let Some(source) = jobs::failing_source(ed.doc(), id) else {
+                continue;
+            };
+            if failed.get(&id).is_none_or(|f| f.source != source) {
+                blamed = true;
+            }
+            failed.insert(
+                id,
+                Failed {
+                    block: view.id,
+                    source,
+                    message: message.clone(),
+                },
+            );
+        }
+        blamed
     }
 
     fn set_adjustment(

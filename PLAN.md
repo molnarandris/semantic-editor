@@ -1772,3 +1772,28 @@ reported targets, so only those are still listed. On the paper: no problems left
   `block_calls_by_function` (`#pagebreak x` is a piece now),
   `unknown_parts_stay_raw` (`Text #h(1em) more` no longer raw), the sample's
   export/import. Awaiting the user's test.
+
+## A failing code piece or call shows its source on red, step 2 (2026-11-16)
+
+- Bridge: `compile_located` returns each error with its places in the main
+  source, innermost first (the error, then the calls it happened in, from
+  Typst's trace). The worker keeps, per error, the first place inside the
+  block's snippet (`CompileResult::error_at`; `None` for an error in the
+  header). Test `errors_are_located`.
+- Widget: on a failed compile of the latest job (`blame`), the innermost node
+  at each place (the block's span map) is blamed if it can show its source
+  (`jobs::failing_source`): a code piece (its source) or a call (name and
+  arguments). It goes into `failed` with that source, the block's id and the
+  message, and the block is submitted again with it shown (`jobs::Sources`,
+  passed down to `serialize_block_open`). One error at a time is enough:
+  each new compile blames the next. A failed piece stays so while its source
+  is unchanged; editing it tries it again (pruned in `submit_blocks`).
+- Writing (Edit style): a failed code piece as when open (`\#` and its
+  source in the code font, every char mapped, so it is fixed in place) on a
+  red highlight; a failed call `#name(args)[` and `]` in the code font on red
+  (not mapped: the name and arguments are edited with the call's options),
+  its body as usual. The block then renders, so the red dot goes; the
+  problems list still names the block with the error.
+- Test `failed_pieces_show_their_source` (a code piece and a call, blamed one
+  after the other, then the block compiles with every char of the piece in
+  place). Awaiting the user's test.

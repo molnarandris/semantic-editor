@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use model::NodeId;
 
 use crate::TYPST_VERSION;
-use crate::compile::{Around, Raster, block_document, compile, render_page};
+use crate::compile::{Around, Raster, block_document, compile_located, render_page};
 use crate::counters::{self, CounterState, LabelTarget};
 use crate::disk_cache::DiskCache;
 use crate::layout::{BlockLayout, RawLayout, raw_layout};
@@ -66,6 +66,9 @@ pub struct CompileResult {
     pub block: NodeId,
     pub generation: u64,
     pub outcome: Result<Rendered, Vec<String>>,
+    /// On failure, for each error: where it happened in the snippet (byte
+    /// offset); `None` if not there (an error in the header).
+    pub error_at: Vec<Option<usize>>,
     /// Compile + render time; zero on a cache hit.
     pub elapsed: Duration,
 }
@@ -164,6 +167,7 @@ fn run(
         let key = cache_key(&job);
         let start = Instant::now();
         let mut elapsed = Duration::ZERO;
+        let mut error_at = vec![];
         let on_disk = || {
             let disk = disk.as_ref().filter(|_| job.persist)?;
             let (raster, raw) = disk.load(key)?;
@@ -178,7 +182,13 @@ fn run(
                         compiles.fetch_add(1, Ordering::Relaxed);
                         let result =
                             catch_unwind(AssertUnwindSafe(|| compile_job(&mut world, &job)))
-                                .unwrap_or_else(|_| Err(vec!["internal compiler panic".into()]));
+                                .unwrap_or_else(|_| {
+                                    Err((vec!["internal compiler panic".into()], vec![]))
+                                })
+                                .map_err(|(errors, at)| {
+                                    error_at = at;
+                                    errors
+                                });
                         elapsed = start.elapsed();
                         if let (Ok((raster, raw)), Some(disk)) = (&result, &disk)
                             && job.persist
@@ -216,6 +226,7 @@ fn run(
             block: job.block,
             generation: job.generation,
             outcome,
+            error_at,
             elapsed,
         });
 
@@ -226,17 +237,32 @@ fn run(
     }
 }
 
+/// The messages of a failed compile, and where each happened in the
+/// snippet ([`CompileResult::error_at`]).
+type Failure = (Vec<String>, Vec<Option<usize>>);
+
 fn compile_job(
     world: &mut BridgeWorld,
     job: &CompileJob,
-) -> Result<(Arc<Raster>, Arc<RawLayout>), Vec<String>> {
+) -> Result<(Arc<Raster>, Arc<RawLayout>), Failure> {
     let (src, offset) = block_document(&job.around, &job.snippet, job.width_pt);
     world.set_files(job.around.files.clone());
-    let doc = compile(world, &src)?;
+    let snippet = offset..offset + job.snippet.len();
+    let doc = compile_located(world, &src).map_err(|errors| {
+        let at = errors
+            .iter()
+            .map(|e| {
+                e.at.iter()
+                    .find(|a| snippet.contains(a))
+                    .map(|a| a - offset)
+            })
+            .collect();
+        (errors.into_iter().map(|e| e.message).collect(), at)
+    })?;
     let page = doc
         .pages()
         .first()
-        .ok_or_else(|| vec!["no page".to_string()])?;
+        .ok_or_else(|| (vec!["no page".to_string()], vec![]))?;
     let raster = render_page(page, job.pixel_per_pt);
     let mut raw = raw_layout(world, page, offset);
     raw.end_state = counters::end_state(&doc);

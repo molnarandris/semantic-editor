@@ -321,7 +321,15 @@ pub fn stale_blocks(
     submitted: &[Submitted],
 ) -> Vec<Job> {
     let files = model::Files::default();
-    stale_blocks_editing(blocks, header, &files, show_code, submitted, None, None)
+    stale_blocks_editing(
+        blocks,
+        header,
+        &files,
+        show_code,
+        submitted,
+        None,
+        Sources::default(),
+    )
 }
 
 /// Typst code making a paragraph break its lines greedily, as word
@@ -330,10 +338,30 @@ pub fn stale_blocks(
 /// every line of the paragraph at each keystroke, the caret with them.
 pub const GREEDY_LINES: &str = "#set par(linebreaks: \"simple\")\n";
 
+/// Nodes whose Typst source shows instead of what it draws.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Sources<'a> {
+    /// The code piece the caret is in.
+    pub open: Option<NodeId>,
+    /// Code pieces and calls that failed to compile: on red.
+    pub failed: &'a [NodeId],
+}
+
+/// The source of inline `id` that a compile error is blamed on, if it can
+/// show its source when it fails: a code piece, or a call's name and
+/// arguments. A failed one is shown so until this changes.
+pub fn failing_source(doc: &model::Document, id: NodeId) -> Option<String> {
+    match &doc.inline(id)?.kind {
+        Inline::Code(s) => Some(s.clone()),
+        Inline::Call { name, args, .. } => Some(format!("{name}({args})")),
+        _ => None,
+    }
+}
+
 /// [`stale_blocks`], with the project's `files`, and `editing` the
 /// top-level block being typed in: its lines are broken greedily
-/// ([`GREEDY_LINES`]) until the caret leaves it; `open` the code piece the
-/// caret is in, whose source shows.
+/// ([`GREEDY_LINES`]) until the caret leaves it; `sources` the nodes whose
+/// source shows.
 pub fn stale_blocks_editing(
     blocks: &[BlockNode],
     header: &str,
@@ -341,7 +369,7 @@ pub fn stale_blocks_editing(
     show_code: bool,
     submitted: &[Submitted],
     editing: Option<NodeId>,
-    open: Option<NodeId>,
+    sources: Sources,
 ) -> Vec<Job> {
     let code: Vec<Option<&str>> = blocks.iter().map(code_of).collect();
     let all_code: String = code
@@ -510,7 +538,8 @@ pub fn stale_blocks_editing(
                 cited_before.push(key.clone());
             }
         }
-        let (snippet, map) = serialize_block_open(block, (number > 0).then_some(number), open);
+        let place = (number > 0).then_some(number);
+        let (snippet, map) = serialize_block_open(block, place, sources.open, sources.failed);
         let prev = submitted.get(index);
         let current =
             prev.is_some_and(|p| *p.around == around && p.snippet == snippet && *p.map == map);
@@ -1230,7 +1259,15 @@ mod tests {
         e.insert_text("Second.");
         let d = e.doc().clone();
         let (first, second) = (d.blocks[0].id, d.blocks[1].id);
-        let jobs = stale_blocks_editing(&d.blocks, "", &d.files, false, &[], Some(second), None);
+        let jobs = stale_blocks_editing(
+            &d.blocks,
+            "",
+            &d.files,
+            false,
+            &[],
+            Some(second),
+            Sources::default(),
+        );
         let around = |i: usize| &jobs.iter().find(|j| j.index == i).unwrap().around;
         assert!(!around(0).prefix.contains(GREEDY_LINES));
         assert!(around(1).prefix.contains(GREEDY_LINES));
@@ -1248,7 +1285,7 @@ mod tests {
             false,
             &submitted(&views),
             Some(first),
-            None,
+            Sources::default(),
         );
         let indices: Vec<usize> = again.iter().map(|j| j.index).collect();
         assert_eq!(indices, [0, 1], "both change how they break");

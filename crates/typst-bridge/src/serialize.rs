@@ -54,6 +54,15 @@ pub const CETZ_IMPORT: &str = concat!("#import \"@preview/cetz:", cetz_version!(
 /// Opens the code font of a call being typed (closed by `]`).
 const CODE_TEXT: &str = "#text(font: \"DejaVu Sans Mono\", size: 0.9em, fill: rgb(\"#6b6390\"))[";
 
+/// Opens content on a red background: code that failed to compile.
+const FAILED: &str = "#highlight(fill: rgb(\"#f7c6c6\"))[";
+
+/// `source` (a call's head or end) in the code font on red, unmapped.
+fn failed_source(source: &str) -> String {
+    let escaped = source.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("{FAILED}{CODE_TEXT}#\"{escaped}\"]]")
+}
+
 /// The calls being typed in a text, as ranges of char indices: `#`,
 /// `#name` and `#name(…` (to its `)`, or to the end), anywhere in it, as
 /// typing space, `[` or `(` turns them into calls (`Editor::insert_text`).
@@ -254,6 +263,9 @@ struct Writer {
     /// The code piece in text whose source shows (Edit style): the caret is
     /// in it.
     open: Option<NodeId>,
+    /// Code pieces and calls that failed to compile (Edit style): their
+    /// source shows, on red.
+    failed: Vec<NodeId>,
 }
 
 /// Whether inline call `i` of `inlines` (bold or italic) can be written as
@@ -596,6 +608,17 @@ impl Writer {
                             w.markup.pop();
                             w.out.push(m);
                         }
+                        _ if w.style == Style::Edit && w.failed.contains(&inline.id) => {
+                            let args = if args.is_empty() {
+                                String::new()
+                            } else {
+                                format!("({args})")
+                            };
+                            let head = failed_source(&format!("#{name}{args}["));
+                            w.out.push_str(&head);
+                            w.text_block(body, false);
+                            w.out.push_str(&failed_source("]"));
+                        }
                         _ => {
                             w.out.push('#');
                             w.out.push_str(name);
@@ -737,12 +760,19 @@ impl Writer {
                 w.out.push(';');
             }
         };
+        let failed = self.failed.contains(&id);
         match self.style {
-            Style::Edit if self.open == Some(id) => {
+            Style::Edit if self.open == Some(id) || failed => {
+                if failed {
+                    self.out.push_str(FAILED);
+                }
                 self.out.push_str(CODE_TEXT);
                 self.out.push_str("\\#");
                 self.text(id, s, false, false);
                 self.out.push(']');
+                if failed {
+                    self.out.push(']');
+                }
             }
             Style::Edit => {
                 self.out.push_str("#sem-code()#");
@@ -1249,23 +1279,25 @@ pub fn serialize_block(block: &BlockNode) -> (String, SpanMap) {
 
 /// Serialize one block in the given style.
 pub fn serialize_block_styled(block: &BlockNode, style: Style) -> (String, SpanMap) {
-    serialize_with(block, style, None, None)
+    serialize_with(block, style, None, None, &[])
 }
 
 /// Serialize one block for the editor; a numbered list item shows `number`
 /// (its place in the list, as the block is rendered on its own).
 pub fn serialize_block_numbered(block: &BlockNode, number: Option<usize>) -> (String, SpanMap) {
-    serialize_with(block, Style::Edit, number, None)
+    serialize_with(block, Style::Edit, number, None, &[])
 }
 
 /// [`serialize_block_numbered`], with the source of code piece `open` (the
-/// caret is in it) showing instead of what it draws.
+/// caret is in it) showing instead of what it draws, and the source of the
+/// code pieces and calls that `failed` to compile showing on red.
 pub fn serialize_block_open(
     block: &BlockNode,
     number: Option<usize>,
     open: Option<NodeId>,
+    failed: &[NodeId],
 ) -> (String, SpanMap) {
-    serialize_with(block, Style::Edit, number, open)
+    serialize_with(block, Style::Edit, number, open, failed)
 }
 
 /// A standalone snippet showing only math node `node` (an inline diagram
@@ -1280,6 +1312,7 @@ pub fn serialize_math_node(node: &MathNode) -> String {
         number: None,
         markup: vec![],
         open: None,
+        failed: vec![],
     };
     if matches!(node.kind, MathKind::Diagram(_))
         || matches!(&node.kind, MathKind::Code(s) if s.contains("cetz"))
@@ -1317,6 +1350,7 @@ fn serialize_with(
     style: Style,
     number: Option<usize>,
     open: Option<NodeId>,
+    failed: &[NodeId],
 ) -> (String, SpanMap) {
     let mut out = String::new();
     // Standalone block documents import CeTZ themselves; a diagram block
@@ -1334,6 +1368,7 @@ fn serialize_with(
         number,
         markup: vec![],
         open,
+        failed: failed.to_vec(),
     };
     w.block(block);
     (w.out, w.map)

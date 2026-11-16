@@ -730,10 +730,11 @@ To fix one group at a time, not at once. Answers already found are noted.
   2026-11-15): the `#name` being typed looks the same in the middle of text as
   at a paragraph's start (done); code in text becomes a *code piece* (done,
   step 1); a call that fails turns into a code piece showing its source on red,
-  to fix in place (step 2), then the same in formulas (step 3). Undo right
+  to fix in place (step 2, done), then the same in formulas (step 3). Undo right
   after the conversion leaves the `#…` as text.
 - **A failed call** shows its source (red), not a single red dot, so a typo can be
-  fixed in place.
+  fixed in place (done in text: code pieces and `#name(…)[…]` calls; formulas
+  are step 3).
 - **Greedy lines**: only the paragraph being typed in breaks greedily, until the
   caret leaves it; everything else follows the header (Typst's default, or the
   header's `#set par(linebreaks: …)`). Open: a way to turn the greedy breaking off.

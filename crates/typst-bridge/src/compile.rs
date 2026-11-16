@@ -4,6 +4,8 @@ use std::sync::Arc;
 
 use typst_layout::{Page, PagedDocument};
 
+use typst::WorldExt;
+
 use crate::serialize::PREAMBLE;
 use crate::world::BridgeWorld;
 
@@ -81,10 +83,42 @@ pub fn snippet_rule(color: &str) -> String {
 
 /// Compile a complete Typst document. Errors are returned as messages.
 pub fn compile(world: &mut BridgeWorld, text: &str) -> Result<PagedDocument, Vec<String>> {
+    compile_located(world, text).map_err(|errors| errors.into_iter().map(|e| e.message).collect())
+}
+
+/// A compile error and where it happened in the main source.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Located {
+    pub message: String,
+    /// Byte offsets in the main source, innermost first: the error itself,
+    /// then the calls it happened in (one in another file is left out).
+    pub at: Vec<usize>,
+}
+
+/// [`compile`], with the places of the errors.
+pub fn compile_located(world: &mut BridgeWorld, text: &str) -> Result<PagedDocument, Vec<Located>> {
     world.set_main_text(text);
+    let main = world.main_source().id();
+    let at = |span: typst::syntax::DiagSpan| {
+        (span.id() == Some(main))
+            .then(|| world.range(span))
+            .flatten()
+            .map(|r| r.start)
+    };
     typst::compile::<PagedDocument>(&*world)
         .output
-        .map_err(|errors| errors.iter().map(|e| e.message.to_string()).collect())
+        .map_err(|errors| {
+            errors
+                .iter()
+                .map(|e| Located {
+                    message: e.message.to_string(),
+                    at: std::iter::once(e.span)
+                        .chain(e.trace.iter().map(|t| t.span.into()))
+                        .filter_map(at)
+                        .collect(),
+                })
+                .collect()
+        })
 }
 
 /// An RGBA8 (premultiplied) raster of one page.
@@ -320,5 +354,17 @@ mod tests {
     fn errors_are_reported() {
         let mut world = BridgeWorld::new();
         assert!(compile(&mut world, "#undefined-thing").is_err());
+    }
+
+    /// An error inside a function defined before reports the call too.
+    #[test]
+    fn errors_are_located() {
+        let mut world = BridgeWorld::new();
+        let src = "#let f(x) = x + \"s\"\nSome #f(1) text";
+        let errors = compile_located(&mut world, src).unwrap_err();
+        let call = src.find("f(1)").unwrap();
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].at.contains(&call), "{:?}", errors[0]);
+        assert!(errors[0].at[0] < call, "the error itself first");
     }
 }

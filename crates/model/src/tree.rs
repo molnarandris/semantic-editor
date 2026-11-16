@@ -1321,6 +1321,20 @@ impl Document {
         find_inline_mut(inlines, id)
     }
 
+    /// The inline `id` (text, formula or call), at any depth.
+    pub fn inline(&self, id: NodeId) -> Option<&InlineNode> {
+        fn find(inlines: &[InlineNode], id: NodeId) -> Option<&InlineNode> {
+            inlines.iter().find_map(|inline| {
+                if inline.id == id {
+                    return Some(inline);
+                }
+                find(inline.body()?, id)
+            })
+        }
+        let block = self.inline_block(id)?;
+        find(self.block(block)?.kind.text_inlines()?, id)
+    }
+
     /// The block whose inlines hold inline `id` (at any depth).
     fn inline_block(&self, id: NodeId) -> Option<NodeId> {
         let mut all = vec![];
