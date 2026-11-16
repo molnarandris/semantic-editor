@@ -960,6 +960,12 @@ impl Writer {
             MathKind::Ident(s) => w.out.push_str(&ident_source(s, w.style)),
             MathKind::Num(s) => w.out.push_str(&num_source(s)),
             MathKind::Slot => w.out.push_str(SLOT),
+            // Failed to compile: its source on red, in a box like the code.
+            MathKind::Code(src) if w.style == Style::Edit && w.failed.contains(&node.id) => {
+                w.out.push_str("#sem-code[");
+                w.out.push_str(&failed_source(&format!("#{src}")));
+                w.out.push_str("];");
+            }
             MathKind::Code(src) if w.style == Style::Edit => {
                 w.out.push_str("#sem-code($#");
                 w.out.push_str(src);

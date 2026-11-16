@@ -553,6 +553,26 @@ mod tests {
         let doc = compile(&mut world, &src).unwrap_or_else(|e| panic!("{e:?}\n{src}"));
         let layout = raw_layout(&world, &doc.pages()[0], offset).resolve(&map);
         assert!(layout.glyphs.iter().any(|g| g.node == x_id), "the body");
+
+        // Code in a formula: blamed, then the rest of the formula renders.
+        let (x, plus, code, y) = (d.ident("x"), d.sym("+"), d.code("nosuch(1)"), d.ident("y"));
+        let (code_id, y_id) = (code.id, y.id);
+        let formula = d.display(vec![x, plus, code, y]);
+        let (snippet, map) = crate::serialize_block(&formula);
+        let (src, offset) = block_document(&Around::default(), &snippet, 300.0);
+        let errors = compile_located(&mut world, &src).unwrap_err();
+        let at = errors[0].at.iter().find(|&&at| at >= offset).unwrap();
+        assert_eq!(map.innermost(at - offset), Some(code_id));
+        let (snippet, map) = crate::serialize_block_open(&formula, None, None, &[code_id]);
+        let (src, offset) = block_document(&Around::default(), &snippet, 300.0);
+        let doc = compile(&mut world, &src).unwrap_or_else(|e| panic!("{e:?}\n{src}"));
+        let layout = raw_layout(&world, &doc.pages()[0], offset).resolve(&map);
+        assert!(layout.box_of(code_id).is_some(), "the source has a box");
+        let (c, after) = (
+            layout.box_of(code_id).unwrap(),
+            layout.box_of(y_id).unwrap(),
+        );
+        assert!(after.x >= c.right() - 0.3, "after it: {c:?} {after:?}");
     }
 
     #[test]

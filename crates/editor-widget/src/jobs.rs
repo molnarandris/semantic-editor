@@ -348,10 +348,16 @@ pub struct Sources<'a> {
 }
 
 /// The source of node `id` that a compile error is blamed on, if it can
-/// show its source when it fails: a code piece, or the name and arguments
-/// of a call (inline or a block). A failed one is shown so until this
-/// changes.
+/// show its source when it fails: a code piece (in text or a formula), or
+/// the name and arguments of a call (inline or a block). A failed one is
+/// shown so until this changes.
 pub fn failing_source(doc: &model::Document, id: NodeId) -> Option<String> {
+    if let Some((row, i)) = doc.find_node(id) {
+        return match &row.nodes[i].kind {
+            model::MathKind::Code(s) => Some(s.clone()),
+            _ => None,
+        };
+    }
     if let Some(block) = doc.block(id) {
         return match &block.kind {
             Block::Env { name, args, .. } => Some(format!("{name}({args})")),
