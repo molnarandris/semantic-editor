@@ -1212,6 +1212,30 @@ fn hash_code_in_text() {
     assert_eq!(texts(&e), ["a {#h(2em)} b"]);
 }
 
+/// Text in a formula: `"` starts it with the caret in it, `"` leaves it;
+/// ←/→ go back into it and typing goes anywhere in it.
+#[test]
+fn text_in_formulas_is_edited_in_place() {
+    let mut d = Document::empty();
+    d.blocks = vec![d.display(vec![])];
+    let mut e = Editor::new(d);
+    let id = e.doc().blocks[0].id;
+    e.set_caret(cursor(id, vec![], 0));
+    e.insert_text("x \"i a\" y");
+    assert_eq!(display_of(&e, 0), "x \"i a\" y");
+    e.move_left();
+    e.move_left();
+    assert_eq!(e.caret(), &cursor(id, vec![Step::Index(1), Step::Chars], 3));
+    e.move_left();
+    e.move_left();
+    e.insert_text("f");
+    assert_eq!(display_of(&e, 0), "x \"if a\" y");
+    assert_eq!(e.open_code(), None, "text is not code");
+    e.escape();
+    assert_eq!(e.caret(), &cursor(id, vec![], 2));
+    e.doc().check_invariants().unwrap();
+}
+
 /// Code in a formula is edited in place: ←/→ walk through its source
 /// (open while the caret is in it), typing keeps every char, Backspace
 /// takes chars, Esc leaves it just after; emptied, it goes. Undo works.
@@ -1226,7 +1250,7 @@ fn code_in_formulas_is_edited_in_place() {
     e.set_caret(cursor(id, vec![], 1));
     assert_eq!(e.open_code(), None);
     e.move_right();
-    assert_eq!(e.caret(), &cursor(id, vec![Step::Index(1), Step::Code], 0));
+    assert_eq!(e.caret(), &cursor(id, vec![Step::Index(1), Step::Chars], 0));
     assert_eq!(e.open_code(), Some(code_id));
     assert_eq!(e.source_target(), Some(code_id));
     for _ in 0..7 {
@@ -1249,7 +1273,7 @@ fn code_in_formulas_is_edited_in_place() {
     assert_eq!(display_of(&e, 0), "x #sym.dager y");
 
     // Emptied and left, it goes.
-    e.set_caret(cursor(id, vec![Step::Index(1), Step::Code], 9));
+    e.set_caret(cursor(id, vec![Step::Index(1), Step::Chars], 9));
     for _ in 0..9 {
         e.backspace();
     }

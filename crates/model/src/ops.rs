@@ -205,7 +205,7 @@ fn text_in(doc: &mut Document, id: NodeId) -> Result<SeqMut<'_>, OpError> {
     }
     if let Some((row, k)) = doc.find_node(id).map(|(r, k)| (r.id, k)) {
         return match doc.find_row_mut(row).map(|r| &mut r.nodes[k].kind) {
-            Some(MathKind::Code(s)) => Ok(SeqMut::Text(s)),
+            Some(MathKind::Code(s) | MathKind::Text(s)) => Ok(SeqMut::Text(s)),
             _ => Err(OpError::KindMismatch),
         };
     }

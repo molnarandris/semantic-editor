@@ -938,9 +938,53 @@ impl Writer {
             MathKind::Primes(n) => w.out.push_str(&"'".repeat(*n)),
             // An empty text (being typed) holds its place in the editor.
             MathKind::Text(s) if s.is_empty() && w.style == Style::Edit => {
-                w.out.push_str("#text(fill: rgb(0, 0, 0, 0), \"x\")");
+                w.out.push_str("#text(fill: rgb(0, 0, 0, 0), \"");
+                w.map.texts.push((node.id, vec![w.out.len()]));
+                w.out.push_str("x\")");
             }
-            MathKind::Text(s) => w.out.push_str(&quoted(s)),
+            // In the editor as markup, each char mapped, so the caret can go
+            // into the text (a string's glyphs after a space map one char
+            // early, measured). `;` ends it, so nothing after continues it.
+            MathKind::Text(s) if w.style == Style::Edit => {
+                // Markup drops spaces at the ends of its block, a string
+                // keeps them: those are written `#" "` (measured: `#[if#" "]`
+                // is as wide as `"if "`), mapped like the rest. (A leading
+                // one may land a fraction of a pixel off, measured.)
+                let body = s.trim_matches(' ');
+                let lead = s.len() - s.trim_start_matches(' ').len();
+                let trail = s.len() - lead - body.len();
+                w.out.push_str("#[");
+                let mut starts = vec![];
+                for _ in 0..lead {
+                    starts.push(w.out.len());
+                    w.out.push_str("#\" \"");
+                }
+                w.text(node.id, body, false, false);
+                let (_, mut inner) = w.map.texts.pop().expect("just written");
+                inner.pop();
+                starts.append(&mut inner);
+                for _ in 0..trail {
+                    starts.push(w.out.len());
+                    w.out.push_str("#\" \"");
+                }
+                starts.push(w.out.len());
+                w.map.texts.push((node.id, starts));
+                w.out.push_str("];");
+            }
+            MathKind::Text(s) => {
+                let mut starts = Vec::with_capacity(s.len() + 1);
+                w.out.push('"');
+                for c in s.chars() {
+                    starts.push(w.out.len());
+                    if matches!(c, '"' | '\\') {
+                        w.out.push('\\');
+                    }
+                    w.out.push(c);
+                }
+                starts.push(w.out.len());
+                w.out.push('"');
+                w.map.texts.push((node.id, starts));
+            }
             MathKind::Align => w.out.push('&'),
             MathKind::Linebreak => w.out.push('\\'),
             MathKind::Call { name, opts, args } => {
@@ -1732,6 +1776,7 @@ mod tests {
             "alpha/beta + oo/2 + (-1)/2 + -1/2 + 2/(-x)",
             "e^(-x^2/2) + \\x + 1.5/2.5",
             "| x | + (a | b) + a, b; c",
+            "x \"if a\" y + \"Rep\"(A) + \"q\"/2",
             "/ + x^ + (/)/ + ^/_",
         ];
         let render = |world: &mut BridgeWorld, snippet: &str| {
@@ -1750,7 +1795,8 @@ mod tests {
                 let block = &e.doc().blocks[0];
                 let edit = serialize_block_styled(block, Style::Edit).0;
                 let read = serialize_block_styled(block, Style::Readable).0;
-                if edit == read {
+                // An empty text holds its place in the editor only.
+                if edit == read || edit.contains("#text(fill: rgb(0, 0, 0, 0)") {
                     continue;
                 }
                 assert!(

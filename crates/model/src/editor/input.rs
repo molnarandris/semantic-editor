@@ -81,8 +81,8 @@ impl Editor {
         if self.opts_pos().is_some() {
             return self.opts_char(c);
         }
-        if self.math_code_pos().is_some() {
-            return self.math_code_char(c);
+        if self.atom_text_pos().is_some() {
+            return self.atom_text_char(c);
         }
         self.selected = None;
         // Just before/after an environment: typing starts a paragraph there.
@@ -614,13 +614,21 @@ impl Editor {
 
     /// A char typed in the source of a code atom in a formula: kept as
     /// typed.
-    fn math_code_char(&mut self, c: char) -> bool {
+    fn atom_text_char(&mut self, c: char) -> bool {
         self.selected = None;
-        let Some((node, offset, _)) = self.math_code_pos() else {
+        let Some((node, offset, _)) = self.atom_text_pos() else {
             return false;
         };
         if c.is_control() {
             return false;
+        }
+        // `"` ends text (in code it is a char like any other).
+        let text = self
+            .doc
+            .find_node(node)
+            .is_some_and(|(row, k)| matches!(row.nodes[k].kind, MathKind::Text(_)));
+        if c == '"' && text {
+            return self.leave_atom_text();
         }
         let op = Op::Insert {
             seq: Seq::Text(node),
@@ -634,8 +642,8 @@ impl Editor {
 
     /// Leave the source of the code atom the caret is in: caret just after
     /// the atom. An empty one goes.
-    pub(super) fn leave_math_code(&mut self) -> bool {
-        let Some((node, _, len)) = self.math_code_pos() else {
+    pub(super) fn leave_atom_text(&mut self) -> bool {
+        let Some((node, _, len)) = self.atom_text_pos() else {
             return false;
         };
         let n = self.caret.path.len();
@@ -778,18 +786,6 @@ impl Editor {
     }
 
     pub(super) fn math_char(&mut self, c: char) -> bool {
-        // Text being typed (`"if`): everything goes into it, `"` ends it.
-        if let Some(p) = self.row_pos()
-            && let Some((id, text)) = self.text_before(&p)
-        {
-            if c == '"' {
-                self.word = None;
-                return true;
-            }
-            let ok = self.retype_node_before(&p, id, MathKind::Text(format!("{text}{c}")));
-            self.word = Some(self.caret.clone());
-            return ok;
-        }
         let mut changed = false;
         if !matches!(c, '/' | '^' | '_') && matches!(self.selected, Some(Selected::Nodes { .. })) {
             changed |= self.delete_selection();
@@ -869,11 +865,17 @@ impl Editor {
             ')' if self.groups.contains(&p.row) => self.escape() || changed,
             ',' if self.next_argument(&p) => true,
             // `"` starts text; `'` adds a prime; `&` is an alignment point.
+            // `"` starts text, the caret in it.
             '"' => {
                 let node = self.doc.node(MathKind::Text(String::new()));
-                let ok = self.type_node(&p, node);
-                self.word = Some(self.caret.clone());
-                ok || changed
+                if !self.type_node(&p, node) {
+                    return changed;
+                }
+                let mut at = self.caret.clone();
+                at.path.extend([Step::Index(at.offset - 1), Step::Chars]);
+                at.offset = 0;
+                self.caret = at;
+                true
             }
             '\'' => match prev {
                 Some((id, MathKind::Primes(n))) => {
@@ -937,19 +939,6 @@ impl Editor {
                 let node = self.doc.sym(&symbols::typed_symbol(c));
                 self.type_node(&p, node)
             }
-        }
-    }
-
-    /// The text being typed in a formula (`"if`), if the caret is right
-    /// after it: its id and text.
-    pub(super) fn text_before(&self, p: &RowPos) -> Option<(NodeId, String)> {
-        match self.node_before(p) {
-            Some(MathNode {
-                id,
-                kind: MathKind::Text(t),
-                ..
-            }) if self.word.as_ref() == Some(&self.caret) => Some((id, t)),
-            _ => None,
         }
     }
 

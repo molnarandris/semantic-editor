@@ -245,9 +245,9 @@ fn row_stops(
         if let Some(r) = r {
             right = r.right();
         }
-        if let MathKind::Code(source) = &node.kind {
+        if let MathKind::Code(source) | MathKind::Text(source) = &node.kind {
             let mut p = path.clone();
-            p.extend([Step::Index(k), Step::Code]);
+            p.extend([Step::Index(k), Step::Chars]);
             let base = out.last().map_or(line, |s| s.line);
             let n = source.chars().count();
             let place = |offset, x, g: Rect, baseline| Stop {
@@ -1194,7 +1194,7 @@ mod tests {
         assert_eq!(got, d.positions(&block));
         let code: Vec<f64> = s
             .iter()
-            .filter(|s| s.cursor.path.ends_with(&[Step::Code]))
+            .filter(|s| s.cursor.path.ends_with(&[Step::Chars]))
             .map(|s| s.x)
             .collect();
         assert_eq!(code.len(), 11);
@@ -1206,6 +1206,30 @@ mod tests {
             .iter()
             .find(|s| s.cursor.offset == 2 && s.cursor.path.is_empty());
         assert!(before.unwrap().x < code[0] && code[10] <= after.unwrap().x + 0.5);
+    }
+
+    /// Text in a formula: a stop at every char, in order, where Typst
+    /// draws them (`"if a"`: the space too).
+    #[test]
+    fn stops_in_text_in_formulas() {
+        let mut d = Document::empty();
+        let (x, text) = (d.ident("x"), d.node(MathKind::Text("if a".into())));
+        let block = d.display(vec![x, text]);
+        let l = layout_of(&block, 300.0);
+        let s = super::stops(&block, Some(&l));
+        let got: Vec<_> = s
+            .iter()
+            .filter(|s| !s.label)
+            .map(|s| s.cursor.clone())
+            .collect();
+        assert_eq!(got, d.positions(&block));
+        let chars: Vec<f64> = s
+            .iter()
+            .filter(|s| s.cursor.path.ends_with(&[Step::Chars]))
+            .map(|s| s.x)
+            .collect();
+        assert_eq!(chars.len(), 5);
+        assert!(chars.windows(2).all(|w| w[1] > w[0] + 1.0), "{chars:?}");
     }
 
     /// A picture in a figure: stops at its box's edges, its options tab's

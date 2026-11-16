@@ -25,9 +25,10 @@
 //!   chars of the options of call `k` (its tab). Not among a block's
 //!   positions (←/→ skip the tab): ↑ from the call's arguments or a click
 //!   reach it.
-//! - Code in a formula: a row path ending `Index(k), Code`, `offset` counts
-//!   chars of code atom `k`'s source (shown after its `#` while the caret is
-//!   in it). Its positions come between those before and after the atom.
+//! - Code or text in a formula: a row path ending `Index(k), Chars`, `offset`
+//!   counts chars of code atom `k`'s source (shown after its `#` while the
+//!   caret is in it) or of text atom `k`. Its positions come between those
+//!   before and after the atom.
 
 use serde::{Deserialize, Serialize};
 
@@ -49,8 +50,9 @@ pub enum Step {
     Label,
     /// The options of a math call (`size: 55%`), in its tab.
     Opts,
-    /// The source of a code atom in a formula (`sym.dagger`).
-    Code,
+    /// The chars of a code atom (`sym.dagger`) or text (`"if"`) in a
+    /// formula.
+    Chars,
 }
 
 impl Step {
@@ -66,7 +68,7 @@ impl Step {
             Step::Body => "body",
             Step::Label => "label",
             Step::Opts => "options",
-            Step::Code => "code",
+            Step::Chars => "text",
         }
     }
 }
@@ -107,8 +109,8 @@ pub enum Target<'a> {
         id: NodeId,
         text: &'a str,
     },
-    /// The source of a code atom in a formula.
-    Code {
+    /// The chars of a code atom or text in a formula.
+    Chars {
         id: NodeId,
         text: &'a str,
     },
@@ -122,7 +124,7 @@ impl Target<'_> {
             | Target::Raw { text, .. }
             | Target::Label { text, .. }
             | Target::Opts { text, .. }
-            | Target::Code { text, .. } => text.chars().count(),
+            | Target::Chars { text, .. } => text.chars().count(),
             Target::Row { row } => row.nodes.len(),
             Target::Edge { .. } => 1,
         }
@@ -558,7 +560,7 @@ impl Document {
         };
         while let [Step::Index(k), child, rest @ ..] = path {
             let Some(node) = row.nodes.get(*k) else { break };
-            if matches!(child, Step::Opts | Step::Code) {
+            if matches!(child, Step::Opts | Step::Chars) {
                 crumbs.push(Crumb {
                     label: node.label(),
                     path_len: consumed + 1,
@@ -595,9 +597,9 @@ fn row_positions(block: NodeId, path: Vec<Step>, row: &MathRow, out: &mut Vec<Cu
             path: path.clone(),
             offset: k,
         });
-        if let MathKind::Code(source) = &node.kind {
+        if let MathKind::Code(source) | MathKind::Text(source) = &node.kind {
             let mut p = path.clone();
-            p.extend([Step::Index(k), Step::Code]);
+            p.extend([Step::Index(k), Step::Chars]);
             for offset in 0..=source.chars().count() {
                 out.push(CursorPath {
                     block,
@@ -627,8 +629,10 @@ fn walk_row<'a>(row: &'a MathRow, path: &[Step]) -> Result<Target<'a>, usize> {
             let text = node.kind.tab().ok_or(0usize)?;
             Ok(Target::Opts { id: node.id, text })
         }
-        [Step::Index(k), Step::Code] => match row.nodes.get(*k).map(|n| (n.id, &n.kind)) {
-            Some((id, MathKind::Code(text))) => Ok(Target::Code { id, text }),
+        [Step::Index(k), Step::Chars] => match row.nodes.get(*k).map(|n| (n.id, &n.kind)) {
+            Some((id, MathKind::Code(text) | MathKind::Text(text))) => {
+                Ok(Target::Chars { id, text })
+            }
             _ => Err(0),
         },
         [Step::Index(k), child, rest @ ..] => {

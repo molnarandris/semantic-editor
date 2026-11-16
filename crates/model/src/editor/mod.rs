@@ -482,11 +482,11 @@ impl Editor {
         }
     }
 
-    /// The atom's node id, the offset and the source's length when the
-    /// caret is in the source of a code atom in a formula.
-    pub(super) fn math_code_pos(&self) -> Option<(NodeId, usize, usize)> {
+    /// The atom's node id, the offset and the length when the caret is in
+    /// the chars of a code atom or text in a formula.
+    pub(super) fn atom_text_pos(&self) -> Option<(NodeId, usize, usize)> {
         match self.doc.resolve(&self.caret)? {
-            Target::Code { id, text } => Some((id, self.caret.offset, text.chars().count())),
+            Target::Chars { id, text } => Some((id, self.caret.offset, text.chars().count())),
             _ => None,
         }
     }
@@ -978,7 +978,7 @@ impl Editor {
                     Target::Raw { block, .. } => Fragment::Blocks(vec![block.clone()]),
                     Target::Label { text, .. }
                     | Target::Opts { text, .. }
-                    | Target::Code { text, .. } => Fragment::Plain(chars(text, start, end)),
+                    | Target::Chars { text, .. } => Fragment::Plain(chars(text, start, end)),
                     _ => return None,
                 }
             }
@@ -1050,8 +1050,8 @@ impl Editor {
             let row = self.row_id_at(*block, path)?;
             return self.row_nodes(row).get(*start).and_then(code);
         }
-        if let Some((id, ..)) = self.math_code_pos() {
-            return Some(id);
+        if let Some((id, ..)) = self.atom_text_pos() {
+            return self.doc.find_node(id).and_then(|(r, k)| code(&r.nodes[k]));
         }
         let p = self.row_pos()?;
         let nodes = self.row_nodes(p.row);
@@ -1280,8 +1280,8 @@ impl Editor {
             (None, _) if self.source_block().is_some() => {
                 "Ctrl+Enter or double click → edit source · Enter → new paragraph · Backspace → delete"
             }
-            (None, Some(p)) if self.text_before(&p).is_some() => {
-                "text in the formula · \" → end it"
+            (None, None) if self.atom_text_pos().is_some() && self.open_code().is_none() => {
+                "text in the formula · \" or Esc → leave"
             }
             (None, Some(p)) if self.call_word(&p, true).is_some() => {
                 if self.call_word(&p, false).is_some() {
@@ -1366,8 +1366,12 @@ impl Editor {
     /// The code piece in text or code atom in a formula the caret is in:
     /// its source shows, to edit.
     pub fn open_code(&self) -> Option<NodeId> {
-        if let Some((id, ..)) = self.math_code_pos() {
-            return Some(id);
+        if let Some((id, ..)) = self.atom_text_pos() {
+            let code = self
+                .doc
+                .find_node(id)
+                .is_some_and(|(row, k)| matches!(row.nodes[k].kind, MathKind::Code(_)));
+            return code.then_some(id);
         }
         let pos = self.raw_pos()?;
         let inline = &pos.inlines[pos.inline];
