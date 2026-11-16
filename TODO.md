@@ -21,12 +21,12 @@ From the user's list of 2026-11-15, one group at a time:
 1. A way to turn greedy line breaking off.
 2. Syntax highlighting in the header, code and figure editors (GtkSourceView with
    Typesetter's Typst language file, GPL).
-3. Formulas: typing `#` in a formula to start code (code atoms come from import
-   and paste); text with visible bounds that can turn back into code (idea: only `"`
-   starts text; anything else is Typst, read as code on space); the header's
-   functions (`bigbx`) cannot be typed (offer `times.big` / box symbols?); copy and
-   paste of a formula holding `#bigbx` breaks subscripts; symbol completion while
-   typing a name, most used first; matrices.
+3. Formulas (in progress, user decision 2026-11-16): text only with `"` (done:
+   other words are code); text and code edited in place, typing anywhere in them
+   (code done, text next); outlined while the caret is in them, like calls. Then:
+   typing `#` in a formula to start code; copy and paste of a formula holding
+   `#bigbx` breaks subscripts; symbol completion while typing a name, most used
+   first; matrices.
 4. Remarks rework: a selection across a display formula remarks only the text before
    it; remark text in the editor's syntax, rendered by Typst; no prominent author,
    date or replies; the card shows the remarked text rendered; maybe in the margin

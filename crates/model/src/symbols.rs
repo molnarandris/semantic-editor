@@ -1,6 +1,55 @@
 //! Symbol shortcuts for math input: names typed as words (`chi`, `\\alpha`)
 //! and operator pairs (`<=`, `->`).
 
+/// Typst's predefined math operators (`typst-library` `math/op.rs`): name,
+/// displayed text (`liminf` has a thin space, U+2009), and whether
+/// attachments go above/below in display math. Typed, they stay
+/// identifiers, which the serializer writes as these operators.
+pub const OPERATORS: &[(&str, &str, bool)] = &[
+    ("arccos", "arccos", false),
+    ("arcsin", "arcsin", false),
+    ("arctan", "arctan", false),
+    ("arg", "arg", false),
+    ("cos", "cos", false),
+    ("cosh", "cosh", false),
+    ("cot", "cot", false),
+    ("coth", "coth", false),
+    ("csc", "csc", false),
+    ("csch", "csch", false),
+    ("ctg", "ctg", false),
+    ("deg", "deg", false),
+    ("det", "det", true),
+    ("dim", "dim", false),
+    ("exp", "exp", false),
+    ("gcd", "gcd", true),
+    ("lcm", "lcm", true),
+    ("hom", "hom", false),
+    ("id", "id", false),
+    ("im", "im", false),
+    ("inf", "inf", true),
+    ("ker", "ker", false),
+    ("lg", "lg", false),
+    ("lim", "lim", true),
+    ("liminf", "lim\u{2009}inf", true),
+    ("limsup", "lim\u{2009}sup", true),
+    ("ln", "ln", false),
+    ("log", "log", false),
+    ("max", "max", true),
+    ("min", "min", true),
+    ("mod", "mod", false),
+    ("Pr", "Pr", true),
+    ("sec", "sec", false),
+    ("sech", "sech", false),
+    ("sin", "sin", false),
+    ("sinc", "sinc", false),
+    ("sinh", "sinh", false),
+    ("sup", "sup", true),
+    ("tan", "tan", false),
+    ("tanh", "tanh", false),
+    ("tg", "tg", false),
+    ("tr", "tr", false),
+];
+
 /// Bare words that become symbols, following Typst's math names.
 const WORDS: &[(&str, &str)] = &[
     ("alpha", "α"),

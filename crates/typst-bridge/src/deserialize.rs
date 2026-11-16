@@ -9,12 +9,12 @@
 
 use model::{
     Block, BlockNode, Document, Fragment, Inline, InlineNode, ListKind, MathKind, MathNode,
-    TitleFields, spaced_gap,
+    OPERATORS, TitleFields, spaced_gap,
 };
 use typst::syntax::ast::{self, AstNode, MathTextKind};
 use typst::syntax::{LinkedNode, SyntaxKind, SyntaxNode, parse};
 
-use crate::serialize::{CETZ_IMPORT, OPERATORS, PREAMBLE, TITLE_AUTHORS, uses_cetz};
+use crate::serialize::{CETZ_IMPORT, PREAMBLE, TITLE_AUTHORS, uses_cetz};
 use crate::symbols::math_only;
 use crate::{math_call_shape, resolve_symbol};
 

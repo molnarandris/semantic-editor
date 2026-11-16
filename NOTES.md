@@ -94,6 +94,8 @@ Learned the hard way (blurry text that Typesetter did not have):
   box), not at a group's edge, after a line break, or where an operator brings its
   own spacing. So `|x|` ≠ `bar.v x bar.v`, `"Rep" (A)` ≠ `"Rep"(A)`, and a space next
   to code (a box) in a formula shows.
+- Code after `#` in a formula does not see the math module: `#dif` fails,
+  `#math.dif` works (`symbols::math_only`); the header's names are seen.
 - `f'` attaches a prime, `f '` does not; after a fraction a prime would attach to the
   denominator.
 - `a*b*c` and `snake_case` are plain text; `a@b.c` is a reference; `word#footnote[…]`

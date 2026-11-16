@@ -8,7 +8,7 @@ use typst::syntax::ast::{self, AstNode};
 
 use model::{
     Block, BlockNode, Document, Fragment, Inline, InlineNode, ListKind, MathKind, MathNode,
-    MathRow, NodeId, TitleFields, spaced_gap,
+    MathRow, NodeId, OPERATORS, TitleFields, spaced_gap,
 };
 
 /// Shared definitions and styles. Prepended to every block document and to
@@ -126,60 +126,6 @@ fn is_empty_text(inlines: &[InlineNode]) -> bool {
 
 /// The Typst source of an empty math row (a visible placeholder box).
 pub const SLOT: &str = "#sem-slot()";
-
-/// Typst's predefined math operators (`typst-library` `math/op.rs`): name,
-/// displayed text (`liminf` has a thin space, U+2009), and whether
-/// attachments go above/below in display math.
-///
-/// They are emitted as `op(#[log])` rather than `log`: the predefined ones
-/// take their text from the library, so their glyphs carry library spans and
-/// could not be mapped back to the node. `op("log")` loses the span too (a
-/// string argument is a value); a markup block keeps it. Same element, same
-/// rendering.
-pub(crate) const OPERATORS: &[(&str, &str, bool)] = &[
-    ("arccos", "arccos", false),
-    ("arcsin", "arcsin", false),
-    ("arctan", "arctan", false),
-    ("arg", "arg", false),
-    ("cos", "cos", false),
-    ("cosh", "cosh", false),
-    ("cot", "cot", false),
-    ("coth", "coth", false),
-    ("csc", "csc", false),
-    ("csch", "csch", false),
-    ("ctg", "ctg", false),
-    ("deg", "deg", false),
-    ("det", "det", true),
-    ("dim", "dim", false),
-    ("exp", "exp", false),
-    ("gcd", "gcd", true),
-    ("lcm", "lcm", true),
-    ("hom", "hom", false),
-    ("id", "id", false),
-    ("im", "im", false),
-    ("inf", "inf", true),
-    ("ker", "ker", false),
-    ("lg", "lg", false),
-    ("lim", "lim", true),
-    ("liminf", "lim\u{2009}inf", true),
-    ("limsup", "lim\u{2009}sup", true),
-    ("ln", "ln", false),
-    ("log", "log", false),
-    ("max", "max", true),
-    ("min", "min", true),
-    ("mod", "mod", false),
-    ("Pr", "Pr", true),
-    ("sec", "sec", false),
-    ("sech", "sech", false),
-    ("sin", "sin", false),
-    ("sinc", "sinc", false),
-    ("sinh", "sinh", false),
-    ("sup", "sup", true),
-    ("tan", "tan", false),
-    ("tanh", "tanh", false),
-    ("tg", "tg", false),
-    ("tr", "tr", false),
-];
 
 /// Maps node ids to byte ranges of the snippet they were serialized into.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -982,12 +928,12 @@ impl Writer {
             }
             MathKind::Code(src) if w.style == Style::Edit => {
                 w.out.push_str("#sem-code($#");
-                w.out.push_str(src);
+                w.out.push_str(&math_code(src));
                 w.out.push_str("$);");
             }
             MathKind::Code(src) => {
                 w.out.push('#');
-                w.out.push_str(src);
+                w.out.push_str(&math_code(src));
             }
             MathKind::Primes(n) => w.out.push_str(&"'".repeat(*n)),
             // An empty text (being typed) holds its place in the editor.
@@ -1282,6 +1228,26 @@ fn sym_source(s: &str) -> String {
     }
 }
 
+/// The code of a code atom in a formula: a name only Typst's math module
+/// defines (`dif`, typed as a word) is `math.dif`, since code after `#`
+/// does not see the math module.
+fn math_code(src: &str) -> String {
+    let name = src
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == '-');
+    if name && crate::symbols::math_only(src) {
+        format!("math.{src}")
+    } else {
+        src.to_string()
+    }
+}
+
+/// An identifier: a letter as is; a predefined operator ([`OPERATORS`])
+/// as `op(#[log])` in the editor, since the predefined ones take their text
+/// from the library, so their glyphs would carry library spans and could
+/// not be mapped back to the node (`op("log")` loses the span too, a string
+/// argument being a value; a markup block keeps it; same rendering); other
+/// words quoted (older documents; typed words become code now).
 fn ident_source(s: &str, style: Style) -> String {
     let mut chars = s.chars();
     match (chars.next(), chars.next()) {
@@ -1631,7 +1597,7 @@ mod tests {
         let mut world = BridgeWorld::new();
         let sessions = [
             "S <= (log chi)/(2) + c",
-            "\\alpha^2_i/x + \\foo ' , ; | [ ] { } & ~~ := \\",
+            "\\alpha^2_i/x + \\x ' , ; | [ ] { } & ~~ := \\",
             "(a+b)^2 / ( ) _ ^ 3.14.15 é ∑ #$",
             "e^(-x^2/2) ! != -> <-> 1/2/3",
             "a times.o b arrow.r.long c eq.not x. times.q y. lt.eq.slant",
@@ -1694,6 +1660,33 @@ mod tests {
         assert!(src.ends_with("$ y $\n"));
     }
 
+    /// A longer word that is no symbol, operator or call is code, as in
+    /// Typst: Typst's math names (`dif`) and the header's (`bigbx`) work, a
+    /// typo fails (and is shown failing); operators stay what they were.
+    #[test]
+    fn typed_words_are_code() {
+        let header = "#let bigbx = math.op(sym.times.square, limits: true)\n";
+        let compiles = |keys: &str| {
+            let block = typed(keys);
+            let around = Around {
+                header: header.into(),
+                ..Around::default()
+            };
+            let (src, _) = block_document(&around, &ser(&block), 300.0);
+            (
+                compile(&mut BridgeWorld::new(), &src).is_ok(),
+                serialize_block_styled(&block, Style::Readable).0,
+            )
+        };
+        assert_eq!(compiles("dif x"), (true, "$ #math.dif x $".into()));
+        assert_eq!(
+            compiles("bigbx_i"),
+            (true, "$ attach(#bigbx, b: i) $".into())
+        );
+        assert_eq!(compiles("log x"), (true, "$ log x $".into()));
+        assert_eq!(compiles("dagge"), (false, "$ #dagge $".into()));
+    }
+
     /// Typed formulas, in the editor's model.
     fn typed(keys: &str) -> BlockNode {
         let mut d = Document::empty();
@@ -1737,7 +1730,7 @@ mod tests {
             "lim_(n -> oo) a_n + max_(x in A) f + liminf x",
             "(a+b)^2 + (x, y)^2_1 + sum_(i=1)^n i",
             "alpha/beta + oo/2 + (-1)/2 + -1/2 + 2/(-x)",
-            "e^(-x^2/2) + sqrt + \\foo + 1.5/2.5",
+            "e^(-x^2/2) + \\x + 1.5/2.5",
             "| x | + (a | b) + a, b; c",
             "/ + x^ + (/)/ + ^/_",
         ];

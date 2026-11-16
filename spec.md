@@ -109,7 +109,9 @@ structure as soon as it is unambiguous.
   `#name` being typed shows in the code font. Undo right after a conversion leaves
   the text.
 - **Math**: `$` inline, `$$` display, `$` at a formula's start toggles the two.
-  Letters form identifiers; finished words become Typst symbols or calls. `/`, `^`,
+  Letters form identifiers; a finished word becomes a Typst symbol, call or
+  operator, else code (as in Typst: a typo fails and shows on red, the header's
+  names work). Text is only typed with `"`. `/`, `^`,
   `_` take the previous operand; `(` groups; `,` moves between arguments; `'`
   primes; `"` text; `&` and `\` + space for aligned lines. Tab visits empty slots.
   Options of math calls are edited in a tab above the call. Code in a formula

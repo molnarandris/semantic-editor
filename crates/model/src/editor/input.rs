@@ -1150,11 +1150,17 @@ impl Editor {
                 };
                 return self.commit(vec![op], p.at(p.offset - 1 + n), typing);
             }
-            None if command && !bare.is_empty() => MathKind::Ident(bare.into()),
-            None if command => {
+            None if command && bare.is_empty() => {
                 let op = row_delete(p.row, p.offset - 1, 1);
                 return self.commit(vec![op], p.at(p.offset - 1), typing);
             }
+            // A longer name that is no symbol or operator is Typst code, as
+            // in Typst (text is only typed with `"`): the header's own
+            // (`bigbx`) works, a typo fails and shows on red.
+            None if bare.chars().count() > 1 && !crate::OPERATORS.iter().any(|o| o.0 == bare) => {
+                MathKind::Code(bare.into())
+            }
+            None if command => MathKind::Ident(bare.into()),
             None => return false,
         };
         self.retype_node_before(&p, id, kind)
