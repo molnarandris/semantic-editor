@@ -365,6 +365,163 @@ pub fn failing_source(doc: &model::Document, id: NodeId) -> Option<String> {
     }
 }
 
+/// What the document's references and citations point to, for the code
+/// around each block that makes them render as in the whole document.
+struct Targets<'a> {
+    blocks: &'a [BlockNode],
+    /// Per block: the labels it defines, each with its stand-in element.
+    defined: &'a [Vec<(String, String)>],
+    /// By label: the block defining it, its stand-in element and how often
+    /// it is defined (a reference resolves only to a unique label).
+    table: HashMap<&'a str, (usize, &'a str, usize)>,
+    /// What labels point to, as their blocks last reported.
+    reported: HashMap<&'a str, &'a LabelTarget>,
+    /// The bibliography's block and its call.
+    bibliography: Option<(usize, String)>,
+    /// Per block: its citations (references to bibliography keys that are
+    /// not labels).
+    cites: Vec<Vec<String>>,
+    /// Every key cited, in document order.
+    all_cited: Vec<String>,
+}
+
+impl<'a> Targets<'a> {
+    fn new(
+        blocks: &'a [BlockNode],
+        defined: &'a [Vec<(String, String)>],
+        submitted: &[Submitted<'a>],
+    ) -> Self {
+        let mut table: HashMap<&str, (usize, &str, usize)> = HashMap::new();
+        for (index, labels) in defined.iter().enumerate() {
+            for (label, element) in labels {
+                table.entry(label).or_insert((index, element, 0)).2 += 1;
+            }
+        }
+        let mut reported: HashMap<&str, &LabelTarget> = HashMap::new();
+        for (index, s) in submitted.iter().enumerate() {
+            for t in s.targets {
+                if table.get(t.label.as_str()).is_some_and(|d| d.0 == index) {
+                    reported.insert(&t.label, t);
+                }
+            }
+        }
+        let (bibliography, keys) = blocks
+            .iter()
+            .enumerate()
+            .find_map(|(i, b)| bibliography_of(b).map(|(call, keys)| (Some((i, call)), keys)))
+            .unwrap_or_default();
+        let cites: Vec<Vec<String>> = blocks
+            .iter()
+            .map(|b| {
+                let mut refs = vec![];
+                refs_in(b, &mut refs);
+                refs.retain(|r| !table.contains_key(r.as_str()) && keys.contains(r));
+                refs
+            })
+            .collect();
+        let mut all_cited: Vec<String> = vec![];
+        for key in cites.iter().flatten() {
+            if !all_cited.contains(key) {
+                all_cited.push(key.clone());
+            }
+        }
+        Self {
+            blocks,
+            defined,
+            table,
+            reported,
+            bibliography,
+            cites,
+            all_cited,
+        }
+    }
+
+    /// The labels block `index` defines.
+    fn own(&self, index: usize) -> Vec<String> {
+        self.defined[index].iter().map(|(l, _)| l.clone()).collect()
+    }
+
+    /// The keys block `index` cites, with those of the blocks `copied`
+    /// before it (whose citations are made there too).
+    fn cited(&self, index: usize, copied: &[(usize, &CounterState)]) -> Vec<String> {
+        let mut cited = self.cites[index].clone();
+        for &(d, _) in copied {
+            for key in &self.cites[d] {
+                if !cited.contains(key) {
+                    cited.push(key.clone());
+                }
+            }
+        }
+        cited
+    }
+
+    /// References of block `index` and of the blocks `copied` before it
+    /// (except to labels those define): a stand-in for each unique,
+    /// reported target (after everything else), else a red `@label`.
+    fn add_references(
+        &self,
+        index: usize,
+        copied: &[(usize, &CounterState)],
+        cited: &[String],
+        around: &mut Around,
+    ) {
+        let mut refs = vec![];
+        refs_in(&self.blocks[index], &mut refs);
+        let mut copy_labels = vec![];
+        for &(d, _) in copied {
+            refs_in(&self.blocks[d], &mut refs);
+            copy_labels.extend(self.own(d));
+        }
+        refs.retain(|l| !copy_labels.contains(l));
+        let own = self.own(index);
+        for label in refs
+            .iter()
+            .filter(|l| !own.contains(l) && !cited.contains(l))
+        {
+            let stub = match (
+                self.table.get(label.as_str()),
+                self.reported.get(label.as_str()),
+            ) {
+                (Some((_, element, 1)), Some(target)) => match *element {
+                    "" => stand_in(target),
+                    e => Some(e.to_string()),
+                }
+                .map(|e| ref_stub(target, &e)),
+                _ => None,
+            };
+            match stub {
+                Some(stub) => around.suffix.push_str(&stub),
+                None => around.prefix.push_str(&missing_ref(label)),
+            }
+        }
+    }
+
+    /// Citations numbered as in the whole document: block `index` citing
+    /// `cited` gets those of the blocks before it (`cited_before`, which it
+    /// adds to) hidden before it and the bibliography hidden after it; the
+    /// bibliography block gets everything the document cites before it.
+    fn add_citations(
+        &self,
+        index: usize,
+        cited: &[String],
+        cited_before: &mut Vec<String>,
+        around: &mut Around,
+    ) {
+        if let (Some((_, call)), false) = (&self.bibliography, cited.is_empty()) {
+            around.prefix.push_str(&hidden_cites(cited_before));
+            around.suffix.push_str(&hidden_bibliography(call));
+        }
+        if self.bibliography.as_ref().is_some_and(|(i, _)| *i == index) {
+            around.prefix.push_str(&hidden_cites(&self.all_cited));
+        }
+        for key in cited {
+            if !cited_before.contains(key) {
+                cited_before.push(key.clone());
+            }
+        }
+    }
+}
+
 /// [`stale_blocks`], with the project's `files`, and `editing` the
 /// top-level block being typed in: its lines are broken greedily
 /// ([`GREEDY_LINES`]) until the caret leaves it; `sources` the nodes whose
@@ -391,8 +548,6 @@ pub fn stale_blocks_editing(
     let mut jobs = vec![];
     // Place of a numbered item in its list (items are rendered one by one).
     let mut number = 0;
-    // Labels: the block defining each (with its stand-in element) and how
-    // often it is defined; a reference resolves only to a unique label.
     let defined: Vec<Vec<(String, String)>> = blocks
         .iter()
         .map(|b| {
@@ -401,48 +556,9 @@ pub fn stale_blocks_editing(
             v
         })
         .collect();
-    let mut table: HashMap<&str, (usize, &str, usize)> = HashMap::new();
-    for (index, labels) in defined.iter().enumerate() {
-        for (label, element) in labels {
-            table.entry(label).or_insert((index, element, 0)).2 += 1;
-        }
-    }
-    // Citations: references to keys of the bibliography (not labels), per
-    // block in document order.
-    let bibliography = blocks
-        .iter()
-        .enumerate()
-        .find_map(|(i, b)| bibliography_of(b).map(|(call, keys)| (i, call, keys)));
-    let keys = bibliography
-        .as_ref()
-        .map(|(_, _, keys)| keys.clone())
-        .unwrap_or_default();
-    let cites: Vec<Vec<String>> = blocks
-        .iter()
-        .map(|b| {
-            let mut refs = vec![];
-            refs_in(b, &mut refs);
-            refs.retain(|r| !table.contains_key(r.as_str()) && keys.contains(r));
-            refs
-        })
-        .collect();
-    let mut all_cited: Vec<String> = vec![];
-    for key in cites.iter().flatten() {
-        if !all_cited.contains(key) {
-            all_cited.push(key.clone());
-        }
-    }
+    let targets = Targets::new(blocks, &defined, submitted);
     // Cited in the blocks before the current one.
     let mut cited_before: Vec<String> = vec![];
-    // What they point to, as their blocks last reported.
-    let mut reported: HashMap<&str, &LabelTarget> = HashMap::new();
-    for (index, s) in submitted.iter().enumerate() {
-        for t in s.targets {
-            if table.get(t.label.as_str()).is_some_and(|d| d.0 == index) {
-                reported.insert(&t.label, t);
-            }
-        }
-    }
     for (index, block) in blocks.iter().enumerate() {
         number = match block.kind {
             Block::Item {
@@ -483,68 +599,19 @@ pub fn stale_blocks_editing(
         // whose function looks them up with `query`): a hidden copy of each
         // first, its counters as at its own start (from its last render);
         // the block's own prefix then sets them back.
-        let copied = copied_blocks(block, index, &table, submitted);
+        let copied = copied_blocks(block, index, &targets.table, submitted);
         let copies: String = copied
             .iter()
             .map(|&(d, start)| hidden_copy(&blocks[d], start))
             .collect();
         around.prefix.insert_str(0, &copies);
         // Labelled blocks (all counter-sensitive) report their targets.
-        let own: Vec<String> = defined[index].iter().map(|(l, _)| l.clone()).collect();
         if sensitive {
-            around.suffix.push_str(&label_report(&own));
+            around.suffix.push_str(&label_report(&targets.own(index)));
         }
-        // References: a stand-in for each unique, reported target (after
-        // everything else), else a red `@label`.
-        let mut refs = vec![];
-        refs_in(block, &mut refs);
-        let mut cited = cites[index].clone();
-        // The copies' references and citations are made here too, except
-        // to labels the copies define.
-        let mut copy_labels = vec![];
-        for &(d, _) in &copied {
-            refs_in(&blocks[d], &mut refs);
-            for key in &cites[d] {
-                if !cited.contains(key) {
-                    cited.push(key.clone());
-                }
-            }
-            copy_labels.extend(defined[d].iter().map(|(l, _)| l.clone()));
-        }
-        refs.retain(|l| !copy_labels.contains(l));
-        let cited = &cited;
-        for label in refs
-            .iter()
-            .filter(|l| !own.contains(l) && !cited.contains(l))
-        {
-            let stub = match (table.get(label.as_str()), reported.get(label.as_str())) {
-                (Some((_, element, 1)), Some(target)) => match *element {
-                    "" => stand_in(target),
-                    e => Some(e.to_string()),
-                }
-                .map(|e| ref_stub(target, &e)),
-                _ => None,
-            };
-            match stub {
-                Some(stub) => around.suffix.push_str(&stub),
-                None => around.prefix.push_str(&missing_ref(label)),
-            }
-        }
-        // Citations are numbered as in the whole document: the earlier ones
-        // hidden before the block, the bibliography hidden after it; the
-        // bibliography lists everything the document cites.
-        if let (Some((_, call, _)), false) = (&bibliography, cited.is_empty()) {
-            around.prefix.push_str(&hidden_cites(&cited_before));
-            around.suffix.push_str(&hidden_bibliography(call));
-        }
-        if bibliography.as_ref().is_some_and(|(i, ..)| *i == index) {
-            around.prefix.push_str(&hidden_cites(&all_cited));
-        }
-        for key in cited {
-            if !cited_before.contains(key) {
-                cited_before.push(key.clone());
-            }
-        }
+        let cited = targets.cited(index, &copied);
+        targets.add_references(index, &copied, &cited, &mut around);
+        targets.add_citations(index, &cited, &mut cited_before, &mut around);
         let place = (number > 0).then_some(number);
         let (snippet, map) = serialize_block_open(block, place, sources.open, sources.failed);
         let prev = submitted.get(index);
