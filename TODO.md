@@ -5,6 +5,8 @@ in GitHub issues; the ones below were found before that and are to be moved ther
 
 ## Waiting for the user's test
 
+- Formulas: unknown words are code (red when failing), text only with `"`; code
+  and text edited in place and outlined while the caret is in them.
 - Code pieces that fail show their source on red (inline pieces, inline calls,
   block calls, code in formulas); a name defined nowhere typed with a space is
   code. Code in formulas is edited in place (←/→ into it, Esc out).
@@ -23,7 +25,7 @@ From the user's list of 2026-11-15, one group at a time:
    Typesetter's Typst language file, GPL).
 3. Formulas (in progress, user decision 2026-11-16): text only with `"` (done:
    other words are code); text and code edited in place, typing anywhere in them
-   (done); outlined while the caret is in them, like calls. Then:
+   (done); outlined while the caret is in them, like calls (done). Then:
    typing `#` in a formula to start code; copy and paste of a formula holding
    `#bigbx` breaks subscripts; symbol completion while typing a name, most used
    first; matrices.

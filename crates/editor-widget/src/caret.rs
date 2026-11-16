@@ -844,17 +844,25 @@ pub fn formula_marks(doc: &Document, caret: &CursorPath, stops: &[Stop]) -> Vec<
     out
 }
 
-/// The outline of an inline call or inline code in `block`, given the path
-/// prefix of the positions inside it (see `Editor::call_focus`): one box per
-/// line its text spans, from the stops inside it (top, bottom and the
-/// extent of each line).
+/// The outline of an inline call, inline code, or code or text in a
+/// formula in `block`, given the path prefix of the positions inside it
+/// (see `Editor::call_focus`): one box per line its text spans, from the
+/// stops inside it (top, bottom and the extent of each line).
 pub fn call_outline(stops: &[Stop], block: model::NodeId, body: &[Step]) -> Vec<Rect> {
     let inside: Vec<Stop> = stops
         .iter()
         .filter(|s| s.cursor.block == block && s.cursor.path.starts_with(body) && !s.tab)
         .cloned()
         .collect();
-    lines(&inside)
+    // Code or text in a formula: from just before the atom (before the
+    // `#` of open code), the stop on the formula's line.
+    let before = match body {
+        [row @ .., Step::Index(k), Step::Chars] => stops
+            .iter()
+            .find(|s| s.cursor.block == block && s.cursor.path == row && s.cursor.offset == *k),
+        _ => None,
+    };
+    let mut rects: Vec<Rect> = lines(&inside)
         .into_iter()
         .map(|line| {
             let (mut x0, mut x1) = (f64::MAX, f64::MIN);
@@ -873,7 +881,14 @@ pub fn call_outline(stops: &[Stop], block: model::NodeId, body: &[Step]) -> Vec<
                 h: bottom - top,
             }
         })
-        .collect()
+        .collect();
+    if let (Some(edge), Some(first)) = (before, rects.first_mut())
+        && edge.x < first.x
+    {
+        first.w += first.x - edge.x;
+        first.x = edge.x;
+    }
+    rects
 }
 
 /// The contour of the boxes of a call's lines (top to bottom), each
@@ -1206,6 +1221,11 @@ mod tests {
             .iter()
             .find(|s| s.cursor.offset == 2 && s.cursor.path.is_empty());
         assert!(before.unwrap().x < code[0] && code[10] <= after.unwrap().x + 0.5);
+        // Outlined from before its `#` to its end.
+        let outline = call_outline(&s, block.id, &[Step::Index(1), Step::Chars]);
+        assert_eq!(outline.len(), 1);
+        assert!((outline[0].x - before.unwrap().x).abs() < 0.01);
+        assert!((outline[0].right() - code[10]).abs() < 0.01);
     }
 
     /// Text in a formula: a stop at every char, in order, where Typst

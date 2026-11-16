@@ -1379,9 +1379,14 @@ impl Editor {
     }
 
     /// The innermost inline the caret is inside of, to outline it: inline
-    /// code, or a call (bold, italic, `#name[…]`). The path prefix that
-    /// every caret position inside it has (a call's ends with `Body`).
+    /// code, a call (bold, italic, `#name[…]`), or code or text in a
+    /// formula. The path prefix that every caret position inside it has (a
+    /// call's ends with `Body`, an atom's with `Chars`).
     pub fn call_focus(&self) -> Option<Vec<Step>> {
+        // Code or text in a formula: its chars' path.
+        if self.atom_text_pos().is_some() {
+            return Some(self.caret.path.clone());
+        }
         if let Some(pos) = self.raw_pos() {
             return Some(pos.at(pos.inline, 0).path);
         }
