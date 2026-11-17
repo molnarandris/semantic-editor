@@ -14,6 +14,13 @@ Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
   remark": `@` in a card offers the paper's labels and shows the paper's numbers;
   Ctrl+click on one goes there in the paper.
 
+## To fix next (user, 2026-11-17)
+
+- "The reference completion pop-up is not visible on the remark card as it gets
+  truncated": it is cut to the card's area.
+- "The size of the letters/citation is weird. If I make the window larger, the size
+  of the font seems to shrink." (the card's text and the quotation)
+
 ## Next
 
 From the user's list of 2026-11-15, one group at a time:
