@@ -4,13 +4,6 @@ Where the work stands. Delete items when done (git keeps the history). Bugs belo
 in GitHub issues; the ones below were found before that and are to be moved there.
 Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
 
-## Waiting for the user's test
-
-- Remark cards: faint yellow, the text typed right in the card (Add Remark makes an
-  empty card with the cursor in it; left empty, it goes), no author, date or
-  replies; on top a read-only quotation of the remarked lines ±1 line (a block's
-  remark: the whole block), cut from the paper's render.
-
 ## Next
 
 From the user's list of 2026-11-15, one group at a time:
