@@ -28,7 +28,6 @@ Then the planned features:
 ## Open questions for the user
 
 - A keyboard way into a label pill and an options tab (today only a click or ↑).
-- Remarks beside the page instead of a sidebar?
 
 ## Wishlist
 
