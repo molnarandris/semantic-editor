@@ -29,7 +29,8 @@ const CHAT: &str = "chat.json";
 /// A remark in `remarks.json`: on block `block`, or on the range between
 /// two caret positions, `start` in it and `end` in `end_block` (if given,
 /// else in it too; paths from the block; the inner nodes' ids are not
-/// saved).
+/// saved). Files written before 2026-11-17 also have an author, a date
+/// and replies: ignored.
 #[derive(Serialize, Deserialize)]
 struct RemarkFile {
     id: u64,
@@ -41,19 +42,8 @@ struct RemarkFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     end: Option<PointFile>,
     text: String,
-    author: String,
-    date: String,
     #[serde(default)]
     resolved: bool,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    replies: Vec<ReplyFile>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct ReplyFile {
-    text: String,
-    author: String,
-    date: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -91,18 +81,7 @@ pub fn remarks_to_json(doc: &Document) -> Option<String> {
                 end_block,
                 end,
                 text: r.text.clone(),
-                author: r.author.clone(),
-                date: r.date.clone(),
                 resolved: r.resolved,
-                replies: r
-                    .replies
-                    .iter()
-                    .map(|a| ReplyFile {
-                        text: a.text.clone(),
-                        author: a.author.clone(),
-                        date: a.date.clone(),
-                    })
-                    .collect(),
             }
         })
         .collect();
@@ -144,18 +123,7 @@ pub fn remarks_from_json(doc: &mut Document, text: &str) -> Result<(), String> {
             id: r.id,
             anchor,
             text: r.text,
-            author: r.author,
-            date: r.date,
             resolved: r.resolved,
-            replies: r
-                .replies
-                .into_iter()
-                .map(|a| model::Reply {
-                    text: a.text,
-                    author: a.author,
-                    date: a.date,
-                })
-                .collect(),
         });
     }
     Ok(())
@@ -597,7 +565,7 @@ mod tests {
             end_block: b2,
             end: point(&doc, b2, 3),
         };
-        doc.add_remark(anchor, "Both.", "A", "2026-11-17");
+        doc.add_remark(anchor, "Both.");
         let (back, _) = from_zip(&to_zip(&doc, None).unwrap()).unwrap();
         let (a, b) = back.remark_range(&back.remarks[0]).unwrap();
         assert_eq!((a.block, a.offset, b.block, b.offset), (b1, 2, b2, 3));
@@ -640,17 +608,12 @@ mod tests {
             end_block: para,
             end,
         };
-        doc.add_remark(range, "Range.", "A", "2026-11-13");
+        doc.add_remark(range, "Range.");
         let block = doc.blocks[3].id;
-        doc.add_remark(model::Anchor::Block(block), "Block.", "A", "2026-11-13");
+        doc.add_remark(model::Anchor::Block(block), "Block.");
         let gone = model::NodeId(10_000);
-        doc.add_remark(model::Anchor::Block(gone), "Detached.", "A", "2026-11-13");
+        doc.add_remark(model::Anchor::Block(gone), "Detached.");
         doc.remarks[1].resolved = true;
-        doc.remarks[1].replies.push(model::Reply {
-            text: "Done.".into(),
-            author: "B".into(),
-            date: "2026-11-14".into(),
-        });
         let zip = to_zip(&doc, None).unwrap();
         let (mut back, _) = from_zip(&zip).unwrap();
         assert_eq!(back.remarks.len(), 3);
@@ -669,7 +632,7 @@ mod tests {
         assert_eq!(
             back.remarks[1..],
             doc.remarks[1..],
-            "replies and resolved kept"
+            "text and resolved kept"
         );
         assert_eq!(back.remarks[2].anchor, model::Anchor::Block(gone));
         assert!(back.fresh_id() > gone);

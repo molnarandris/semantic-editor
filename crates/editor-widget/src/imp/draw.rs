@@ -202,7 +202,7 @@ impl SemEditor {
     }
 
     /// The open remarks drawn at widget point `(x, y)` (on a shaded range
-    /// or a block's bar): author, date and text of each.
+    /// or a block's bar): the text of each.
     pub(super) fn remark_at(&self, x: f64, y: f64) -> Option<String> {
         let zoom = self.zoom.get();
         let scroll = self.scroll();
@@ -237,10 +237,7 @@ impl SemEditor {
                 _ => false,
             };
             if hit {
-                found.push(format!(
-                    "{} ({}): {}",
-                    remark.author, remark.date, remark.text
-                ));
+                found.push(remark.text.clone());
             }
         }
         (!found.is_empty()).then(|| found.join("\n\n"))

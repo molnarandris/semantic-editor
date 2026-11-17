@@ -2410,7 +2410,7 @@ fn remarks_follow_edits() {
             e.move_left();
         }
     });
-    let id = e.add_remark("Which world?", "A", "2026-11-13").unwrap();
+    let id = e.add_remark("Which world?").unwrap();
     let block = e.doc().blocks[0].id;
     let range = |e: &Editor| {
         let r = e.doc().remarks.iter().find(|r| r.id == id).unwrap();
@@ -2472,7 +2472,7 @@ fn remarks_across_blocks() {
     // Selected backwards: from "After" back to "it." before the formula.
     e.set_caret(at(b1, 7));
     e.set_anchor(at(b2, 5));
-    e.add_remark("Both.", "A", "2026-11-17").unwrap();
+    e.add_remark("Both.").unwrap();
     let Anchor::Range {
         block, end_block, ..
     } = e.doc().remarks[0].anchor
@@ -2508,7 +2508,7 @@ fn remarks_on_blocks() {
     let mut e = Editor::new(d);
     let env = e.doc().blocks[0].id;
     e.set_caret(e.doc().start_of(&e.doc().blocks[0].kind.body().unwrap()[0]));
-    e.add_remark("Check.", "A", "2026-11-13").unwrap();
+    e.add_remark("Check.").unwrap();
     assert_eq!(e.doc().remarks[0].anchor, Anchor::Block(env));
     assert_eq!(e.doc().remark_range(&e.doc().remarks[0]), None);
 }
@@ -2530,7 +2530,7 @@ fn remarks_in_formulas() {
     select_with(&mut e, |e| {
         e.set_caret(at(3));
     });
-    let id = e.add_remark("b?", "A", "2026-11-13").unwrap();
+    let id = e.add_remark("b?").unwrap();
     let range = |e: &Editor| {
         let r = e.doc().remarks.iter().find(|r| r.id == id).unwrap();
         let (a, b) = e.doc().remark_range(r).unwrap();
@@ -2553,7 +2553,7 @@ fn remarks_in_formulas() {
 }
 
 /// The sidebar's view of remarks: in text order, the ones the caret is in,
-/// selecting one, replies, resolving and deleting.
+/// selecting one, editing its text, resolving and deleting.
 #[test]
 fn remarks_for_the_sidebar() {
     let mut e = Editor::default();
@@ -2569,9 +2569,9 @@ fn remarks_for_the_sidebar() {
     // A range in the second block ("block"), then a remark on the first.
     e.set_caret(at(b1, 7));
     select_with(&mut e, |e| e.set_caret(at(b1, 12)));
-    let range = e.add_remark("Which?", "A", "2026-11-14").unwrap();
+    let range = e.add_remark("Which?").unwrap();
     e.set_caret(at(b0, 2));
-    let block = e.add_remark("Whole.", "A", "2026-11-14").unwrap();
+    let block = e.add_remark("Whole.").unwrap();
     let order: Vec<u64> = e.doc().remarks_in_order().iter().map(|r| r.id).collect();
     assert_eq!(order, [block, range]);
 
@@ -2588,8 +2588,8 @@ fn remarks_for_the_sidebar() {
     assert_eq!(e.selection(), None);
     assert_eq!(e.caret().block, b0);
 
-    assert!(e.reply_remark(range, "This one.", "B", "2026-11-14"));
-    assert_eq!(e.doc().remarks[0].replies[0].author, "B");
+    assert!(e.set_remark_text(range, "This one?"));
+    assert_eq!(e.doc().remarks[0].text, "This one?");
     assert!(e.set_remark_resolved(range, true));
     e.set_caret(at(b1, 9));
     assert_eq!(e.remarks_at_caret(), [] as [u64; 0], "resolved: not in it");

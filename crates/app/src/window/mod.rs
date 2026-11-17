@@ -282,7 +282,8 @@ impl Window {
                     this.editor.select_remark(id);
                     this.editor.grab_focus();
                 }
-                RemarkAction::Reply(id) => spawn(this.reply_remark(id)),
+                RemarkAction::Show(id) => this.editor.select_remark(id),
+                RemarkAction::SetText(id, text) => this.editor.set_remark_text(id, &text),
                 RemarkAction::Resolve(id, resolved) => {
                     this.editor.set_remark_resolved(id, resolved)
                 }
@@ -406,7 +407,7 @@ impl Window {
                     }
                 })
             }),
-            ("add-remark", |w| spawn(async move { w.add_remark().await })),
+            ("add-remark", |w| w.add_remark()),
             ("ask-claude", |w| w.ask_claude()),
             ("name-version", |w| {
                 spawn(async move { w.name_version(None).await })
@@ -583,66 +584,17 @@ impl Window {
         self.update_versions();
     }
 
-    /// Ask for a remark and put it on the selection, or on the block the
-    /// caret is in.
-    async fn add_remark(self: Rc<Self>) {
-        let text = self
-            .ask_remark_text(
-                "Add Remark",
-                "On the selected text, or on the block the caret is in.",
-                "_Add",
-            )
-            .await;
-        if let Some(text) = text {
-            if self.editor.add_remark(&text, &files::author(), &today()) {
-                self.split_remarks.set_show_sidebar(true);
-                self.right_pages.set_visible_child_name("remarks");
-            } else {
-                self.toast("Remarks cannot be added to an old version");
-            }
-        }
-        self.editor.grab_focus();
-    }
-
-    /// Ask for an answer to remark `id` and add it.
-    async fn reply_remark(self: Rc<Self>, id: u64) {
-        let text = self.ask_remark_text("Reply", "", "_Reply").await;
-        if let Some(text) = text {
-            self.editor
-                .reply_remark(id, &text, &files::author(), &today());
-        }
-    }
-
-    /// Ask for a remark's or reply's text (several lines); `None` if
-    /// cancelled or empty.
-    async fn ask_remark_text(&self, heading: &str, body: &str, button: &str) -> Option<String> {
-        let text = gtk::TextView::builder()
-            .wrap_mode(gtk::WrapMode::WordChar)
-            .top_margin(6)
-            .bottom_margin(6)
-            .left_margin(6)
-            .right_margin(6)
-            .build();
-        let scrolled = gtk::ScrolledWindow::builder()
-            .child(&text)
-            .min_content_height(100)
-            .min_content_width(320)
-            .has_frame(true)
-            .build();
-        let dialog = adw::AlertDialog::new(Some(heading), (!body.is_empty()).then_some(body));
-        dialog.set_extra_child(Some(&scrolled));
-        dialog.add_responses(&[("cancel", "_Cancel"), ("ok", button)]);
-        dialog.set_response_appearance("ok", adw::ResponseAppearance::Suggested);
-        dialog.set_default_response(Some("ok"));
-        dialog.set_close_response("cancel");
-        text.grab_focus();
-        let answer = dialog.choose_future(Some(&self.window)).await;
-        let buffer = text.buffer();
-        let text = buffer
-            .text(&buffer.start_iter(), &buffer.end_iter(), false)
-            .trim()
-            .to_string();
-        (answer == "ok" && !text.is_empty()).then_some(text)
+    /// Put a new remark on the selection, or on the block the caret is in,
+    /// and type its text in its card in the sidebar.
+    fn add_remark(&self) {
+        let Some(id) = self.editor.add_remark("") else {
+            self.toast("Remarks cannot be added to an old version");
+            return;
+        };
+        self.split_remarks.set_show_sidebar(true);
+        self.right_pages.set_visible_child_name("remarks");
+        self.update_remarks();
+        self.remarks.edit(id);
     }
 
     /// Ask for a version's name ("arXiv submission").
@@ -744,14 +696,6 @@ fn saved_state(doc: &Document) -> (String, Vec<BlockNode>, Files, Vec<Remark>) {
     )
 }
 
-/// Today as `YYYY-MM-DD`, for remarks.
-fn today() -> String {
-    glib::DateTime::now_local()
-        .and_then(|d| d.format("%Y-%m-%d"))
-        .map(|d| d.to_string())
-        .unwrap_or_default()
-}
-
 /// An empty document with the default header.
 fn new_document() -> Document {
     let mut doc = Document::new();
@@ -793,7 +737,7 @@ fn main_menu() -> gio::Menu {
     );
     menu.append_section(None, &insert);
     let remarks = gio::Menu::new();
-    remarks.append(Some("Add _Remark…"), Some("win.add-remark"));
+    remarks.append(Some("Add _Remark"), Some("win.add-remark"));
     remarks.append(Some("Ask _Claude…"), Some("win.ask-claude"));
     menu.append_section(None, &remarks);
     let other = gio::Menu::new();

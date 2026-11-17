@@ -153,7 +153,9 @@ structure as soon as it is unambiguous.
 
 - Left sidebar: Outline (headings rendered by Typst) and Versions.
 - Right sidebar: Remarks (anchored to blocks or ranges, a range also across blocks
-  such as a display formula; following edits; kept out of the Typst) and Chat with Claude (through the user's own Claude Code, `claude -p`;
+  such as a display formula; following edits; kept out of the Typst; a card each on
+  old-paper yellow, its text typed right in the card, no author, date or replies;
+  an empty one goes when left) and Chat with Claude (through the user's own Claude Code, `claude -p`;
   answers typeset by Typst; not saved).
 - Problems: Next Problem visits blocks that fail, broken references and duplicate
   labels.

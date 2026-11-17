@@ -15,21 +15,7 @@ pub struct Remark {
     pub id: u64,
     pub anchor: Anchor,
     pub text: String,
-    pub author: String,
-    /// When it was written, `YYYY-MM-DD`.
-    pub date: String,
     pub resolved: bool,
-    /// Answers, oldest first.
-    pub replies: Vec<Reply>,
-}
-
-/// An answer to a remark.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Reply {
-    pub text: String,
-    pub author: String,
-    /// `YYYY-MM-DD`.
-    pub date: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -210,16 +196,13 @@ impl Document {
     }
 
     /// Add a remark; returns its id.
-    pub fn add_remark(&mut self, anchor: Anchor, text: &str, author: &str, date: &str) -> u64 {
+    pub fn add_remark(&mut self, anchor: Anchor, text: &str) -> u64 {
         let id = self.remarks.iter().map(|r| r.id).max().unwrap_or(0) + 1;
         self.remarks.push(Remark {
             id,
             anchor,
             text: text.into(),
-            author: author.into(),
-            date: date.into(),
             resolved: false,
-            replies: vec![],
         });
         id
     }

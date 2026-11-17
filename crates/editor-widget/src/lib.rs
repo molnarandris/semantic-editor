@@ -135,15 +135,11 @@ impl SemEditor {
     }
 
     /// Add a remark about the selection, or the top-level block the caret
-    /// is in (see [`model::Editor::add_remark`]). `false` if read-only.
-    pub fn add_remark(&self, text: &str, author: &str, date: &str) -> bool {
-        let added = self
-            .imp()
-            .editor
-            .borrow_mut()
-            .add_remark(text, author, date)
-            .is_some();
-        if added {
+    /// is in (see [`model::Editor::add_remark`]): its id, `None` if
+    /// read-only.
+    pub fn add_remark(&self, text: &str) -> Option<u64> {
+        let added = self.imp().editor.borrow_mut().add_remark(text);
+        if added.is_some() {
             self.imp().after_command(false);
         }
         added
@@ -180,10 +176,10 @@ impl SemEditor {
         self.imp().select_remark(id);
     }
 
-    /// Answer remark `id`.
-    pub fn reply_remark(&self, id: u64, text: &str, author: &str, date: &str) {
+    /// Change remark `id`'s text.
+    pub fn set_remark_text(&self, id: u64, text: &str) {
         let imp = self.imp();
-        if imp.editor.borrow_mut().reply_remark(id, text, author, date) {
+        if imp.editor.borrow_mut().set_remark_text(id, text) {
             imp.after_command(false);
         }
     }

@@ -14,7 +14,7 @@ use std::collections::HashSet;
 use crate::cursor::{CursorPath, Step, Target};
 use crate::history::History;
 use crate::ops::{Items, Op, Seq};
-use crate::remarks::{Anchor, Remark, Reply};
+use crate::remarks::{Anchor, Remark};
 use crate::selection::{Fragment, SelRange, Selection};
 use crate::symbols;
 use crate::tree::{
@@ -844,7 +844,7 @@ impl Editor {
     /// blocks without such ends: the first; no selection: the top-level
     /// block the caret is in (the whole theorem). Not part of undo. Returns
     /// its id.
-    pub fn add_remark(&mut self, text: &str, author: &str, date: &str) -> Option<u64> {
+    pub fn add_remark(&mut self, text: &str) -> Option<u64> {
         if self.read_only {
             return None;
         }
@@ -866,7 +866,7 @@ impl Editor {
                 Anchor::Block(self.doc.blocks[top].id)
             }
         };
-        Some(self.doc.add_remark(anchor, text, author, date))
+        Some(self.doc.add_remark(anchor, text))
     }
 
     /// The ends of the selection for a remark: within a block, as drawn;
@@ -892,16 +892,12 @@ impl Editor {
         self.doc.remarks.iter_mut().find(|r| r.id == id)
     }
 
-    /// Answer remark `id`. Not part of undo.
-    pub fn reply_remark(&mut self, id: u64, text: &str, author: &str, date: &str) -> bool {
+    /// Change remark `id`'s text. Not part of undo.
+    pub fn set_remark_text(&mut self, id: u64, text: &str) -> bool {
         let Some(remark) = self.remark_mut(id) else {
             return false;
         };
-        remark.replies.push(Reply {
-            text: text.into(),
-            author: author.into(),
-            date: date.into(),
-        });
+        remark.text = text.into();
         true
     }
 
@@ -915,7 +911,7 @@ impl Editor {
         true
     }
 
-    /// Delete remark `id` with its replies. Not part of undo.
+    /// Delete remark `id`. Not part of undo.
     pub fn delete_remark(&mut self, id: u64) -> bool {
         if self.remark_mut(id).is_none() {
             return false;
