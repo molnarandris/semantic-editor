@@ -147,6 +147,9 @@ Learned the hard way (blurry text that Typesetter did not have):
   session persistence) through `flatpak-spawn --host`; `--bare` cannot use the
   subscription. Stateless: the paper and the conversation go on stdin each time.
 - **No backslash commands in math**: names resolve when the word ends, as in Typst.
+- **Matrix rows**: `MathKind::Call.rows` holds where each `;` row starts. Typst ends
+  embedded code at a direct `;` and swallows it (`#sem-slot();`), so the serializer
+  puts a space before `;` after a cell that may end in code (an empty cell too).
 
 ## Tools
 
