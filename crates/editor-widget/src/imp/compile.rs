@@ -502,6 +502,7 @@ impl SemEditor {
                 self.reveal_caret();
             }
             self.update_im_location();
+            self.update_completions();
         }
     }
 

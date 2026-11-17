@@ -115,6 +115,9 @@ impl SemEditor {
                     im.focus_out();
                 }
                 imp.stop_blink();
+                if let Some((popup, _)) = imp.popup.get() {
+                    popup.popdown();
+                }
                 obj.queue_draw();
             }
         });
@@ -147,9 +150,7 @@ impl SemEditor {
                 let ctrl = gesture
                     .current_event_state()
                     .contains(gdk::ModifierType::CONTROL_MASK);
-                if let Some(label) = imp.completion_at(x, y) {
-                    imp.choose_completion(&label);
-                } else if ctrl
+                if ctrl
                     && let Some(label) = imp.ref_at(x, y)
                     && imp.editor.borrow_mut().follow_ref(&label)
                 {
@@ -483,11 +484,11 @@ impl SemEditor {
             }
             _ => return false,
         }
-        self.obj().queue_draw();
+        self.update_completions();
         true
     }
 
-    fn choose_completion(&self, label: &str) {
+    pub(super) fn choose_completion(&self, label: &str) {
         let mut ed = self.editor.borrow_mut();
         if ed.ref_typing().is_some() {
             ed.complete_ref(label);
@@ -496,15 +497,6 @@ impl SemEditor {
         }
         drop(ed);
         self.after_command(true);
-    }
-
-    /// The completion row at widget point `(x, y)`, if the list shows.
-    fn completion_at(&self, x: f64, y: f64) -> Option<String> {
-        self.completion_rows
-            .borrow()
-            .iter()
-            .find(|(r, _)| r.contains_point(&graphene::Point::new(x as f32, y as f32)))
-            .map(|(_, label)| label.clone())
     }
 
     /// Up/down to the neighbouring line (across blocks), line start/end.

@@ -5,6 +5,7 @@
 mod compile;
 mod draw;
 mod input;
+mod popup;
 mod quote;
 
 use std::cell::{Cell, OnceCell, RefCell};
@@ -220,10 +221,10 @@ pub struct SemEditor {
     reveal_third: Cell<bool>,
     /// The completion list while a reference is typed: the chosen entry,
     /// the label typed when it was chosen (a new one starts at the top),
-    /// and the rows as last drawn (widget coordinates), for clicks.
+    /// and the pop-up showing the list (see `popup.rs`).
     completion: Cell<usize>,
     completion_typed: RefCell<String>,
-    completion_rows: RefCell<Vec<(graphene::Rect, String)>>,
+    popup: OnceCell<(gtk::Popover, gtk::ListBox)>,
 
     hadjustment: RefCell<Option<gtk::Adjustment>>,
     vadjustment: RefCell<Option<gtk::Adjustment>>,
@@ -366,6 +367,7 @@ impl ObjectImpl for SemEditor {
         drop(editor);
         obj.connect_scale_factor_notify(|obj| obj.queue_allocate());
         self.setup_input();
+        self.setup_popup();
     }
 
     fn dispose(&self) {
@@ -374,6 +376,9 @@ impl ObjectImpl for SemEditor {
             im.set_client_widget(None::<&gtk::Widget>);
         }
         self.stop_blink();
+        if let Some((popup, _)) = self.popup.get() {
+            popup.unparent();
+        }
     }
 }
 
@@ -410,6 +415,9 @@ impl WidgetImpl for SemEditor {
             self.submit_blocks(true);
         }
         self.configure_adjustments(width as f64, height as f64);
+        if let Some((popup, _)) = self.popup.get() {
+            popup.present();
+        }
     }
 
     fn snapshot(&self, snapshot: &gtk::Snapshot) {
@@ -483,9 +491,6 @@ impl WidgetImpl for SemEditor {
         {
             snapshot.append_color(&gdk::RGBA::new(0.1, 0.1, 0.12, 1.0), &r);
         }
-        if obj.has_focus() {
-            self.snapshot_completions(snapshot);
-        }
     }
 }
 
@@ -518,6 +523,7 @@ impl SemEditor {
             self.reveal_caret();
         }
         self.update_im_location();
+        self.update_completions();
         self.restart_blink();
         self.obj().emit_by_name::<()>("caret-moved", &[]);
     }

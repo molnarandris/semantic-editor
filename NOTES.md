@@ -134,10 +134,13 @@ Learned the hard way (blurry text that Typesetter did not have):
   keystroke. A name bound in a way the parser cannot read (`#let thm = thmbox(…)`, an
   import, `: *`) may take anything; a name defined nowhere is code.
 - **Widget-drawn decorations** (label pills, reference tint, `&` marks, outlines,
-  options tabs, completion list) instead of Typst output: no recompile when the caret
-  moves, and nothing changes the typeset spacing (a zero-width box at `&` changes the
-  spacing around `=`).
-- **No GTK popover for completion**: the editor keeps focus and the input method.
+  options tabs) instead of Typst output: no recompile when the caret moves, and
+  nothing changes the typeset spacing (a zero-width box at `&` changes the spacing
+  around `=`).
+- **Completion list in a popover that never takes focus** (`imp/popup.rs`:
+  `autohide(false)`, `can_focus(false)`): the editor keeps the keys and the input
+  method. Drawn in the widget it was cut to the widget (a remark card is as tall as
+  its text).
 - **Bibliography** written as `refs.bib` in exports and the project, but embedded in
   the editor's own renders; the block keeps its source for undo.
 - **One-way import**: a `.typ` is never written back.

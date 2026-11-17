@@ -6,10 +6,13 @@ Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
 
 ## Waiting for the user's test
 
+- The completion list (references, names in formulas) is a real pop-up, no longer
+  cut to a remark's card ("The reference completion pop-up is not visible on the
+  remark card as it gets truncated"); typing, ↑/↓, Enter/Tab and clicking a row
+  should work as before, in the paper too.
+
 ## To fix next (user, 2026-11-17)
 
-- "The reference completion pop-up is not visible on the remark card as it gets
-  truncated": it is cut to the card's area.
 - "The size of the letters/citation is weird. If I make the window larger, the size
   of the font seems to shrink." (the card's text and the quotation)
 

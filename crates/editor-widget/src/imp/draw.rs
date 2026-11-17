@@ -1,5 +1,5 @@
 //! Drawing on top of the block renders: outlines, selection, remarks,
-//! label pills, tabs, completion list, formula marks.
+//! label pills, tabs, formula marks.
 
 use super::*;
 
@@ -454,82 +454,6 @@ impl SemEditor {
             ));
             snapshot.append_layout(&layout, &text);
             snapshot.restore();
-        }
-    }
-
-    /// The completion list, below the caret: each label with what it labels,
-    /// the chosen one highlighted.
-    pub(super) fn snapshot_completions(&self, snapshot: &gtk::Snapshot) {
-        let list = self.completions();
-        let mut rows = self.completion_rows.borrow_mut();
-        rows.clear();
-        let Some(caret) = self.caret_rect().filter(|_| !list.is_empty()) else {
-            return;
-        };
-        let obj = self.obj();
-        let layouts: Vec<_> = list
-            .iter()
-            .map(|(label, desc)| {
-                let l = obj.create_pango_layout(Some(label));
-                let d = obj.create_pango_layout(Some(desc));
-                (l, d)
-            })
-            .collect();
-        let (pad, gap) = (6.0_f32, 18.0_f32);
-        let label_w = layouts
-            .iter()
-            .map(|(l, _)| l.pixel_size().0)
-            .max()
-            .unwrap_or(0) as f32;
-        let desc_w = layouts
-            .iter()
-            .map(|(_, d)| d.pixel_size().0)
-            .max()
-            .unwrap_or(0) as f32;
-        let row_h = layouts
-            .iter()
-            .map(|(l, _)| l.pixel_size().1)
-            .max()
-            .unwrap_or(16) as f32
-            + 4.0;
-        let (x, y) = (caret.x(), caret.y() + caret.height() + 4.0);
-        let width = label_w + gap + desc_w + 2.0 * pad;
-        let shown = list.len().min(8);
-        let frame = graphene::Rect::new(x, y, width, row_h * shown as f32 + 2.0 * 3.0);
-        let outline = gsk::RoundedRect::from_rect(frame, 4.0);
-        snapshot.push_rounded_clip(&outline);
-        snapshot.append_color(&gdk::RGBA::WHITE, &frame);
-        snapshot.pop();
-        snapshot.append_border(
-            &outline,
-            &[1.0; 4],
-            &[gdk::RGBA::new(0.0, 0.0, 0.0, 0.25); 4],
-        );
-        let chosen = self.completion.get().min(list.len() - 1);
-        // Keep the chosen row in the window of rows shown.
-        let first = chosen.saturating_sub(shown - 1);
-        for (k, ((label, _), (l, d))) in list
-            .iter()
-            .zip(&layouts)
-            .enumerate()
-            .skip(first)
-            .take(shown)
-        {
-            let top = y + 3.0 + row_h * (k - first) as f32;
-            let row = graphene::Rect::new(x + 2.0, top, width - 4.0, row_h);
-            if k == chosen {
-                let r = gsk::RoundedRect::from_rect(row, 3.0);
-                snapshot.push_rounded_clip(&r);
-                snapshot.append_color(&gdk::RGBA::new(0.21, 0.52, 0.89, 0.18), &row);
-                snapshot.pop();
-            }
-            snapshot.save();
-            snapshot.translate(&graphene::Point::new(x + pad, top + 2.0));
-            snapshot.append_layout(l, &gdk::RGBA::new(0.1, 0.1, 0.12, 1.0));
-            snapshot.translate(&graphene::Point::new(label_w + gap, 0.0));
-            snapshot.append_layout(d, &gdk::RGBA::new(0.4, 0.42, 0.48, 1.0));
-            snapshot.restore();
-            rows.push((row, label.clone()));
         }
     }
 
