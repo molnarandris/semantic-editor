@@ -151,7 +151,8 @@ structure as soon as it is unambiguous.
 - Problems: Next Problem visits blocks that fail, broken references and duplicate
   labels.
 - Dialogs edit the header, code, diagrams, the bibliography and the title fields,
-  with a live preview.
+  with a live preview; Typst source is highlighted (markup, or code alone in
+  diagrams and code in formulas).
 
 ## Known limits
 

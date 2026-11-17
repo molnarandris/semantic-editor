@@ -82,10 +82,13 @@ impl Window {
         let Some(source) = self.source_of(target) else {
             return;
         };
-        let (title, subtitle) = match target {
+        // Typst highlighting: diagrams and code in a formula are code
+        // alone, the header and raw blocks markup.
+        let (title, subtitle, language) = match target {
             PreviewTarget::Header => (
                 "Document Header",
                 "Set and show rules, imports, definitions",
+                Some("typst"),
             ),
             PreviewTarget::Block(block) => {
                 let doc = self.editor.document();
@@ -93,21 +96,28 @@ impl Window {
                     .find_node(block)
                     .is_some_and(|(r, k)| matches!(r.nodes[k].kind, model::MathKind::Diagram(_)));
                 match doc.block(block).map(|b| &b.kind) {
-                    Some(Block::Diagram(_)) => ("Diagram", "CeTZ drawing code"),
+                    Some(Block::Diagram(_)) => ("Diagram", "CeTZ drawing code", Some("typst-code")),
                     Some(Block::Bibliography(_)) => (
                         "Bibliography",
                         "BibTeX or Hayagriva YAML; lists the works the document cites",
+                        None,
                     ),
-                    None if inline_diagram => ("Diagram", "CeTZ drawing code"),
-                    Some(Block::RawTypst(s)) if typst_bridge::is_code(s) => {
-                        ("Code", "Definitions and rules for the blocks after it")
-                    }
-                    Some(_) => ("Raw Typst", "Typst markup"),
-                    None => ("Code in a Formula", "Typst code, e.g. an inline diagram"),
+                    None if inline_diagram => ("Diagram", "CeTZ drawing code", Some("typst-code")),
+                    Some(Block::RawTypst(s)) if typst_bridge::is_code(s) => (
+                        "Code",
+                        "Definitions and rules for the blocks after it",
+                        Some("typst"),
+                    ),
+                    Some(_) => ("Raw Typst", "Typst markup", Some("typst")),
+                    None => (
+                        "Code in a Formula",
+                        "Typst code, e.g. an inline diagram",
+                        Some("typst-code"),
+                    ),
                 }
             }
         };
-        let ed = Rc::new(build(title, subtitle, target));
+        let ed = Rc::new(build(title, subtitle, target, language));
         ed.set_text(&source);
         *self.block_editor.borrow_mut() = Some(ed.clone());
 
@@ -236,7 +246,14 @@ impl Window {
 
 /// The dialog: header with title and Done, source | preview, error below
 /// the preview.
-fn build(title: &str, subtitle: &str, target: PreviewTarget) -> BlockEditor {
+/// The dialog for `target`, its source highlighted as `language` (an id of
+/// GtkSourceView's, see [`language`]).
+fn build(
+    title: &str,
+    subtitle: &str,
+    target: PreviewTarget,
+    language: Option<&str>,
+) -> BlockEditor {
     let done = gtk::Button::builder()
         .label("Done")
         .css_classes(["suggested-action"])
@@ -249,6 +266,7 @@ fn build(title: &str, subtitle: &str, target: PreviewTarget) -> BlockEditor {
     header.pack_end(&done);
 
     let buffer = sourceview5::Buffer::new(None);
+    buffer.set_language(language.and_then(self::language).as_ref());
     follow_style_scheme(&buffer);
     let view = sourceview5::View::with_buffer(&buffer);
     view.set_monospace(true);
@@ -325,6 +343,13 @@ fn build(title: &str, subtitle: &str, target: PreviewTarget) -> BlockEditor {
         loading: Cell::new(false),
         debounce: RefCell::new(None),
     }
+}
+
+/// Typst highlighting, from `data/languages` (installed where GtkSourceView
+/// looks): `typst` (Typesetter's language file) for markup, `typst-code`
+/// for code alone.
+fn language(id: &str) -> Option<sourceview5::Language> {
+    sourceview5::LanguageManager::default().language(id)
 }
 
 /// Wrapped lines start under the first non-blank character of their line:
@@ -547,5 +572,55 @@ mod preview {
         pub fn connect_wants_scale(&self, f: impl Fn(f64) + 'static) {
             self.imp().wants_scale.replace(Some(Box::new(f)));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sourceview5::prelude::*;
+
+    /// Highlighting style tags in `text` as language `id` from the repo's
+    /// `data/languages`: (char offset, tag's foreground set).
+    fn styled(id: &str, text: &str) -> Vec<(i32, bool)> {
+        gtk::init().expect("GTK (needs a display)");
+        let manager = sourceview5::LanguageManager::new();
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/languages");
+        let mut path: Vec<String> = manager
+            .search_path()
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        path.insert(0, dir.into());
+        manager.set_search_path(&path.iter().map(String::as_str).collect::<Vec<_>>());
+        let language = manager
+            .language(id)
+            .unwrap_or_else(|| panic!("no language {id}"));
+        let buffer = sourceview5::Buffer::with_language(&language);
+        buffer.set_style_scheme(
+            sourceview5::StyleSchemeManager::default()
+                .scheme("Adwaita")
+                .as_ref(),
+        );
+        buffer.set_text(text);
+        let (start, end) = buffer.bounds();
+        buffer.ensure_highlight(&start, &end);
+        let mut out = vec![];
+        let mut it = start;
+        while it < end {
+            let fg = it.tags().iter().any(|t| t.is_foreground_set());
+            out.push((it.offset(), fg));
+            it.forward_char();
+        }
+        out
+    }
+
+    #[test]
+    fn typst_is_highlighted() {
+        let markup = styled("typst", "#let f(x) = x\nSome *bold* text");
+        assert!(markup[1].1, "let: {markup:?}");
+        assert!(!markup[16].1, "plain text: {markup:?}");
+        let code = styled("typst-code", "circle((0, 0), name: \"a\")");
+        assert!(code[0].1, "circle: {code:?}");
+        assert!(code[21].1, "string: {code:?}");
     }
 }

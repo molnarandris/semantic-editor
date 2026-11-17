@@ -3,10 +3,11 @@
 #   build-aux/sdk cargo test
 #   build-aux/sdk cargo clippy --all-targets
 # Uses a separate target dir so it doesn't fight with host or Builder builds.
+# The Wayland socket lets tests initialise GTK (no window opens).
 set -e
 cmd="$1"; shift
 root="$(cd "$(dirname "$0")/.." && pwd)"
-exec flatpak run --share=network --filesystem="$root" --filesystem=~/.cargo \
+exec flatpak run --share=network --socket=wayland --filesystem="$root" --filesystem=~/.cargo \
     --env=CARGO_TARGET_DIR="$root/target/sdk" \
     --env=PATH=/usr/lib/sdk/rust-stable/bin:/app/bin:/usr/bin \
     --cwd="$root" --command="$cmd" org.gnome.Sdk//51 "$@"

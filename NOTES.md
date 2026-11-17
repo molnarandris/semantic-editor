@@ -23,6 +23,13 @@ commit messages say what changed and why).
 - Flathub would need `cargo-sources.json` (`flatpak-cargo-generator`); the build uses
   the network for now. The app has network access for Typst packages.
 - Tests that compile CeTZ download the package on their first run.
+- `build-aux/sdk` passes the Wayland socket so tests can initialise GTK (the
+  highlighting test); no window opens.
+- Highlighting: `data/languages/typst.lang` is Typesetter's (GPL-3.0-or-later,
+  copied unchanged, only `def:` styles, so any scheme works); `typst-code.lang` is
+  ours, its `code` context alone, for diagrams. Both are installed in
+  `/app/share/gtksourceview-5/language-specs`, which the default language manager
+  searches; `build-aux/sdk cargo run` has no highlighting (nothing installed there).
 
 ## Fonts and preamble
 

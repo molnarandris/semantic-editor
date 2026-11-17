@@ -35,7 +35,8 @@
                 "install -Dm644 data/io.github.molnarandris.SemanticEditor.metainfo.xml /app/share/metainfo/${FLATPAK_ID}.metainfo.xml",
                 "sed -i \"s/<id>.*<\\/id>/<id>${FLATPAK_ID}<\\/id>/; s/<launchable type=\\\"desktop-id\\\">.*</<launchable type=\\\"desktop-id\\\">${FLATPAK_ID}.desktop</\" /app/share/metainfo/${FLATPAK_ID}.metainfo.xml",
                 "install -Dm644 data/io.github.molnarandris.SemanticEditor.mime.xml /app/share/mime/packages/${FLATPAK_ID}.xml",
-                "install -Dm644 data/icons/io.github.molnarandris.SemanticEditor.svg /app/share/icons/hicolor/scalable/apps/${FLATPAK_ID}.svg"
+                "install -Dm644 data/icons/io.github.molnarandris.SemanticEditor.svg /app/share/icons/hicolor/scalable/apps/${FLATPAK_ID}.svg",
+                "install -Dm644 -t /app/share/gtksourceview-5/language-specs data/languages/typst.lang data/languages/typst-code.lang"
             ],
             "sources": [
                 {

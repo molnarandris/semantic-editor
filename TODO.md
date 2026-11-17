@@ -6,6 +6,7 @@ Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
 
 ## Waiting for the user's test
 
+- Syntax highlighting in the header, code, raw Typst and diagram dialogs.
 - Formulas: unknown words are code (red when failing), text only with `"`; code
   and text edited in place and outlined while the caret is in them.
 - Code pieces that fail show their source on red (inline pieces, inline calls,
@@ -21,20 +22,18 @@ Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
 
 From the user's list of 2026-11-15, one group at a time:
 
-1. Syntax highlighting in the header, code and figure editors (GtkSourceView with
-   Typesetter's Typst language file, GPL).
-2. Formulas (in progress, user decision 2026-11-16): text only with `"` (done:
+1. Formulas (in progress, user decision 2026-11-16): text only with `"` (done:
    other words are code); text and code edited in place, typing anywhere in them
    (done); outlined while the caret is in them, like calls (done). Then:
    typing `#` in a formula to start code; copy and paste of a formula holding
    `#bigbx` breaks subscripts; symbol completion while typing a name, most used
    first; matrices.
-3. Remarks rework: a selection across a display formula remarks only the text before
+2. Remarks rework: a selection across a display formula remarks only the text before
    it; remark text in the editor's syntax, rendered by Typst; no prominent author,
    date or replies; the card shows the remarked text rendered; maybe in the margin
    instead of a sidebar (undecided).
-4. Chat: clickable references to the paper's parts; Claude can add remarks.
-5. Sidebar buttons look bad (postponed by the user, not important).
+3. Chat: clickable references to the paper's parts; Claude can add remarks.
+4. Sidebar buttons look bad (postponed by the user, not important).
 
 Then the planned features:
 

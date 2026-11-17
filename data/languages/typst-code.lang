@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- Typst code with no markup around it (a diagram's CeTZ code, code in a
+     formula): the code context of typst.lang (from Typesetter). -->
+<language id="typst-code" name="Typst Code" version="2.0" _section="meta" hidden="true">
+  <definitions>
+    <context id="typst-code">
+      <include>
+        <context ref="typst:code"/>
+      </include>
+    </context>
+  </definitions>
+</language>
