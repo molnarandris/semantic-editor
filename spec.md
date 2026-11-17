@@ -155,7 +155,8 @@ structure as soon as it is unambiguous.
 - Right sidebar: Remarks (anchored to blocks or ranges, a range also across blocks
   such as a display formula; following edits; kept out of the Typst; a card each on
   old-paper yellow, on top a read-only quotation cut from the paper's render (a
-  range's lines with one line above and below; a block's remark the whole block),
+  range's lines with one line above and below, the range shaded as in the paper;
+  a block's remark the whole block),
   its text typed right in the card with the paper's editor (formulas, markup, the
   paper's own functions, `@label` references to the paper's sections, equations
   and environments, offered while typing and shown with the paper's numbers, Ctrl+click goes there; kept

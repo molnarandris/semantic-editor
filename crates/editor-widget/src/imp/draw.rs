@@ -3,6 +3,10 @@
 
 use super::*;
 
+/// The shading under a remarked range (in the paper and in its card's
+/// quotation).
+pub(super) const REMARK_SHADE: gdk::RGBA = gdk::RGBA::new(1.0, 0.82, 0.15, 0.35);
+
 impl SemEditor {
     /// Current structure and selection, drawn under the text.
     /// A faint outline around the environment the caret is in (tinted) or
@@ -151,7 +155,7 @@ impl SemEditor {
     /// lines, a whole block's beside the block).
     pub(super) fn snapshot_remarks(&self, snapshot: &gtk::Snapshot, x0: f64, scroll: f64) {
         let zoom = self.zoom.get();
-        let shade = gdk::RGBA::new(1.0, 0.82, 0.15, 0.35);
+        let shade = REMARK_SHADE;
         let bar = gdk::RGBA::new(0.95, 0.7, 0.0, 0.9);
         let (ranges, blocks) = {
             let ed = self.editor.borrow();
@@ -298,7 +302,7 @@ impl SemEditor {
 
     /// [`Self::range_rects`] in top-level block `index`: from `first` (or
     /// its start) to `last` (or its end).
-    fn block_range_rects(
+    pub(super) fn block_range_rects(
         &self,
         index: usize,
         first: Option<&CursorPath>,

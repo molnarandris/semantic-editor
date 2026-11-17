@@ -21,6 +21,16 @@ Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
 - A card's quotation at the size of the card's text, whatever the window, the zoom
   or the screen; shrunk only when the paper's lines are wider than the card ("If I
   make the window larger, the size of the font seems to shrink").
+- The remarked range shaded in its card's quotation, as in the paper ("when it is
+  short and lines above and below were included in the quote, I want the highlight
+  to show up in the remark card as well").
+
+## Known limits
+
+- A card's quotation still shrinks in a wide window: it is as wide as the paper's
+  text column, empty part included. Re-rendering it at the card's width was
+  considered and postponed by the user (needs its own jobs on the shared compile
+  thread).
 
 ## Next
 

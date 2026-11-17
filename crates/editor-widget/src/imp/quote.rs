@@ -1,7 +1,9 @@
 //! A remark's quotation for its card in the sidebar: the lines its range
 //! covers with one line above and one below (a whole block's remark: the
-//! block), cut from the blocks' renders, so it reads as in the paper.
+//! block), cut from the blocks' renders, so it reads as in the paper; the
+//! remarked range shaded as in the paper.
 
+use super::draw::REMARK_SHADE;
 use super::*;
 
 /// A piece of a quotation: top-level block `index`, from `top` to `bottom`
@@ -75,12 +77,55 @@ impl SemEditor {
         Some((top, bottom))
     }
 
-    /// What remark `id`'s quotation depends on (its pieces and their
-    /// renders), to redo it only when this changes.
+    /// The shading of remark `id`'s range in its quotation: for each piece
+    /// (by its place in `spans`), rectangles (x, y, width, height) in pt of
+    /// its block. None for a remark on a whole block.
+    fn quote_marks(&self, id: u64, spans: &[Span]) -> Vec<(usize, [f64; 4])> {
+        let range = {
+            let ed = self.editor.borrow();
+            let doc = ed.doc();
+            doc.remarks
+                .iter()
+                .find(|r| r.id == id)
+                .and_then(|r| doc.remark_range(r))
+        };
+        let Some((first, last)) = range else {
+            return vec![];
+        };
+        let zoom = self.zoom.get();
+        let tops = self.block_tops();
+        let mut marks = vec![];
+        for (k, s) in spans.iter().enumerate() {
+            let Some(&top) = tops.get(s.index) else {
+                continue;
+            };
+            let from = (k == 0).then_some(&first);
+            let to = (k == spans.len() - 1).then_some(&last);
+            for r in self.block_range_rects(s.index, from, to, 0.0, 0.0) {
+                marks.push((
+                    k,
+                    [
+                        r.x() as f64 / zoom,
+                        (r.y() as f64 - top) / zoom,
+                        r.width() as f64 / zoom,
+                        r.height() as f64 / zoom,
+                    ],
+                ));
+            }
+        }
+        marks
+    }
+
+    /// What remark `id`'s quotation depends on (its pieces, their renders
+    /// and its shading), to redo it only when this changes.
     pub(crate) fn remark_quote_key(&self, id: u64) -> Option<Vec<u64>> {
         let spans = self.quote_spans(id)?;
+        let mut key: Vec<u64> = self
+            .quote_marks(id, &spans)
+            .iter()
+            .flat_map(|(k, r)| [*k as u64].into_iter().chain(r.map(|v| (v * 100.0) as u64)))
+            .collect();
         let views = self.views.borrow();
-        let mut key = vec![];
         for s in spans {
             let view = views.get(s.index)?;
             key.extend([
@@ -98,6 +143,7 @@ impl SemEditor {
     /// `None` before the blocks are rendered.
     pub(crate) fn remark_quote(&self, id: u64) -> Option<(gdk::Texture, f64)> {
         let spans = self.quote_spans(id)?;
+        let marks = self.quote_marks(id, &spans);
         let views = self.views.borrow();
         let pad = typst_bridge::BLOCK_PAD_PT;
         let mut pieces = vec![];
@@ -124,10 +170,12 @@ impl SemEditor {
         let stride = width as usize * 4;
         let mut out = vec![0u8; stride * height as usize];
         let mut row = 0usize;
+        let mut starts = vec![];
         for (k, (texture, x0, x1, y0, y1)) in pieces.iter().enumerate() {
             if k > 0 {
                 row += gap as usize;
             }
+            starts.push(row);
             let mut downloader = gdk::TextureDownloader::new(texture);
             downloader.set_format(gdk::MemoryFormat::R8g8b8a8Premultiplied);
             let (bytes, src_stride) = downloader.download_bytes();
@@ -139,6 +187,28 @@ impl SemEditor {
                 row += 1;
             }
         }
+        // The remarked range shaded as in the paper, under the text. A
+        // piece's row 0 is `QUOTE_PAD_PT` above its span's top; its column
+        // 0 is the text column's left edge.
+        for (k, [x, y, w, h]) in marks {
+            let (span, start) = (&spans[k], starts[k] as f64);
+            let at = |pt: f64| (pt * ppp).round() as i64;
+            let left = at(x).clamp(0, width);
+            let right = at(x + w).clamp(left, width);
+            let to_row = |pt: f64| start as i64 + at(pt - span.top + QUOTE_PAD_PT);
+            let piece_end = start as i64 + (pieces[k].4 - pieces[k].3);
+            let top = to_row(y).clamp(start as i64, piece_end);
+            let bottom = to_row(y + h).clamp(top, piece_end);
+            for r in top..bottom {
+                let line = &mut out[r as usize * stride..][..stride];
+                for px in line[left as usize * 4..right as usize * 4]
+                    .as_chunks_mut::<4>()
+                    .0
+                {
+                    shade_under(px);
+                }
+            }
+        }
         let texture = gdk::MemoryTexture::new(
             width as i32,
             height as i32,
@@ -147,6 +217,22 @@ impl SemEditor {
             stride,
         );
         Some((texture.upcast(), ppp))
+    }
+}
+
+/// Put the remark shading under premultiplied RGBA pixel `px`: what the
+/// paper shows where its shading is drawn before the text.
+fn shade_under(px: &mut [u8; 4]) {
+    let s = REMARK_SHADE;
+    let shade = [
+        s.red() * s.alpha(),
+        s.green() * s.alpha(),
+        s.blue() * s.alpha(),
+        s.alpha(),
+    ];
+    let clear = 1.0 - px[3] as f32 / 255.0;
+    for (c, sh) in px.iter_mut().zip(shade) {
+        *c = (*c as f32 + sh * 255.0 * clear).round().min(255.0) as u8;
     }
 }
 
@@ -215,5 +301,16 @@ mod tests {
             line_bands(&stops),
             [(0.0, 12.0), (20.0, 32.0), (36.0, 52.0)]
         );
+    }
+
+    /// The shading shows on the clear background, not over opaque ink.
+    #[test]
+    fn shading_goes_under_the_text() {
+        let mut clear = [0, 0, 0, 0];
+        shade_under(&mut clear);
+        assert_eq!(clear, [89, 73, 13, 89]);
+        let mut ink = [20, 20, 20, 255];
+        shade_under(&mut ink);
+        assert_eq!(ink, [20, 20, 20, 255]);
     }
 }
