@@ -147,6 +147,11 @@ Learned the hard way (blurry text that Typesetter did not have):
   session persistence) through `flatpak-spawn --host`; `--bare` cannot use the
   subscription. Stateless: the paper and the conversation go on stdin each time.
 - **No backslash commands in math**: names resolve when the word ends, as in Typst.
+- **One compile thread for all editors** (`imp/mod.rs`, `WORKER`): the paper, remark
+  cards and old versions submit with their owner id (`Worker::submit_as`); results go
+  back to the editor registered under it. Block ids of different editors may clash,
+  so the queue replaces jobs by owner and block. The render cache is shared (keyed by
+  content).
 - **Remark quotations** are cut from the blocks' textures (`imp/quote.rs`), not
   rendered again, so the lines are the paper's; a key of the blocks' render
   generations and the cut tells the sidebar when to redo one. Screenshots under

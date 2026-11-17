@@ -183,7 +183,8 @@ pub struct SemEditor {
     /// Typst code rendered (`jobs::full_citation`); None while rendering or
     /// if it failed.
     cite_tips: RefCell<HashMap<String, Option<gdk::Paintable>>>,
-    worker: OnceCell<Worker>,
+    /// Who this editor is to the shared compile thread (see [`submit`]).
+    owner: Cell<u64>,
     generation: Cell<u64>,
     /// Page width and pixels per point the current renders were requested at.
     page_width_pt: Cell<f64>,
@@ -233,6 +234,44 @@ impl ObjectSubclass for SemEditor {
 
     fn class_init(klass: &mut Self::Class) {
         klass.set_css_name("semeditor");
+    }
+}
+
+thread_local! {
+    /// The compile thread all editors share (the paper's, the remark
+    /// cards', old versions'), started with the first editor.
+    static WORKER: Worker = {
+        let disk_cache = glib::user_cache_dir()
+            .join("semantic-editor")
+            .join("renders");
+        // Results arrive on the compile thread; hop to the main loop, to
+        // the editor that asked.
+        Worker::spawn(Some(disk_cache), move |result| {
+            glib::MainContext::default().invoke(move || {
+                let editor = EDITORS.with_borrow(|e| e.get(&result.owner).and_then(|w| w.upgrade()));
+                if let Some(editor) = editor {
+                    editor.imp().on_result(result);
+                }
+            });
+        })
+    };
+    /// The editors by owner id, for the results.
+    static EDITORS: RefCell<HashMap<u64, glib::WeakRef<super::SemEditor>>> =
+        RefCell::default();
+    static NEXT_OWNER: Cell<u64> = const { Cell::new(1) };
+}
+
+/// Register `editor` for compile results: its owner id.
+fn register(editor: &super::SemEditor) -> u64 {
+    let owner = NEXT_OWNER.replace(NEXT_OWNER.get() + 1);
+    EDITORS.with_borrow_mut(|e| e.insert(owner, editor.downgrade()));
+    owner
+}
+
+impl SemEditor {
+    /// Compile `job` on the shared thread, for this editor.
+    pub(super) fn submit(&self, job: CompileJob) {
+        WORKER.with(|w| w.submit_as(self.owner.get(), job));
     }
 }
 
@@ -307,20 +346,7 @@ impl ObjectImpl for SemEditor {
         obj.set_cursor_from_name(Some("text"));
         self.zoom.set(DEFAULT_ZOOM);
 
-        // Results arrive on the compile thread; hop to the main loop.
-        let weak = glib::SendWeakRef::from(obj.downgrade());
-        let disk_cache = glib::user_cache_dir()
-            .join("semantic-editor")
-            .join("renders");
-        let worker = Worker::spawn(Some(disk_cache), move |result| {
-            let weak = weak.clone();
-            glib::MainContext::default().invoke(move || {
-                if let Some(editor) = weak.upgrade() {
-                    editor.imp().on_result(result);
-                }
-            });
-        });
-        let _ = self.worker.set(worker);
+        self.owner.set(register(&obj));
 
         let mut editor = self.editor.borrow_mut();
         editor.set_symbol_resolver(typst_bridge::resolve_symbol);
@@ -332,6 +358,7 @@ impl ObjectImpl for SemEditor {
     }
 
     fn dispose(&self) {
+        EDITORS.with_borrow_mut(|e| e.remove(&self.owner.get()));
         if let Some(im) = self.im.get() {
             im.set_client_widget(None::<&gtk::Widget>);
         }

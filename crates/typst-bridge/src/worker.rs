@@ -63,6 +63,8 @@ pub struct Rendered {
 
 #[derive(Debug)]
 pub struct CompileResult {
+    /// Who submitted the job (see [`Worker::submit_as`]).
+    pub owner: u64,
     pub block: NodeId,
     pub generation: u64,
     pub outcome: Result<Rendered, Vec<String>>,
@@ -75,7 +77,7 @@ pub struct CompileResult {
 
 /// Handle to the compile thread. Dropping it stops the thread.
 pub struct Worker {
-    tx: Sender<CompileJob>,
+    tx: Sender<(u64, CompileJob)>,
     compiles: Arc<AtomicUsize>,
 }
 
@@ -105,8 +107,15 @@ impl Worker {
     }
 
     pub fn submit(&self, job: CompileJob) {
+        self.submit_as(0, job);
+    }
+
+    /// Submit a job for `owner`, one of several editors sharing the thread:
+    /// its result carries the owner back, and only that owner's queued job
+    /// for the same block is replaced.
+    pub fn submit_as(&self, owner: u64, job: CompileJob) {
         // The thread only exits when this handle is dropped.
-        let _ = self.tx.send(job);
+        let _ = self.tx.send((owner, job));
     }
 }
 
@@ -132,17 +141,20 @@ fn cache_key(job: &CompileJob) -> u64 {
     h.finish()
 }
 
-/// Queue a job, replacing a queued job for the same block.
-fn enqueue(queue: &mut VecDeque<CompileJob>, job: CompileJob) {
-    match queue.iter_mut().find(|j| j.block == job.block) {
-        Some(old) if old.generation <= job.generation => *old = job,
+/// Queue a job, replacing a queued job of the same owner for the same block.
+fn enqueue(queue: &mut VecDeque<(u64, CompileJob)>, (owner, job): (u64, CompileJob)) {
+    match queue
+        .iter_mut()
+        .find(|(o, j)| *o == owner && j.block == job.block)
+    {
+        Some((_, old)) if old.generation <= job.generation => *old = job,
         Some(_) => {}
-        None => queue.push_back(job),
+        None => queue.push_back((owner, job)),
     }
 }
 
 fn run(
-    rx: Receiver<CompileJob>,
+    rx: Receiver<(u64, CompileJob)>,
     disk: Option<DiskCache>,
     compiles: Arc<AtomicUsize>,
     deliver: impl Fn(CompileResult),
@@ -160,7 +172,7 @@ fn run(
         while let Ok(job) = rx.try_recv() {
             enqueue(&mut queue, job);
         }
-        let Some(job) = queue.pop_front() else {
+        let Some((owner, job)) = queue.pop_front() else {
             continue;
         };
 
@@ -223,6 +235,7 @@ fn run(
             targets: raw.targets.clone(),
         });
         deliver(CompileResult {
+            owner,
             block: job.block,
             generation: job.generation,
             outcome,
@@ -323,18 +336,21 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// A newer job replaces a queued one of the same owner and block; the
+    /// same block id of another owner (another editor) is another job.
     #[test]
     fn enqueue_replaces_superseded_jobs() {
         let mut q = VecDeque::new();
-        enqueue(&mut q, job(NodeId(1), 1, "a"));
-        enqueue(&mut q, job(NodeId(2), 1, "b"));
-        enqueue(&mut q, job(NodeId(1), 3, "c"));
-        enqueue(&mut q, job(NodeId(1), 2, "stale"));
+        enqueue(&mut q, (0, job(NodeId(1), 1, "a")));
+        enqueue(&mut q, (0, job(NodeId(2), 1, "b")));
+        enqueue(&mut q, (7, job(NodeId(1), 1, "other")));
+        enqueue(&mut q, (0, job(NodeId(1), 3, "c")));
+        enqueue(&mut q, (0, job(NodeId(1), 2, "stale")));
         let got: Vec<_> = q
             .iter()
-            .map(|j| (j.block.0, j.generation, j.snippet.as_str()))
+            .map(|(o, j)| (*o, j.block.0, j.generation, j.snippet.as_str()))
             .collect();
-        assert_eq!(got, [(1, 3, "c"), (2, 1, "b")]);
+        assert_eq!(got, [(0, 1, 3, "c"), (0, 2, 1, "b"), (7, 1, 1, "other")]);
     }
 
     #[test]

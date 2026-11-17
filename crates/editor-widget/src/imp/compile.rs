@@ -80,7 +80,7 @@ impl SemEditor {
             // The block changed; its stops follow the new tree right away
             // (against the old layout until the new one arrives).
             view.stops = OnceCell::new();
-            self.worker.get().expect("worker").submit(CompileJob {
+            self.submit(CompileJob {
                 block: block.id,
                 generation,
                 around: job.around,
@@ -181,7 +181,7 @@ impl SemEditor {
         self.generation.set(generation);
         preview.generation = generation;
         preview.submitted = Some(key);
-        self.worker.get().expect("worker").submit(CompileJob {
+        self.submit(CompileJob {
             block: PREVIEW_ID,
             generation,
             around,
@@ -229,7 +229,7 @@ impl SemEditor {
             entry.submitted = Some(key);
             generation
         };
-        self.worker.get().expect("worker").submit(CompileJob {
+        self.submit(CompileJob {
             block: NodeId(id.0 | OUTLINE_BIT),
             generation,
             around,
@@ -312,7 +312,7 @@ impl SemEditor {
         self.snippets.borrow_mut().insert(id, done);
         let generation = self.generation.get() + 1;
         self.generation.set(generation);
-        self.worker.get().expect("worker").submit(CompileJob {
+        self.submit(CompileJob {
             block: NodeId(id),
             generation,
             around: Around {
