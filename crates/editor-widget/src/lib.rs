@@ -395,6 +395,19 @@ impl SemEditor {
         })
     }
 
+    /// Called with the phrase when a link to a place of the paper
+    /// (`paper:` and the phrase) is clicked in a read-only text.
+    pub fn connect_follow_place<F: Fn(&Self, &str) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
+        self.connect_local("follow-place", false, move |args| {
+            let obj = args[0].get::<Self>().expect("SemEditor");
+            f(&obj, &args[1].get::<String>().expect("phrase"));
+            None
+        })
+    }
+
     /// Go to the block labelled `label`, as Ctrl+click on a reference to it
     /// does (Alt+← comes back). `false` if there is none.
     pub fn follow_ref(&self, label: &str) -> bool {

@@ -24,7 +24,15 @@ const ANSWER_ZOOM: f64 = 1.25;
 type Paper = Box<dyn Fn() -> String>;
 /// The paper's header and labels, for an answer to be shown with.
 type Context = Box<dyn Fn() -> (String, Vec<Outside>)>;
-type Follow = Box<dyn Fn(&str)>;
+type Follow = Box<dyn Fn(Place)>;
+
+/// A place of the paper an answer points at.
+pub enum Place {
+    /// A reference to its label (`@label`).
+    Label(String),
+    /// A link to a phrase copied from it (`#link("paper:…")[…]`).
+    Phrase(String),
+}
 
 pub struct ChatPane {
     pub widget: gtk::Box,
@@ -48,7 +56,8 @@ pub struct ChatPane {
     /// The paper's Typst, asked for on every question.
     paper: RefCell<Option<Paper>>,
     context: RefCell<Option<Context>>,
-    /// Go to the paper's label (a click on a reference in an answer).
+    /// Go to a place of the paper (a click on a reference or a link in an
+    /// answer).
     follow: Rc<RefCell<Option<Follow>>>,
 }
 
@@ -206,8 +215,8 @@ impl ChatPane {
         *self.context.borrow_mut() = Some(Box::new(f));
     }
 
-    /// Call `f` with the paper's label a click in an answer goes to.
-    pub fn connect_follow(&self, f: impl Fn(&str) + 'static) {
+    /// Call `f` with the place of the paper a click in an answer goes to.
+    pub fn connect_follow(&self, f: impl Fn(Place) + 'static) {
         *self.follow.borrow_mut() = Some(Box::new(f));
     }
 
@@ -451,7 +460,13 @@ impl ChatPane {
         let follow = self.follow.clone();
         editor.connect_follow_outside(move |_, label| {
             if let Some(f) = follow.borrow().as_ref() {
-                f(label);
+                f(Place::Label(label.to_string()));
+            }
+        });
+        let follow = self.follow.clone();
+        editor.connect_follow_place(move |_, phrase| {
+            if let Some(f) = follow.borrow().as_ref() {
+                f(Place::Phrase(phrase.to_string()));
             }
         });
         self.answers.borrow_mut().push(editor.clone());

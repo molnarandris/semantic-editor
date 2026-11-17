@@ -165,6 +165,12 @@ impl SemEditor {
                     // To the paper's label, from a remark's text (Ctrl+click)
                     // or a chat answer (read-only: a click).
                     obj.emit_by_name::<()>("follow-outside", &[&label]);
+                } else if imp.editor.borrow().read_only()
+                    && let Some(url) = imp.link_at(x, y)
+                    && let Some(phrase) = url.strip_prefix("paper:")
+                {
+                    // To a place of the paper, from a chat answer.
+                    obj.emit_by_name::<()>("follow-place", &[&phrase]);
                 } else if ctrl && let Some(url) = imp.link_at(x, y) {
                     // Ctrl+click on a web link: open it.
                     imp.open_link(&url);

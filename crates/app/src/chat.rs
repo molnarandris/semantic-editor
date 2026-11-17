@@ -42,9 +42,27 @@ never put it in a code block or backticks. Refer to a part of the paper that \
 has a label (written <name> after it in the source) with @name, e.g. @main-thm: \
 it is shown exactly as a reference in the paper is (e.g. Theorem 2, with the \
 paper's number) and links there, so do not write a word such as Theorem before \
-it. Refer to unlabelled parts by name \
-(the section on X, the second lemma). Never write <labels> of your own. You \
-cannot change the paper or any file.";
+it. When you mention a part without a label (a section, a theorem, a \
+paragraph), name it and link the name to a phrase copied exactly from that \
+place in the source: #link(\"paper:Let X be a compact\")[the second lemma]. \
+The phrase is a few words from one paragraph or heading, without quotation \
+marks or backslashes, found only there; the author clicks it to go there. \
+Never write <labels> of your own. You cannot change the paper or any file.";
+
+/// The first of `blocks` (an id and its Typst) whose Typst holds `phrase`,
+/// spaces and line breaks counting as one space (a link of an answer to a
+/// place of the paper).
+pub fn find_phrase<T>(blocks: impl IntoIterator<Item = (T, String)>, phrase: &str) -> Option<T> {
+    let words = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let phrase = words(phrase);
+    if phrase.is_empty() {
+        return None;
+    }
+    blocks
+        .into_iter()
+        .find(|(_, source)| words(source).contains(&phrase))
+        .map(|(id, _)| id)
+}
 
 /// Where a quoted selection is: the section heading before its block (if
 /// any) and the whole top-level block's Typst, which Claude can find in
@@ -219,5 +237,41 @@ mod tests {
         assert_eq!(local[3], "claude");
         let tools = local.iter().position(|a| a == "--tools").unwrap();
         assert_eq!(local[tools + 1], "", "no tools");
+    }
+
+    /// A phrase is found in the first block holding it, whatever its line
+    /// breaks; one in no block, or an empty one, is not.
+    #[test]
+    fn phrase_finds_its_block() {
+        let blocks = || {
+            [
+                (1, "= Introduction".to_string()),
+                (2, "Let $X$ be\n  compact. Then".to_string()),
+                (3, "Let $X$ be compact again.".to_string()),
+            ]
+        };
+        assert_eq!(find_phrase(blocks(), "Let $X$ be compact"), Some(2));
+        assert_eq!(find_phrase(blocks(), "compact again"), Some(3));
+        assert_eq!(find_phrase(blocks(), "Let Y"), None);
+        assert_eq!(find_phrase(blocks(), "  "), None);
+    }
+
+    /// An answer's link to a place, as the chat shows it (imported), is a
+    /// link from its words to `paper:` and the phrase.
+    #[test]
+    fn answer_link_to_place() {
+        let doc = typst_bridge::import_typ(r#"See #link("paper:Let X be")[the lemma]."#);
+        fn ids(v: &[model::InlineNode], out: &mut Vec<model::NodeId>) {
+            for inline in v {
+                out.push(inline.id);
+                if let Some(body) = inline.body() {
+                    ids(body, out);
+                }
+            }
+        }
+        let mut all = vec![];
+        ids(doc.blocks[0].kind.text_inlines().unwrap(), &mut all);
+        let urls: Vec<_> = all.iter().filter_map(|&id| doc.link_url(id)).collect();
+        assert!(urls.iter().any(|u| u == "paper:Let X be"), "{urls:?}");
     }
 }

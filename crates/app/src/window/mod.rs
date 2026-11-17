@@ -272,11 +272,9 @@ impl Window {
             None => Default::default(),
         });
         let weak = Rc::downgrade(self);
-        self.chat.connect_follow(move |label| {
-            if let Some(this) = weak.upgrade()
-                && this.editor.follow_ref(label)
-            {
-                this.editor.grab_focus();
+        self.chat.connect_follow(move |place| {
+            if let Some(this) = weak.upgrade() {
+                this.go_to_place(place);
             }
         });
         let weak = Rc::downgrade(self);
@@ -493,6 +491,38 @@ impl Window {
         self.right_pages.set_visible_child_name("remarks");
         // A conversation is not kept: a new document starts without one.
         self.chat.clear();
+    }
+
+    /// Go to the place of the paper a chat answer points at: a label's
+    /// block, or the first block whose Typst (as Claude read it) holds the
+    /// phrase, as the outline goes to a heading.
+    fn go_to_place(&self, place: chat::Place) {
+        let found = match &place {
+            chat::Place::Label(label) => self.editor.follow_ref(label),
+            chat::Place::Phrase(phrase) => {
+                let blocks: Vec<_> = self
+                    .editor
+                    .document()
+                    .blocks
+                    .iter()
+                    .map(|b| {
+                        let (typst, _) =
+                            typst_bridge::serialize_block_styled(b, typst_bridge::Style::Readable);
+                        (b.id, typst)
+                    })
+                    .collect();
+                let id = crate::chat::find_phrase(blocks, phrase);
+                if let Some(id) = id {
+                    self.editor.go_to_block(id);
+                }
+                id.is_some()
+            }
+        };
+        if found {
+            self.editor.grab_focus();
+        } else {
+            self.toast("Could not find that place in the paper");
+        }
     }
 
     /// The selection as the chat quotes it: its Typst, and where it is

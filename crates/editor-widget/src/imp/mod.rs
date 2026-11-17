@@ -318,6 +318,12 @@ impl ObjectImpl for SemEditor {
                 Signal::builder("follow-outside")
                     .param_types([String::static_type()])
                     .build(),
+                // A click, in a read-only text (a chat answer), on a link to
+                // a place of the paper (`paper:` and a phrase copied from
+                // it). Param: the phrase.
+                Signal::builder("follow-place")
+                    .param_types([String::static_type()])
+                    .build(),
                 // A heading's outline entry was rendered. Param: its id.
                 Signal::builder("outline-rendered")
                     .param_types([u64::static_type()])

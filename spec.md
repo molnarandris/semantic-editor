@@ -163,7 +163,9 @@ structure as soon as it is unambiguous.
   as Typst), a click in the text edits it, no author, date or replies; an empty one
   goes when left) and Chat with Claude (through the user's own Claude Code, `claude -p`;
   answers typeset by Typst; `@label` in an answer shows as a reference in the paper
-  does, with its number, and a click goes there; not saved; a question is about the
+  does, with its number, and a click goes there; a part without a label is linked
+  by a phrase copied from it, and a click goes to the block holding it (as the
+  outline goes to a heading); not saved; a question is about the
   selection the user
   made, not the one a remark's card or a new remark leaves in the paper).
 - Problems: Next Problem visits blocks that fail, broken references and duplicate

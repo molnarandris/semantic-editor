@@ -29,6 +29,10 @@ Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
   labelled parts; the answer shows it as the paper does, with its number, and a
   click goes there. Answers are now shown by a read-only editor (selectable,
   re-flowing with the sidebar).
+- Chat: "un-labeled sections/theorems are not clickable … I just want to quickly
+  check the place what AI mentions": Claude links a mention of an unlabelled part
+  to a phrase copied from it; a click goes to the paragraph holding the phrase
+  (a toast if it is not found).
 - The chat no longer quotes the selection a remark leaves in the paper ("my last
   remark's highlight is passed to the chat").
 
