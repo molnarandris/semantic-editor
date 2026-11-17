@@ -4,6 +4,11 @@ Where the work stands. Delete items when done (git keeps the history). Bugs belo
 in GitHub issues; the ones below were found before that and are to be moved there.
 Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
 
+## Waiting for the user's test
+
+- Remarks across blocks: a selection over a display formula remarks all of it,
+  from where it starts to where it ends (shaded across the formula).
+
 ## Next
 
 From the user's list of 2026-11-15, one group at a time:
@@ -13,8 +18,7 @@ From the user's list of 2026-11-15, one group at a time:
    quotation of the remarked text, for a word or phrase its line plus one above and
    one below (a whole paragraph for a paragraph's remark is ok for now); the remark
    text edited like the paper, by the same editor widget for one paragraph; no
-   prominent author or date, no replies. A selection across a display formula must
-   remark all of it, not only the text before.
+   author or date at all (user 2026-11-17), no replies.
 2. Chat: clickable references to the paper's parts; Claude can add remarks.
 3. Sidebar buttons look bad (postponed by the user, not important).
 

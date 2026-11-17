@@ -2450,6 +2450,53 @@ fn remarks_follow_edits() {
     e.doc().check_invariants().unwrap();
 }
 
+/// A selection across a display formula remarks all of it: from where it
+/// starts in the paragraph before to where it ends in the one after; the
+/// caret in the formula is in it; the ends follow edits.
+#[test]
+fn remarks_across_blocks() {
+    let mut d = Document::empty();
+    let (t1, t2) = (d.text("Before it."), d.text("After it."));
+    let p1 = d.paragraph(vec![t1]);
+    let x = d.ident("x");
+    let f = d.display(vec![x]);
+    let p2 = d.paragraph(vec![t2]);
+    let (b1, bf, b2) = (p1.id, f.id, p2.id);
+    d.blocks = vec![p1, f, p2];
+    let mut e = Editor::new(d);
+    let at = |block, offset| CursorPath {
+        block,
+        path: vec![Step::Index(0)],
+        offset,
+    };
+    // Selected backwards: from "After" back to "it." before the formula.
+    e.set_caret(at(b1, 7));
+    e.set_anchor(at(b2, 5));
+    e.add_remark("Both.", "A", "2026-11-17").unwrap();
+    let Anchor::Range {
+        block, end_block, ..
+    } = e.doc().remarks[0].anchor
+    else {
+        panic!("a range: {:?}", e.doc().remarks[0].anchor);
+    };
+    assert_eq!((block, end_block), (b1, b2));
+    let range = |e: &Editor| {
+        let (a, b) = e.doc().remark_range(&e.doc().remarks[0]).unwrap();
+        (a.block, a.offset, b.block, b.offset)
+    };
+    assert_eq!(range(&e), (b1, 7, b2, 5));
+    e.set_caret(e.doc().start_of(e.doc().block(bf).unwrap()));
+    assert_eq!(e.remarks_at_caret(), vec![1], "the formula is in it");
+    e.set_caret(at(b2, 7));
+    assert!(e.remarks_at_caret().is_empty(), "after its end");
+    e.set_caret(at(b1, 0));
+    e.insert_text("So ");
+    e.set_caret(at(b2, 0));
+    e.insert_text("And ");
+    assert_eq!(range(&e), (b1, 10, b2, 9));
+    e.doc().check_invariants().unwrap();
+}
+
 /// Without a selection a remark is on the top-level block the caret is in:
 /// a whole theorem, not its paragraph.
 #[test]

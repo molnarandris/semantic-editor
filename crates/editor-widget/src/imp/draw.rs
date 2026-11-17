@@ -273,7 +273,8 @@ impl SemEditor {
     }
 
     /// The rectangles, line by line, covering every caret position from
-    /// `first` to `last` (in one block), in widget coordinates.
+    /// `first` to `last` (in one block, or from one to a later one), in
+    /// widget coordinates.
     fn range_rects(
         &self,
         first: &CursorPath,
@@ -281,20 +282,48 @@ impl SemEditor {
         x0: f64,
         scroll: f64,
     ) -> Vec<graphene::Rect> {
-        let zoom = self.zoom.get();
-        let Some(index) = self.editor.borrow().doc().top_index(first.block) else {
-            return vec![];
+        let (i, j) = {
+            let ed = self.editor.borrow();
+            let doc = ed.doc();
+            match (doc.top_index(first.block), doc.top_index(last.block)) {
+                (Some(i), Some(j)) => (i, j),
+                _ => return vec![],
+            }
         };
+        (i..=j)
+            .flat_map(|index| {
+                let from = (index == i).then_some(first);
+                let to = (index == j).then_some(last);
+                self.block_range_rects(index, from, to, x0, scroll)
+            })
+            .collect()
+    }
+
+    /// [`Self::range_rects`] in top-level block `index`: from `first` (or
+    /// its start) to `last` (or its end).
+    fn block_range_rects(
+        &self,
+        index: usize,
+        first: Option<&CursorPath>,
+        last: Option<&CursorPath>,
+        x0: f64,
+        scroll: f64,
+    ) -> Vec<graphene::Rect> {
+        let zoom = self.zoom.get();
         let Some(&top) = self.block_tops().get(index) else {
             return vec![];
         };
         let stops = self.block_stops(index);
-        let (Some(a), Some(b)) = (
-            stops.iter().position(|s| s.cursor == *first),
-            stops.iter().position(|s| s.cursor == *last),
-        ) else {
+        let find = |c: Option<&CursorPath>, default: usize| match c {
+            Some(c) => stops.iter().position(|s| s.cursor == *c),
+            None => Some(default),
+        };
+        let (Some(a), Some(b)) = (find(first, 0), find(last, stops.len().saturating_sub(1))) else {
             return vec![];
         };
+        if stops.is_empty() {
+            return vec![];
+        }
         let inside: Vec<Stop> = stops[a.min(b)..=a.max(b)]
             .iter()
             .filter(|s| !s.tab && !s.label)

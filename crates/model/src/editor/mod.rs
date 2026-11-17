@@ -839,17 +839,20 @@ impl Editor {
         }
     }
 
-    /// Add a remark about the selection: a range in one block; selected
-    /// blocks: the first; no selection: the top-level block the caret is in
-    /// (the whole theorem). Not part of undo. Returns its id.
+    /// Add a remark about the selection: a range from its first to its last
+    /// position (across blocks too, as over a display formula); selected
+    /// blocks without such ends: the first; no selection: the top-level
+    /// block the caret is in (the whole theorem). Not part of undo. Returns
+    /// its id.
     pub fn add_remark(&mut self, text: &str, author: &str, date: &str) -> Option<u64> {
         if self.read_only {
             return None;
         }
-        let range = self.selection_bounds().and_then(|(first, last)| {
+        let range = self.remark_ends().and_then(|(first, last)| {
             Some(Anchor::Range {
                 block: first.block,
                 start: self.doc.point_at(&first)?,
+                end_block: last.block,
                 end: self.doc.point_at(&last)?,
             })
         });
@@ -864,6 +867,21 @@ impl Editor {
             }
         };
         Some(self.doc.add_remark(anchor, text, author, date))
+    }
+
+    /// The ends of the selection for a remark: within a block, as drawn;
+    /// across blocks, the anchor and the caret in document order.
+    fn remark_ends(&self) -> Option<(CursorPath, CursorPath)> {
+        let Some(SelRange::Blocks { .. }) = self.selection() else {
+            return self.selection_bounds();
+        };
+        let (a, b) = (self.anchor.clone()?, self.caret.clone());
+        let order = |c| self.doc.doc_order(c);
+        Some(if order(&a)? <= order(&b)? {
+            (a, b)
+        } else {
+            (b, a)
+        })
     }
 
     /// The remark with id `id`, to change (not in a read-only document).
@@ -910,21 +928,16 @@ impl Editor {
     /// on a block holding the caret.
     pub fn remarks_at_caret(&self) -> Vec<u64> {
         let doc = &self.doc;
-        let Some(top) = doc.top_index(self.caret.block) else {
+        let Some(caret) = doc.doc_order(&self.caret) else {
             return vec![];
         };
-        let mut positions = None;
         let mut found = vec![];
         for remark in doc.remarks.iter().filter(|r| !r.resolved) {
             let inside = match doc.remark_range(remark) {
-                Some((a, b)) => {
-                    let ps = positions.get_or_insert_with(|| doc.positions(&doc.blocks[top]));
-                    let at = |c: &CursorPath| ps.iter().position(|p| p == c);
-                    match (at(&a), at(&b), at(&self.caret)) {
-                        (Some(a), Some(b), Some(c)) => (a.min(b)..=a.max(b)).contains(&c),
-                        _ => false,
-                    }
-                }
+                Some((a, b)) => match (doc.doc_order(&a), doc.doc_order(&b)) {
+                    (Some(a), Some(b)) => (a.min(b)..=a.max(b)).contains(&caret),
+                    _ => false,
+                },
                 None => doc
                     .block(remark.anchor.block())
                     .is_some_and(|b| b.contains(self.caret.block)),

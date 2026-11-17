@@ -27,14 +27,17 @@ const REMARKS: &str = "remarks.json";
 const CHAT: &str = "chat.json";
 
 /// A remark in `remarks.json`: on block `block`, or on the range between
-/// two caret positions in it (paths from the block; the inner nodes' ids
-/// are not saved).
+/// two caret positions, `start` in it and `end` in `end_block` (if given,
+/// else in it too; paths from the block; the inner nodes' ids are not
+/// saved).
 #[derive(Serialize, Deserialize)]
 struct RemarkFile {
     id: u64,
     block: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     start: Option<PointFile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    end_block: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     end: Option<PointFile>,
     text: String,
@@ -73,14 +76,19 @@ pub fn remarks_to_json(doc: &Document) -> Option<String> {
         .iter()
         .map(|r| {
             let range = doc.remark_range(r);
-            let (start, end) = match range {
-                Some((a, b)) => (Some(point(a)), Some(point(b))),
-                None => (None, None),
+            let block = r.anchor.block().0;
+            let (start, end_block, end) = match range {
+                Some((a, b)) => {
+                    let end_block = (b.block.0 != block).then_some(b.block.0);
+                    (Some(point(a)), end_block, Some(point(b)))
+                }
+                None => (None, None, None),
             };
             RemarkFile {
                 id: r.id,
-                block: r.anchor.block().0,
+                block,
                 start,
+                end_block,
                 end,
                 text: r.text.clone(),
                 author: r.author.clone(),
@@ -111,7 +119,8 @@ pub fn remarks_from_json(doc: &mut Document, text: &str) -> Result<(), String> {
     for r in remarks {
         let block = model::NodeId(r.block);
         doc.reserve_id(block);
-        let point = |p: &PointFile| {
+        let end_block = r.end_block.map_or(block, model::NodeId);
+        let point = |block, p: &PointFile| {
             doc.point_at(&model::CursorPath {
                 block,
                 path: p.path.clone(),
@@ -119,11 +128,16 @@ pub fn remarks_from_json(doc: &mut Document, text: &str) -> Result<(), String> {
             })
         };
         let range = match (&r.start, &r.end) {
-            (Some(a), Some(b)) => point(a).zip(point(b)),
+            (Some(a), Some(b)) => point(block, a).zip(point(end_block, b)),
             _ => None,
         };
         let anchor = match range {
-            Some((start, end)) => model::Anchor::Range { block, start, end },
+            Some((start, end)) => model::Anchor::Range {
+                block,
+                start,
+                end_block,
+                end,
+            },
             None => model::Anchor::Block(block),
         };
         doc.remarks.push(model::Remark {
@@ -558,6 +572,37 @@ mod tests {
         }
     }
 
+    /// A remark from one paragraph to another keeps both ends.
+    #[test]
+    fn remarks_across_blocks_round_trip() {
+        let mut doc = Document::empty();
+        let (t1, t2) = (doc.text("Before."), doc.text("After."));
+        let p1 = doc.paragraph(vec![t1]);
+        let x = doc.ident("x");
+        let f = doc.display(vec![x]);
+        let p2 = doc.paragraph(vec![t2]);
+        let (b1, b2) = (p1.id, p2.id);
+        doc.blocks = vec![p1, f, p2];
+        let point = |doc: &Document, block, offset| {
+            doc.point_at(&model::CursorPath {
+                block,
+                path: vec![model::Step::Index(0)],
+                offset,
+            })
+            .unwrap()
+        };
+        let anchor = model::Anchor::Range {
+            block: b1,
+            start: point(&doc, b1, 2),
+            end_block: b2,
+            end: point(&doc, b2, 3),
+        };
+        doc.add_remark(anchor, "Both.", "A", "2026-11-17");
+        let (back, _) = from_zip(&to_zip(&doc, None).unwrap()).unwrap();
+        let (a, b) = back.remark_range(&back.remarks[0]).unwrap();
+        assert_eq!((a.block, a.offset, b.block, b.offset), (b1, 2, b2, 3));
+    }
+
     #[test]
     fn bad_files_are_rejected() {
         assert!(from_json("{").is_err());
@@ -592,6 +637,7 @@ mod tests {
         let range = model::Anchor::Range {
             block: para,
             start,
+            end_block: para,
             end,
         };
         doc.add_remark(range, "Range.", "A", "2026-11-13");

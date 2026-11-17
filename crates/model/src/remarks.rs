@@ -36,10 +36,13 @@ pub struct Reply {
 pub enum Anchor {
     /// A whole block (a theorem, an equation, a paragraph).
     Block(NodeId),
-    /// A range inside `block`; both ends in its texts or math rows.
+    /// A range from a point in `block` to one in `end_block` (the same
+    /// block, or a later one: across a display formula), in their texts or
+    /// math rows.
     Range {
         block: NodeId,
         start: Point,
+        end_block: NodeId,
         end: Point,
     },
 }
@@ -107,21 +110,30 @@ impl Document {
             }
         }
         for i in 0..self.remarks.len() {
-            let Anchor::Range { block, start, end } = self.remarks[i].anchor else {
+            let Anchor::Range {
+                block,
+                start,
+                end_block,
+                end,
+            } = self.remarks[i].anchor
+            else {
                 continue;
             };
             let empty = start.node == end.node && start.offset >= end.offset;
+            let at_home = |b: NodeId, p: Point| {
+                self.block(b)
+                    .and_then(|node| self.point_cursor(node, p))
+                    .is_some_and(|c| c.block == b)
+            };
             let anchor = if empty {
                 Anchor::Block(block)
-            } else if !e.drops || self.range_in(block, start, end) {
+            } else if !e.drops || at_home(block, start) && at_home(end_block, end) {
                 continue;
-            } else if let Some(home) = self.blocks.iter().find_map(|b| {
-                let c = self.point_cursor(b, start)?;
-                self.range_in(c.block, start, end).then_some(c.block)
-            }) {
+            } else if let (Some(home), Some(end_home)) = (self.home(start), self.home(end)) {
                 Anchor::Range {
                     block: home,
                     start,
+                    end_block: end_home,
                     end,
                 }
             } else if self.block(block).is_some() {
@@ -134,13 +146,12 @@ impl Document {
         }
     }
 
-    /// Whether both ends are in block `block`.
-    fn range_in(&self, block: NodeId, start: Point, end: Point) -> bool {
-        self.block(block).is_some_and(|b| {
-            self.point_cursor(b, start)
-                .is_some_and(|c| c.block == block)
-                && self.point_cursor(b, end).is_some_and(|c| c.block == block)
-        })
+    /// The block `point` is in now, if it is still in the document.
+    fn home(&self, point: Point) -> Option<NodeId> {
+        self.blocks
+            .iter()
+            .find_map(|b| self.point_cursor(b, point))
+            .map(|c| c.block)
     }
 
     /// The text or row a caret position is in, as a [`Point`].
@@ -169,14 +180,33 @@ impl Document {
         })
     }
 
+    /// Where caret position `c` is in document order: its top-level
+    /// block's index and its index among that block's positions.
+    pub fn doc_order(&self, c: &CursorPath) -> Option<(usize, usize)> {
+        let top = self.top_index(c.block)?;
+        let at = self
+            .positions(&self.blocks[top])
+            .iter()
+            .position(|p| p == c)?;
+        Some((top, at))
+    }
+
     /// The caret positions a range remark spans, `None` for a whole block
     /// or a detached remark.
     pub fn remark_range(&self, remark: &Remark) -> Option<(CursorPath, CursorPath)> {
-        let Anchor::Range { block, start, end } = remark.anchor else {
+        let Anchor::Range {
+            block,
+            start,
+            end_block,
+            end,
+        } = remark.anchor
+        else {
             return None;
         };
-        let b = self.block(block)?;
-        Some((self.point_cursor(b, start)?, self.point_cursor(b, end)?))
+        Some((
+            self.point_cursor(self.block(block)?, start)?,
+            self.point_cursor(self.block(end_block)?, end)?,
+        ))
     }
 
     /// Add a remark; returns its id.
