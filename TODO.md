@@ -9,6 +9,10 @@ Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
 - Remark text edited in its card by the paper's editor (formulas, markup, the
   paper's own functions), kept as Typst; cards stay cream with dark text in a dark
   theme (the quotation is black, as on the paper).
+- A click in a card's text edits it (it needed a double click).
+- "I want to reference sections, equations etc of the original doc from within the
+  remark": `@` in a card offers the paper's labels and shows the paper's numbers;
+  Ctrl+click on one goes there in the paper.
 
 ## Next
 
