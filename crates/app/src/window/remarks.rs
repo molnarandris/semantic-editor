@@ -1,13 +1,19 @@
 //! The Remarks pane on the right: a card per remark in the order of the
 //! text, on old-paper yellow, the ones the caret is in selected. The text
-//! is edited right in the card. Clicking a card selects its text; Resolve
-//! on each card; resolved remarks below, dimmed, with Reopen and Delete.
+//! is edited right in the card, by an editor like the paper's (the
+//! paper's header in force), and kept as Typst. Clicking a card selects
+//! its text; Resolve on each card; resolved remarks below, dimmed, with
+//! Reopen and Delete.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
-use model::Remark;
+use editor_widget::SemEditor;
+use model::{Document, Fragment, Remark};
+
+/// The remark editors' zoom: about the size of the interface's text.
+const CARD_ZOOM: f64 = editor_widget::DEFAULT_ZOOM * 0.75;
 
 /// What a card asks the window to do.
 #[derive(Clone, Debug)]
@@ -40,6 +46,8 @@ pub struct RemarksPane {
     /// The remarks the cards show, to rebuild only on a change (a card's
     /// own edits are written here first, so they do not rebuild it).
     shown: Rc<RefCell<Vec<Shown>>>,
+    /// The paper's header, for the remarks' editors.
+    header: RefCell<String>,
     /// The cards, open ones first in list order.
     cards: RefCell<Vec<Card>>,
     read_only: Cell<bool>,
@@ -99,6 +107,7 @@ impl RemarksPane {
             resolved_title,
             empty,
             shown: Rc::default(),
+            header: RefCell::default(),
             cards: RefCell::default(),
             read_only: Cell::new(false),
             on_action,
@@ -120,10 +129,15 @@ impl RemarksPane {
         *self.shown.borrow_mut() = shown;
     }
 
-    /// Show `remarks` (in text order) and select the cards of `current`
-    /// (the remarks the caret is in), scrolled into view.
-    pub fn update(&self, remarks: Vec<Shown>, current: &[u64]) {
-        if *self.shown.borrow() != remarks {
+    /// Show `remarks` (in text order), written with the paper's `header` in
+    /// force, and select the cards of `current` (the remarks the caret is
+    /// in), scrolled into view.
+    pub fn update(&self, remarks: Vec<Shown>, current: &[u64], header: &str) {
+        let new_header = *self.header.borrow() != header;
+        if new_header {
+            *self.header.borrow_mut() = header.to_string();
+        }
+        if new_header || *self.shown.borrow() != remarks {
             self.rebuild(&remarks);
             *self.shown.borrow_mut() = remarks;
         }
@@ -233,14 +247,18 @@ impl RemarksPane {
             column.append(&dim("Its text was deleted."));
         }
         let editable = !self.read_only.get() && !r.resolved;
-        let text = gtk::TextView::builder()
-            .wrap_mode(gtk::WrapMode::WordChar)
-            .editable(editable)
-            .cursor_visible(editable)
-            .accepts_tab(false)
-            .css_classes(["remark-text"])
-            .build();
-        text.buffer().set_text(&r.text);
+        let text = SemEditor::new();
+        text.set_fit_content(true);
+        text.set_zoom(CARD_ZOOM);
+        text.set_hexpand(true);
+        let mut doc = typst_bridge::import_typ(&r.text);
+        if doc.blocks.is_empty() {
+            let p = doc.paragraph(vec![]);
+            doc.blocks.push(p);
+        }
+        doc.header = self.header.borrow().clone();
+        text.set_document(doc);
+        text.set_read_only(!editable);
         if editable {
             self.connect_text(&text, id);
         }
@@ -265,14 +283,19 @@ impl RemarksPane {
         (row, card)
     }
 
-    /// A card's text: every change goes to the remark; entering it shows
-    /// the remark's text in the paper; leaving it empty deletes the remark.
-    fn connect_text(&self, text: &gtk::TextView, id: u64) {
+    /// A card's text: every change goes to the remark (as Typst); entering
+    /// it shows the remark's text in the paper; leaving it empty deletes
+    /// the remark.
+    fn connect_text(&self, text: &SemEditor, id: u64) {
         let (shown, on_action) = (self.shown.clone(), self.on_action.clone());
-        text.buffer().connect_changed(move |buffer| {
-            let new = buffer
-                .text(&buffer.start_iter(), &buffer.end_iter(), false)
-                .to_string();
+        // What the editor holds as Typst: changed only by an edit.
+        let last = RefCell::new(source(&text.document()));
+        text.connect_caret_moved(move |text| {
+            let new = source(&text.document());
+            if *last.borrow() == new {
+                return;
+            }
+            *last.borrow_mut() = new.clone();
             if let Some(s) = shown.borrow_mut().iter_mut().find(|s| s.remark.id == id) {
                 s.remark.text = new.clone();
             }
@@ -290,12 +313,9 @@ impl RemarksPane {
         let on_action = self.on_action.clone();
         let view = text.downgrade();
         focus.connect_leave(move |_| {
-            let empty = view.upgrade().is_some_and(|v| {
-                let b = v.buffer();
-                b.text(&b.start_iter(), &b.end_iter(), false)
-                    .trim()
-                    .is_empty()
-            });
+            let empty = view
+                .upgrade()
+                .is_some_and(|v| source(&v.document()).trim().is_empty());
             if empty && let Some(f) = on_action.borrow().as_ref() {
                 f(RemarkAction::Delete(id));
             }
@@ -339,10 +359,15 @@ impl RemarksPane {
 struct Card {
     id: u64,
     resolved: bool,
-    text: gtk::TextView,
+    text: SemEditor,
     quote: gtk::Picture,
     /// What its quotation shows (see `refresh_quotes`).
     key: RefCell<Option<Vec<u64>>>,
+}
+
+/// A remark's text as Typst: its editor's blocks, without the header.
+fn source(doc: &Document) -> String {
+    typst_bridge::fragment_source(&Fragment::Blocks(doc.blocks.clone()))
 }
 
 /// The remark id a card stands for.
@@ -379,7 +404,6 @@ fn load_css() {
          .remark-card button { color: #2e2a22; }
          .remark-list > row:selected .remark-card { border-color: alpha(#c08a00, 0.9);
                         box-shadow: 0 0 0 1px alpha(#c08a00, 0.9); }
-         .remark-text, .remark-text text { background: none; color: #2e2a22; }
          .remark-quote { padding-bottom: 6px; margin-bottom: 2px;
                          border-bottom: 1px solid alpha(#9a7a20, 0.3); }",
     );
@@ -388,4 +412,24 @@ fn load_css() {
         &css,
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A remark's text read into its card's editor and written back is the
+    /// same (so showing a remark is not an edit), formulas and markup too.
+    #[test]
+    fn remark_text_round_trips() {
+        for text in [
+            "Is this the right word?",
+            "Check $A^i$ here, and *this*.",
+            "Two paragraphs.\n\nThe second one.",
+            "- a list\n- of two",
+        ] {
+            assert_eq!(source(&typst_bridge::import_typ(text)), text);
+        }
+        assert_eq!(source(&typst_bridge::import_typ("")), "");
+    }
 }

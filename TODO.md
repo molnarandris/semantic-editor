@@ -4,18 +4,18 @@ Where the work stands. Delete items when done (git keeps the history). Bugs belo
 in GitHub issues; the ones below were found before that and are to be moved there.
 Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
 
+## Waiting for the user's test
+
+- Remark text edited in its card by the paper's editor (formulas, markup, the
+  paper's own functions), kept as Typst; cards stay cream with dark text in a dark
+  theme (the quotation is black, as on the paper).
+
 ## Next
 
 From the user's list of 2026-11-15, one group at a time:
 
-1. Remarks rework (user decisions 2026-11-17): stay in the sidebar for now (maybe
-   later between paragraphs); cards on faint yellow (old paper); on top a read-only
-   quotation of the remarked text, for a word or phrase its line plus one above and
-   one below (a whole paragraph for a paragraph's remark is ok for now); the remark
-   text edited like the paper, by the same editor widget for one paragraph; no
-   author or date at all (user 2026-11-17), no replies.
-2. Chat: clickable references to the paper's parts; Claude can add remarks.
-3. Sidebar buttons look bad (postponed by the user, not important).
+1. Chat: clickable references to the paper's parts; Claude can add remarks.
+2. Sidebar buttons look bad (postponed by the user, not important).
 
 Then the planned features:
 
@@ -32,6 +32,7 @@ Then the planned features:
 
 ## Wishlist
 
+- Remark cards between the paragraphs instead of the sidebar (user, maybe later).
 - Branches (parallel versions), saving a copy without history.
 - Footnote texts listed at the end, the paragraph showing only the number.
 - Tables (2D arguments); `lr` around a selection; precise

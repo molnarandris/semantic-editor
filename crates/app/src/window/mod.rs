@@ -521,7 +521,9 @@ impl Window {
                 })
                 .collect()
         };
-        self.remarks.update(shown, &self.editor.remarks_at_caret());
+        let header = self.editor.header();
+        self.remarks
+            .update(shown, &self.editor.remarks_at_caret(), &header);
         self.refresh_quotes();
     }
 
