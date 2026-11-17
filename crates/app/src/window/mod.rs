@@ -291,6 +291,12 @@ impl Window {
             }
         });
         let weak = Rc::downgrade(self);
+        self.editor.connect_block_rendered(move |_| {
+            if let Some(this) = weak.upgrade() {
+                this.refresh_quotes();
+            }
+        });
+        let weak = Rc::downgrade(self);
         self.editor.connect_outline_rendered(move |editor, id| {
             if let Some(this) = weak.upgrade() {
                 this.outline.show_render(editor, id);
@@ -516,6 +522,15 @@ impl Window {
                 .collect()
         };
         self.remarks.update(shown, &self.editor.remarks_at_caret());
+        self.refresh_quotes();
+    }
+
+    /// The remark cards' quotations, after the paper or a remark changed.
+    fn refresh_quotes(&self) {
+        self.remarks.refresh_quotes(
+            |id| self.editor.remark_quote_key(id),
+            |id| self.editor.remark_quote(id),
+        );
     }
 
     /// Show the scratch files in the sidebar, with whether they are used.

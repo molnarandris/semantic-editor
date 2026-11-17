@@ -147,6 +147,11 @@ Learned the hard way (blurry text that Typesetter did not have):
   session persistence) through `flatpak-spawn --host`; `--bare` cannot use the
   subscription. Stateless: the paper and the conversation go on stdin each time.
 - **No backslash commands in math**: names resolve when the word ends, as in Typst.
+- **Remark quotations** are cut from the blocks' textures (`imp/quote.rs`), not
+  rendered again, so the lines are the paper's; a key of the blocks' render
+  generations and the cut tells the sidebar when to redo one. Screenshots under
+  Broadway fail while the remarks sidebar opens at startup (an AdwBin gets a garbage
+  width; not seen on Wayland).
 - **Matrix rows**: `MathKind::Call.rows` holds where each `;` row starts. Typst ends
   embedded code at a direct `;` and swallows it (`#sem-slot();`), so the serializer
   puts a space before `;` after a cell that may end in code (an empty cell too).

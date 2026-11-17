@@ -447,6 +447,7 @@ impl SemEditor {
         let obj = self.obj();
         obj.queue_resize();
         obj.queue_draw();
+        obj.emit_by_name::<()>("block-rendered", &[]);
         let caret_view = {
             let ed = self.editor.borrow();
             let doc = ed.doc();

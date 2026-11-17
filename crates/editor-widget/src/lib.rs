@@ -176,6 +176,19 @@ impl SemEditor {
         self.imp().select_remark(id);
     }
 
+    /// What remark `id`'s quotation depends on, to redo it only when
+    /// this changes (see [`Self::remark_quote`]).
+    pub fn remark_quote_key(&self, id: u64) -> Option<Vec<u64>> {
+        self.imp().remark_quote_key(id)
+    }
+
+    /// Remark `id`'s quotation for its card: the lines it covers with one
+    /// line above and below, as rendered in the paper (a whole block's
+    /// remark: the block), and its device pixels per pt.
+    pub fn remark_quote(&self, id: u64) -> Option<(gtk::gdk::Texture, f64)> {
+        self.imp().remark_quote(id)
+    }
+
     /// Change remark `id`'s text.
     pub fn set_remark_text(&self, id: u64, text: &str) {
         let imp = self.imp();
@@ -350,6 +363,14 @@ impl SemEditor {
     }
 
     /// Called after every command (caret, selection or document changed).
+    pub fn connect_block_rendered<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
+        self.connect_local("block-rendered", false, move |args| {
+            let obj = args[0].get::<Self>().expect("SemEditor");
+            f(&obj);
+            None
+        })
+    }
+
     pub fn connect_caret_moved<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
         self.connect_local("caret-moved", false, move |args| {
             let obj = args[0].get::<Self>().expect("SemEditor");

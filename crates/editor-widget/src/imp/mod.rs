@@ -5,6 +5,7 @@
 mod compile;
 mod draw;
 mod input;
+mod quote;
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
@@ -264,6 +265,8 @@ impl ObjectImpl for SemEditor {
                     .build(),
                 // The preview render (see `set_preview`) changed.
                 Signal::builder("preview-rendered").build(),
+                // A block's render arrived (remark quotations follow).
+                Signal::builder("block-rendered").build(),
                 // A heading's outline entry was rendered. Param: its id.
                 Signal::builder("outline-rendered")
                     .param_types([u64::static_type()])

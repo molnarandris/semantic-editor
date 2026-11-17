@@ -40,8 +40,8 @@ pub struct RemarksPane {
     /// The remarks the cards show, to rebuild only on a change (a card's
     /// own edits are written here first, so they do not rebuild it).
     shown: Rc<RefCell<Vec<Shown>>>,
-    /// The open cards' remark ids, in list order, with their text views.
-    open_cards: RefCell<Vec<(u64, gtk::TextView)>>,
+    /// The cards, open ones first in list order.
+    cards: RefCell<Vec<Card>>,
     read_only: Cell<bool>,
     on_action: Callback,
 }
@@ -99,7 +99,7 @@ impl RemarksPane {
             resolved_title,
             empty,
             shown: Rc::default(),
-            open_cards: RefCell::default(),
+            cards: RefCell::default(),
             read_only: Cell::new(false),
             on_action,
         };
@@ -127,9 +127,10 @@ impl RemarksPane {
             self.rebuild(&remarks);
             *self.shown.borrow_mut() = remarks;
         }
-        let cards = self.open_cards.borrow();
+        let cards = self.cards.borrow();
         let mut first = None;
-        for (i, (id, _)) in cards.iter().enumerate() {
+        let open = cards.iter().filter(|c| !c.resolved);
+        for (i, Card { id, .. }) in open.enumerate() {
             let Some(row) = self.open.row_at_index(i as i32) else {
                 continue;
             };
@@ -147,9 +148,28 @@ impl RemarksPane {
 
     /// Put the keyboard focus in remark `id`'s text (a new remark).
     pub fn edit(&self, id: u64) {
-        let cards = self.open_cards.borrow();
-        if let Some((_, text)) = cards.iter().find(|(i, _)| *i == id) {
-            text.grab_focus();
+        let cards = self.cards.borrow();
+        if let Some(card) = cards.iter().find(|c| c.id == id) {
+            card.text.grab_focus();
+        }
+    }
+
+    /// Show each card's quotation: `key` tells what it depends on, `quote`
+    /// makes it (only when the key changed: the paper or the range did).
+    pub fn refresh_quotes(
+        &self,
+        key: impl Fn(u64) -> Option<Vec<u64>>,
+        quote: impl Fn(u64) -> Option<(gtk::gdk::Texture, f64)>,
+    ) {
+        for card in self.cards.borrow().iter() {
+            let new = key(card.id);
+            if *card.key.borrow() == new {
+                continue;
+            }
+            let texture = new.as_ref().and_then(|_| quote(card.id));
+            card.quote.set_paintable(texture.as_ref().map(|(t, _)| t));
+            card.quote.set_visible(texture.is_some());
+            *card.key.borrow_mut() = new;
         }
     }
 
@@ -173,26 +193,27 @@ impl RemarksPane {
     fn rebuild(&self, remarks: &[Shown]) {
         self.open.remove_all();
         self.resolved.remove_all();
-        let mut open_cards = vec![];
-        let mut resolved_any = false;
-        for shown in remarks {
-            let (row, text) = self.card(shown);
-            if shown.remark.resolved {
-                self.resolved.append(&row);
-                resolved_any = true;
-            } else {
-                self.open.append(&row);
-                open_cards.push((shown.remark.id, text));
-            }
+        let mut cards = vec![];
+        for shown in remarks.iter().filter(|s| !s.remark.resolved) {
+            let (row, card) = self.card(shown);
+            self.open.append(&row);
+            cards.push(card);
         }
-        self.empty.set_visible(open_cards.is_empty());
+        self.empty.set_visible(cards.is_empty());
+        let resolved_any = remarks.iter().any(|s| s.remark.resolved);
+        for shown in remarks.iter().filter(|s| s.remark.resolved) {
+            let (row, card) = self.card(shown);
+            self.resolved.append(&row);
+            cards.push(card);
+        }
         self.resolved_title.set_visible(resolved_any);
         self.resolved.set_visible(resolved_any);
-        *self.open_cards.borrow_mut() = open_cards;
+        *self.cards.borrow_mut() = cards;
     }
 
-    /// The card of a remark: its text (edited in place), buttons.
-    fn card(&self, shown: &Shown) -> (gtk::ListBoxRow, gtk::TextView) {
+    /// The card of a remark: the quotation of what it is about (read-only,
+    /// shown once rendered), its text (edited in place), buttons.
+    fn card(&self, shown: &Shown) -> (gtk::ListBoxRow, Card) {
         let r = &shown.remark;
         let id = r.id;
         let column = gtk::Box::builder()
@@ -200,6 +221,14 @@ impl RemarksPane {
             .spacing(4)
             .css_classes(["remark-card"])
             .build();
+        let quote = gtk::Picture::builder()
+            .can_shrink(true)
+            .content_fit(gtk::ContentFit::ScaleDown)
+            .halign(gtk::Align::Start)
+            .visible(false)
+            .css_classes(["remark-quote"])
+            .build();
+        column.append(&quote);
         if shown.detached {
             column.append(&dim("Its text was deleted."));
         }
@@ -226,7 +255,14 @@ impl RemarksPane {
         if r.resolved {
             row.add_css_class("dim-label");
         }
-        (row, text)
+        let card = Card {
+            id,
+            resolved: r.resolved,
+            text,
+            quote,
+            key: RefCell::default(),
+        };
+        (row, card)
     }
 
     /// A card's text: every change goes to the remark; entering it shows
@@ -299,6 +335,16 @@ impl RemarksPane {
     }
 }
 
+/// A card's parts that change after it is built.
+struct Card {
+    id: u64,
+    resolved: bool,
+    text: gtk::TextView,
+    quote: gtk::Picture,
+    /// What its quotation shows (see `refresh_quotes`).
+    key: RefCell<Option<Vec<u64>>>,
+}
+
 /// The remark id a card stands for.
 fn row_id(row: &gtk::ListBoxRow) -> u64 {
     row.widget_name().parse().unwrap_or_default()
@@ -313,8 +359,9 @@ fn dim(text: &str) -> gtk::Label {
         .build()
 }
 
-/// Cards on old-paper yellow with dark text (in a dark theme too, like the
-/// paper); the cards the caret is in outlined.
+/// Cards on old-paper yellow: the theme's background tinted yellow (cream
+/// in a light theme, warm dark in a dark one, so the quotation rendered in
+/// the text colour reads in both); the cards the caret is in outlined.
 fn load_css() {
     thread_local!(static LOADED: Cell<bool> = const { Cell::new(false) });
     if LOADED.replace(true) {
@@ -327,12 +374,13 @@ fn load_css() {
     css.load_from_string(
         ".remark-list { background: none; }
          .remark-list > row { padding: 4px 8px; background: none; }
-         .remark-card { background: #f8f0d8; color: #2e2a22; border-radius: 6px;
-                        padding: 8px; border: 1px solid rgba(120, 100, 40, 0.25); }
-         .remark-list > row:selected .remark-card { border-color: rgba(190, 140, 0, 0.9);
-                        box-shadow: 0 0 0 1px rgba(190, 140, 0, 0.9); }
-         .remark-text, .remark-text text { background: none; color: #2e2a22; }
-         .remark-card button { color: #2e2a22; }",
+         .remark-card { background: mix(@window_bg_color, #e9c46a, 0.22); border-radius: 6px;
+                        padding: 8px; border: 1px solid alpha(#9a7a20, 0.3); }
+         .remark-list > row:selected .remark-card { border-color: alpha(#c08a00, 0.9);
+                        box-shadow: 0 0 0 1px alpha(#c08a00, 0.9); }
+         .remark-text, .remark-text text { background: none; }
+         .remark-quote { padding-bottom: 6px; margin-bottom: 2px;
+                         border-bottom: 1px solid alpha(#9a7a20, 0.3); }",
     );
     gtk::style_context_add_provider_for_display(
         &display,
