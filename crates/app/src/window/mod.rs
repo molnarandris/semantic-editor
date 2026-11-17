@@ -267,9 +267,16 @@ impl Window {
             None => String::new(),
         });
         let weak = Rc::downgrade(self);
-        self.chat.connect_render(move |markup, width, done| {
-            if let Some(this) = weak.upgrade() {
-                this.editor.render_snippet(markup, width, done);
+        self.chat.connect_context(move || match weak.upgrade() {
+            Some(this) => (this.editor.full_header(), this.editor.outside_labels()),
+            None => Default::default(),
+        });
+        let weak = Rc::downgrade(self);
+        self.chat.connect_follow(move |label| {
+            if let Some(this) = weak.upgrade()
+                && this.editor.follow_ref(label)
+            {
+                this.editor.grab_focus();
             }
         });
         let weak = Rc::downgrade(self);
@@ -545,6 +552,7 @@ impl Window {
             |id| self.editor.remark_quote(id),
         );
         self.remarks.refresh_labels(|| self.editor.outside_labels());
+        self.chat.refresh_labels(|| self.editor.outside_labels());
     }
 
     /// Show the scratch files in the sidebar, with whether they are used.

@@ -166,19 +166,11 @@ impl SemEditor {
         Some(typst_bridge::fragment_source(&fragment))
     }
 
-    /// Render Typst `markup` (a chat answer) `width_px` logical pixels wide,
-    /// with the document's definitions, in the text colour; `done` gets
-    /// the texture and its device pixels per logical pixel, or the errors.
-    pub fn render_snippet(
-        &self,
-        markup: &str,
-        width_px: f64,
-        done: impl FnOnce(Result<(gtk::gdk::Texture, f64), String>) + 'static,
-    ) {
-        let width_pt = width_px / imp::SNIPPET_PX_PER_PT;
-        let color = self.color();
-        self.imp()
-            .render_snippet(markup, width_pt, color, Box::new(done));
+    /// The header with every definition of the document in force: the
+    /// header, then the code blocks' definitions (for Typst written
+    /// outside the paper with its notation: a chat answer).
+    pub fn full_header(&self) -> String {
+        self.imp().snippet_header().to_string()
     }
 
     /// The open remarks the caret is in (see `Editor::remarks_at_caret`).

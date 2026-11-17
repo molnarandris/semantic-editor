@@ -25,6 +25,13 @@ Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
   short and lines above and below were included in the quote, I want the highlight
   to show up in the remark card as well").
 
+- Chat: "clickable references to the paper's parts": Claude writes `@label` for
+  labelled parts; the answer shows it as the paper does, with its number, and a
+  click goes there. Answers are now shown by a read-only editor (selectable,
+  re-flowing with the sidebar).
+- The chat no longer quotes the selection a remark leaves in the paper ("my last
+  remark's highlight is passed to the chat").
+
 ## Known limits
 
 - A card's quotation still shrinks in a wide window: it is as wide as the paper's
@@ -36,7 +43,7 @@ Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
 
 From the user's list of 2026-11-15, one group at a time:
 
-1. Chat: clickable references to the paper's parts; Claude can add remarks.
+1. Chat: Claude can add remarks (clickable references done, above).
 2. Sidebar buttons look bad (postponed by the user, not important).
 
 Then the planned features:

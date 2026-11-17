@@ -38,9 +38,13 @@ inline as $x^2$, display math as $ sum_(i=1)^n a_i $ with spaces inside the \
 dollars. Your answer is compiled with the paper's definitions, so its own \
 functions and notation work: write Typst meant for the paper (a proposed \
 change, an example, a #lemma[...]) directly as markup, so that it is typeset; \
-never put it in a code block or backticks. Refer to parts of the paper by name \
-and number (Theorem 2, Section 3), never with @ references or <labels>, which \
-do not exist in your answer. You cannot change the paper or any file.";
+never put it in a code block or backticks. Refer to a part of the paper that \
+has a label (written <name> after it in the source) with @name, e.g. @main-thm: \
+it is shown exactly as a reference in the paper is (e.g. Theorem 2, with the \
+paper's number) and links there, so do not write a word such as Theorem before \
+it. Refer to unlabelled parts by name \
+(the section on X, the second lemma). Never write <labels> of your own. You \
+cannot change the paper or any file.";
 
 /// Where a quoted selection is: the section heading before its block (if
 /// any) and the whole top-level block's Typst, which Claude can find in

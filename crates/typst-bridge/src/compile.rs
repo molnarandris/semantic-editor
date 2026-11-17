@@ -66,7 +66,7 @@ pub fn outline_entry_rule(color: &str) -> String {
     )
 }
 
-/// Typst code before a chat answer (`SemEditor::render_snippet`): 11pt
+/// Typst code before a chat answer (after the paper's header): 11pt
 /// text in `color` (Typst code, `rgb("#202020")`), not justified (the
 /// column is narrow), a display formula too wide for it scaled down.
 pub fn snippet_rule(color: &str) -> String {

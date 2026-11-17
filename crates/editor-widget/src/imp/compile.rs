@@ -323,7 +323,7 @@ impl SemEditor {
 
     /// The header snippets are rendered with: the last block's, which holds
     /// the code blocks' definitions too.
-    pub(super) fn snippet_header(&self) -> Arc<str> {
+    pub(crate) fn snippet_header(&self) -> Arc<str> {
         match self.views.borrow().last() {
             Some(view) => view.around.header.clone(),
             None => self.editor.borrow().doc().header.as_str().into(),

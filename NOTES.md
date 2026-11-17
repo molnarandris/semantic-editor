@@ -162,6 +162,12 @@ Learned the hard way (blurry text that Typesetter did not have):
   shrunk only when wider than the card. Screenshots under
   Broadway fail while the remarks sidebar opens at startup (an AdwBin gets a garbage
   width; not seen on Wayland).
+- **Chat answers are read-only fitted editors** (like a remark's text), not
+  pictures: references to the paper's labels come with it (`outside_labels`,
+  refreshed after renders while there are answers), a plain click follows one
+  (read-only editors only; cards need Ctrl), and they re-flow with the width. Their
+  header is `full_header` (the header plus the code blocks' definitions) and the
+  chat's text rule (`snippet_rule`) in the theme's text colour.
 - **No widget-tree changes inside a focus handler**: removing the widget that is
   losing the focus (an empty remark card deleted on leave) makes GTK loop for ever
   on `gtk_widget_get_parent` criticals (frozen window). Defer with

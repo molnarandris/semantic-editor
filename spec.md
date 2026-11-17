@@ -162,7 +162,9 @@ structure as soon as it is unambiguous.
   and environments, offered while typing and shown with the paper's numbers, Ctrl+click goes there; kept
   as Typst), a click in the text edits it, no author, date or replies; an empty one
   goes when left) and Chat with Claude (through the user's own Claude Code, `claude -p`;
-  answers typeset by Typst; not saved; a question is about the selection the user
+  answers typeset by Typst; `@label` in an answer shows as a reference in the paper
+  does, with its number, and a click goes there; not saved; a question is about the
+  selection the user
   made, not the one a remark's card or a new remark leaves in the paper).
 - Problems: Next Problem visits blocks that fail, broken references and duplicate
   labels.
