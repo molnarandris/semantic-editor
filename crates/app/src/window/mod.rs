@@ -533,6 +533,7 @@ impl Window {
             |id| self.editor.remark_quote_key(id),
             |id| self.editor.remark_quote(id),
         );
+        self.remarks.refresh_labels(|| self.editor.outside_labels());
     }
 
     /// Show the scratch files in the sidebar, with whether they are used.

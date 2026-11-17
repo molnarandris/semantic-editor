@@ -183,6 +183,9 @@ pub struct SemEditor {
     /// Typst code rendered (`jobs::full_citation`); None while rendering or
     /// if it failed.
     cite_tips: RefCell<HashMap<String, Option<gdk::Paintable>>>,
+    /// Labels of the paper that references in this text may point to (a
+    /// remark's text); see `set_outside`.
+    outside: RefCell<Vec<jobs::Outside>>,
     /// Who this editor is to the shared compile thread (see [`submit`]).
     owner: Cell<u64>,
     /// As tall as its content, no paper or margins (a remark's text in its

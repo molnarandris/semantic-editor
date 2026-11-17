@@ -157,6 +157,11 @@ Learned the hard way (blurry text that Typesetter did not have):
   generations and the cut tells the sidebar when to redo one. Screenshots under
   Broadway fail while the remarks sidebar opens at startup (an AdwBin gets a garbage
   width; not seen on Wayland).
+- **References from a remark to the paper**: a card's editor is a document of its
+  own, so the paper hands it its labels (`outside_labels`: unique, reported, with
+  stand-in element and number) and the card's jobs add the same `ref_stub` stand-ins
+  as for the paper's own blocks (`Sources.outside`). Refreshed with the quotations,
+  only while there are cards.
 - **Matrix rows**: `MathKind::Call.rows` holds where each `;` row starts. Typst ends
   embedded code at a direct `;` and swallows it (`#sem-slot();`), so the serializer
   puts a space before `;` after a cell that may end in code (an empty cell too).

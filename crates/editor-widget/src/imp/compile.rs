@@ -64,6 +64,7 @@ impl SemEditor {
                 jobs::Sources {
                     open: ed.open_code(),
                     failed: &failed,
+                    outside: &self.outside.borrow(),
                 },
             )
         };
@@ -94,6 +95,49 @@ impl SemEditor {
         }
         drop((ed, views));
         self.submit_preview();
+    }
+
+    /// The labels references elsewhere may point to (from a remark's text),
+    /// in document order, with their numbers as last rendered.
+    pub(crate) fn outside_labels(&self) -> Vec<jobs::Outside> {
+        let ed = self.editor.borrow();
+        let views = self.views.borrow();
+        let submitted: Vec<_> = views
+            .iter()
+            .map(|v| jobs::Submitted {
+                around: &v.around,
+                snippet: &v.snippet,
+                map: &v.map,
+                end: v.end.as_ref(),
+                start: v.start.as_ref(),
+                targets: &v.targets,
+            })
+            .collect();
+        let kinds: HashMap<&str, String> = ed
+            .doc()
+            .labels()
+            .into_iter()
+            .map(|(label, block)| (label, label_kind(&block.kind).to_string()))
+            .collect();
+        jobs::resolvable(&ed.doc().blocks, &submitted)
+            .into_iter()
+            .map(|(label, element, target)| jobs::Outside {
+                kind: kinds.get(label.as_str()).cloned().unwrap_or_default(),
+                label,
+                element,
+                target,
+            })
+            .collect()
+    }
+
+    /// Let references point to `outside` labels (the paper's, in a
+    /// remark's text); those to them render again when they change.
+    pub(crate) fn set_outside(&self, outside: Vec<jobs::Outside>) {
+        if *self.outside.borrow() == outside {
+            return;
+        }
+        *self.outside.borrow_mut() = outside;
+        self.submit_blocks(false);
     }
 
     /// Render `target` for a preview at `pixel_per_pt` (device pixels per
@@ -512,4 +556,15 @@ fn texture(raster: Arc<Raster>) -> gdk::Texture {
         stride,
     )
     .upcast()
+}
+
+/// What a block with a label is, as a reference completion says it:
+/// "section", "equation", an environment's name.
+pub(super) fn label_kind(kind: &Block) -> &str {
+    match kind {
+        Block::Heading { .. } => "section",
+        Block::DisplayMath(_) => "equation",
+        Block::Env { name, .. } => name.as_str(),
+        _ => "",
+    }
 }

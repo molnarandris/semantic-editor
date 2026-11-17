@@ -399,18 +399,24 @@ impl SemEditor {
             .into_iter()
             .filter(|(label, _)| label.contains(typed.as_str()))
             .map(|(label, block)| {
-                let kind = match &block.kind {
-                    Block::Heading { .. } => "section",
-                    Block::DisplayMath(_) => "equation",
-                    Block::Env { name, .. } => name.as_str(),
-                    _ => "",
-                };
+                let kind = compile::label_kind(&block.kind);
                 let desc = match numbers.get(label) {
                     Some(n) => format!("{kind} {n}"),
                     None => kind.to_string(),
                 };
                 (label.to_string(), desc)
             })
+            // The paper's labels, from a remark's text.
+            .chain(
+                self.outside
+                    .borrow()
+                    .iter()
+                    .filter(|o| o.label.contains(typed.as_str()))
+                    .map(|o| {
+                        let n: Vec<String> = o.target.value.iter().map(i64::to_string).collect();
+                        (o.label.clone(), format!("{} {}", o.kind, n.join(".")))
+                    }),
+            )
             // Then the bibliography's keys: citations.
             .chain(
                 ed.doc()

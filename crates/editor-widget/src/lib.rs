@@ -8,6 +8,7 @@ mod imp;
 mod jobs;
 
 pub use imp::DEFAULT_ZOOM;
+pub use jobs::Outside;
 
 /// What the source editor's preview shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -195,6 +196,19 @@ impl SemEditor {
     /// remark: the block), and its device pixels per pt.
     pub fn remark_quote(&self, id: u64) -> Option<(gtk::gdk::Texture, f64)> {
         self.imp().remark_quote(id)
+    }
+
+    /// The labels a remark's text may refer to, with their numbers as last
+    /// rendered (see [`Self::set_outside_labels`]).
+    pub fn outside_labels(&self) -> Vec<Outside> {
+        self.imp().outside_labels()
+    }
+
+    /// Let `@label` in this text refer to `labels` of another document
+    /// (the paper's, in a remark's text): offered while typing one, shown
+    /// with its number there.
+    pub fn set_outside_labels(&self, labels: Vec<Outside>) {
+        self.imp().set_outside(labels);
     }
 
     /// Change remark `id`'s text.

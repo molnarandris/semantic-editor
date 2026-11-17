@@ -345,6 +345,51 @@ pub struct Sources<'a> {
     pub open: Option<NodeId>,
     /// Code pieces and calls that failed to compile: on red.
     pub failed: &'a [NodeId],
+    /// Labels of another document that references may point to (the
+    /// paper's, in a remark's text).
+    pub outside: &'a [Outside],
+}
+
+/// A label of another document (the paper, for a remark's text):
+/// references to it render with its number there.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Outside {
+    pub label: String,
+    /// An invisible element like the one labelled ([`ref_stub`]).
+    pub element: String,
+    pub target: LabelTarget,
+    /// What it labels: "section", "equation", an environment's name.
+    pub kind: String,
+}
+
+/// The labels of `blocks` that references resolve to (defined once and
+/// reported by their block), with their stand-in elements and targets.
+pub fn resolvable(
+    blocks: &[BlockNode],
+    submitted: &[Submitted],
+) -> Vec<(String, String, LabelTarget)> {
+    let defined: Vec<Vec<(String, String)>> = blocks
+        .iter()
+        .map(|b| {
+            let mut v = vec![];
+            labels_in(b, &mut v);
+            v
+        })
+        .collect();
+    let targets = Targets::new(blocks, &defined, submitted, &[]);
+    defined
+        .iter()
+        .flatten()
+        .filter_map(|(label, _)| {
+            let (_, element, count) = targets.table.get(label.as_str())?;
+            let target = targets.reported.get(label.as_str())?;
+            let element = match *element {
+                "" => stand_in(target)?,
+                e => e.to_string(),
+            };
+            (*count == 1).then(|| (label.clone(), element, (*target).clone()))
+        })
+        .collect()
 }
 
 /// The source of node `id` that a compile error is blamed on, if it can
@@ -389,6 +434,8 @@ struct Targets<'a> {
     cites: Vec<Vec<String>>,
     /// Every key cited, in document order.
     all_cited: Vec<String>,
+    /// Labels of another document.
+    outside: &'a [Outside],
 }
 
 impl<'a> Targets<'a> {
@@ -396,6 +443,7 @@ impl<'a> Targets<'a> {
         blocks: &'a [BlockNode],
         defined: &'a [Vec<(String, String)>],
         submitted: &[Submitted<'a>],
+        outside: &'a [Outside],
     ) -> Self {
         let mut table: HashMap<&str, (usize, &str, usize)> = HashMap::new();
         for (index, labels) in defined.iter().enumerate() {
@@ -439,6 +487,7 @@ impl<'a> Targets<'a> {
             bibliography,
             cites,
             all_cited,
+            outside,
         }
     }
 
@@ -493,6 +542,11 @@ impl<'a> Targets<'a> {
                     e => Some(e.to_string()),
                 }
                 .map(|e| ref_stub(target, &e)),
+                (None, _) => self
+                    .outside
+                    .iter()
+                    .find(|o| o.label == *label)
+                    .map(|o| ref_stub(&o.target, &o.element)),
                 _ => None,
             };
             match stub {
@@ -562,7 +616,7 @@ pub fn stale_blocks_editing(
             v
         })
         .collect();
-    let targets = Targets::new(blocks, &defined, submitted);
+    let targets = Targets::new(blocks, &defined, submitted, sources.outside);
     // Cited in the blocks before the current one.
     let mut cited_before: Vec<String> = vec![];
     for (index, block) in blocks.iter().enumerate() {
@@ -1023,6 +1077,34 @@ mod tests {
             "a label on raw Typst gets a stand-in: {}",
             views[0].around.suffix
         );
+
+        // A remark's text refers to these labels: with their numbers here.
+        let outside: Vec<Outside> = resolvable(&d.blocks, &submitted(&views))
+            .into_iter()
+            .map(|(label, element, target)| Outside {
+                label,
+                element,
+                target,
+                kind: String::new(),
+            })
+            .collect();
+        let labels: Vec<&str> = outside.iter().map(|o| o.label.as_str()).collect();
+        assert_eq!(labels, ["sec:b", "fig", "eq:raw"]);
+        let mut remark = Document::empty();
+        let (see, r) = (remark.text("See "), remark.reference("sec:b"));
+        let para = remark.paragraph(vec![see, r]);
+        remark.blocks = vec![para];
+        let files = model::Files::default();
+        let sources = Sources {
+            outside: &outside,
+            ..Sources::default()
+        };
+        let jobs = stale_blocks_editing(&remark.blocks, header, &files, false, &[], None, sources);
+        let (src, _) = typst_bridge::block_document(&jobs[0].around, &jobs[0].snippet, 300.0);
+        let mut world = typst_bridge::BridgeWorld::new();
+        let out = typst_bridge::compile(&mut world, &src).unwrap_or_else(|e| panic!("{e:?}"));
+        let text = frame_text(&out.pages()[0].frame);
+        assert!(text.contains("Section\u{a0}2"), "{text:?}");
     }
 
     /// Missing labels, labels only on raw Typst, labels defined twice.
@@ -1572,21 +1654,24 @@ mod tests {
         let (src, _) = typst_bridge::block_document(&Around::default(), &code, 300.0);
         let mut world = typst_bridge::BridgeWorld::new();
         let out = typst_bridge::compile(&mut world, &src).unwrap_or_else(|e| panic!("{e:?}"));
-        fn walk(frame: &typst::layout::Frame, out: &mut String) {
-            for (_, item) in frame.items() {
-                match item {
-                    typst::layout::FrameItem::Group(g) => walk(&g.frame, out),
-                    typst::layout::FrameItem::Text(t) => out.push_str(&t.text),
-                    _ => {}
-                }
-            }
-        }
-        let mut text = String::new();
-        walk(&out.pages()[0].frame, &mut text);
+        let text = frame_text(&out.pages()[0].frame);
         assert!(text.starts_with("[2]"), "{text:?}");
         assert!(
             text.contains("First Paper") && !text.contains("Second"),
             "{text:?}"
         );
+    }
+
+    /// The text drawn in `frame`, in drawing order.
+    fn frame_text(frame: &typst::layout::Frame) -> String {
+        let mut out = String::new();
+        for (_, item) in frame.items() {
+            match item {
+                typst::layout::FrameItem::Group(g) => out.push_str(&frame_text(&g.frame)),
+                typst::layout::FrameItem::Text(t) => out.push_str(&t.text),
+                _ => {}
+            }
+        }
+        out
     }
 }

@@ -157,7 +157,9 @@ structure as soon as it is unambiguous.
   old-paper yellow, on top a read-only quotation cut from the paper's render (a
   range's lines with one line above and below; a block's remark the whole block),
   its text typed right in the card with the paper's editor (formulas, markup, the
-  paper's own functions; kept as Typst), no author, date or replies; an empty one
+  paper's own functions, `@label` references to the paper's sections, equations
+  and environments, offered while typing and shown with the paper's numbers; kept
+  as Typst), a click in the text edits it, no author, date or replies; an empty one
   goes when left) and Chat with Claude (through the user's own Claude Code, `claude -p`;
   answers typeset by Typst; not saved).
 - Problems: Next Problem visits blocks that fail, broken references and duplicate

@@ -9,7 +9,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
-use editor_widget::SemEditor;
+use editor_widget::{Outside, SemEditor};
 use model::{Document, Fragment, Remark};
 
 /// The remark editors' zoom: about the size of the interface's text.
@@ -48,6 +48,8 @@ pub struct RemarksPane {
     shown: Rc<RefCell<Vec<Shown>>>,
     /// The paper's header, for the remarks' editors.
     header: RefCell<String>,
+    /// The paper's labels, which `@label` in a card's text refers to.
+    labels: RefCell<Vec<Outside>>,
     /// The cards, open ones first in list order.
     cards: RefCell<Vec<Card>>,
     read_only: Cell<bool>,
@@ -117,6 +119,7 @@ impl RemarksPane {
             empty,
             shown: Rc::default(),
             header: RefCell::default(),
+            labels: RefCell::default(),
             cards: RefCell::default(),
             read_only: Cell::new(false),
             on_action,
@@ -175,6 +178,23 @@ impl RemarksPane {
         if let Some(card) = cards.iter().find(|c| c.id == id) {
             card.text.grab_focus();
         }
+    }
+
+    /// Let `@label` in the cards' texts refer to the paper's labels
+    /// (`labels`, asked for only when there are cards).
+    pub fn refresh_labels(&self, labels: impl FnOnce() -> Vec<Outside>) {
+        let cards = self.cards.borrow();
+        if cards.is_empty() {
+            return;
+        }
+        let labels = labels();
+        if *self.labels.borrow() == labels {
+            return;
+        }
+        for card in cards.iter() {
+            card.text.set_outside_labels(labels.clone());
+        }
+        *self.labels.borrow_mut() = labels;
     }
 
     /// Show each card's quotation: `key` tells what it depends on, `quote`
@@ -268,6 +288,7 @@ impl RemarksPane {
         doc.header = self.header.borrow().clone();
         text.set_document(doc);
         text.set_read_only(!editable);
+        text.set_outside_labels(self.labels.borrow().clone());
         if editable {
             self.connect_text(&text, id);
         }
