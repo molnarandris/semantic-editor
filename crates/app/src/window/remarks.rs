@@ -95,6 +95,15 @@ impl RemarksPane {
         let on_action: Callback = Rc::default();
         let action = on_action.clone();
         open.connect_row_activated(move |_, row| {
+            // A click in the card's text edits it: the press gave the text
+            // the focus, the release must not take it back to the paper.
+            let in_text = row
+                .root()
+                .and_then(|r| r.focus())
+                .is_some_and(|f| f.is::<SemEditor>() && f.is_ancestor(row));
+            if in_text {
+                return;
+            }
             if let Some(f) = action.borrow().as_ref() {
                 f(RemarkAction::Select(row_id(row)));
             }
