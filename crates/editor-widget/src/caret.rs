@@ -262,7 +262,14 @@ fn row_stops(
                 depth: depth + 1,
                 ..stop(block, p.clone(), offset, x, g.y, g.bottom(), baseline)
             };
-            out.extend(code_stops(node.id, n, l, r.unwrap_or(at_before), base, place));
+            out.extend(code_stops(
+                node.id,
+                n,
+                l,
+                r.unwrap_or(at_before),
+                base,
+                place,
+            ));
         }
         if let Some(opts) = node.kind.tab() {
             let mut p = path.clone();

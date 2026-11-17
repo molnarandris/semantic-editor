@@ -962,7 +962,8 @@ impl Writer {
                         starts.push(w.out.len());
                         let after_word = !words[i - 1].is_empty();
                         let inner = words[i..].iter().any(|w| !w.is_empty());
-                        w.out.push_str(if after_word && inner { " " } else { "#\" \";" });
+                        w.out
+                            .push_str(if after_word && inner { " " } else { "#\" \";" });
                     }
                     if !word.is_empty() {
                         w.text(node.id, word, false, false);
@@ -1861,7 +1862,10 @@ mod tests {
         let (a, b) = (layout(&edit), layout(&read));
         assert_eq!(a.len(), b.len(), "{edit}\n{read}");
         for (g, h) in a.iter().zip(&b) {
-            assert!(g.1 == h.1 && (g.0 - h.0).abs() < 0.01, "{g:?} vs {h:?}\n{edit}\n{read}");
+            assert!(
+                g.1 == h.1 && (g.0 - h.0).abs() < 0.01,
+                "{g:?} vs {h:?}\n{edit}\n{read}"
+            );
         }
     }
 
