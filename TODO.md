@@ -8,10 +8,13 @@ Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
 
 From the user's list of 2026-11-15, one group at a time:
 
-1. Remarks rework: a selection across a display formula remarks only the text before
-   it; remark text in the editor's syntax, rendered by Typst; no prominent author,
-   date or replies; the card shows the remarked text rendered; maybe in the margin
-   instead of a sidebar (undecided).
+1. Remarks rework (user decisions 2026-11-17): stay in the sidebar for now (maybe
+   later between paragraphs); cards on faint yellow (old paper); on top a read-only
+   quotation of the remarked text, for a word or phrase its line plus one above and
+   one below (a whole paragraph for a paragraph's remark is ok for now); the remark
+   text edited like the paper, by the same editor widget for one paragraph; no
+   prominent author or date, no replies. A selection across a display formula must
+   remark all of it, not only the text before.
 2. Chat: clickable references to the paper's parts; Claude can add remarks.
 3. Sidebar buttons look bad (postponed by the user, not important).
 
