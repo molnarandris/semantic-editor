@@ -6,6 +6,7 @@ Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
 
 ## Waiting for the user's test
 
+- Copy and paste of formulas with scripts on code or groups (`attach`).
 - Formulas: unknown words are code (red when failing), text only with `"`; code
   and text edited in place and outlined while the caret is in them.
 - Code pieces that fail show their source on red (inline pieces, inline calls,
@@ -23,9 +24,8 @@ From the user's list of 2026-11-15, one group at a time:
 
 1. Formulas (in progress, user decision 2026-11-16): text only with `"` (done:
    other words are code); text and code edited in place, typing anywhere in them
-   (done); outlined while the caret is in them, like calls (done). Then:
-   copy and paste of a formula holding `#bigbx` breaks subscripts; symbol
-   completion while typing a name, most used first; matrices ("almost there, not
+   (done); outlined while the caret is in them, like calls (done); copy and paste
+   of a formula holding `#bigbx` (done). Then: symbol completion while typing a name, most used first; matrices ("almost there, not
    much needed").
 2. Remarks rework: a selection across a display formula remarks only the text before
    it; remark text in the editor's syntax, rendered by Typst; no prominent author,
