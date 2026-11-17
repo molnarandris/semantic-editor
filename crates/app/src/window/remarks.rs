@@ -356,9 +356,18 @@ impl RemarksPane {
             let empty = view
                 .upgrade()
                 .is_some_and(|v| source(&v.document()).trim().is_empty());
-            if empty && let Some(f) = on_action.borrow().as_ref() {
-                f(RemarkAction::Delete(id));
+            if !empty {
+                return;
             }
+            // Not right now: deleting rebuilds the cards, and taking this
+            // editor out of the window while GTK is still moving the focus
+            // away from it makes GTK loop for ever (a frozen window).
+            let on_action = on_action.clone();
+            gtk::glib::idle_add_local_once(move || {
+                if let Some(f) = on_action.borrow().as_ref() {
+                    f(RemarkAction::Delete(id));
+                }
+            });
         });
         text.add_controller(focus);
     }
