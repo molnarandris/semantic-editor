@@ -185,6 +185,9 @@ pub struct SemEditor {
     cite_tips: RefCell<HashMap<String, Option<gdk::Paintable>>>,
     /// Who this editor is to the shared compile thread (see [`submit`]).
     owner: Cell<u64>,
+    /// As tall as its content, no paper or margins (a remark's text in its
+    /// card); see `set_fit_content`.
+    pub(crate) fit: Cell<bool>,
     generation: Cell<u64>,
     /// Page width and pixels per point the current renders were requested at.
     page_width_pt: Cell<f64>,
@@ -370,6 +373,10 @@ impl WidgetImpl for SemEditor {
     fn measure(&self, orientation: gtk::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
         let zoom = self.zoom.get();
         match orientation {
+            gtk::Orientation::Horizontal if self.fit.get() => {
+                let min = (MIN_PAGE_WIDTH_PT * zoom) as i32;
+                (min, min, -1, -1)
+            }
             gtk::Orientation::Horizontal => {
                 let min = MIN_PAGE_WIDTH_PT * zoom + 2.0 * SIDE_MARGIN_PX;
                 let nat = MAX_PAGE_WIDTH_PT * zoom + 2.0 * (SIDE_MARGIN_PX + PAPER_PAD_PT * zoom);
@@ -381,7 +388,11 @@ impl WidgetImpl for SemEditor {
 
     fn size_allocate(&self, width: i32, height: i32, _baseline: i32) {
         let zoom = self.zoom.get();
-        let page = ((width as f64 - 2.0 * (SIDE_MARGIN_PX + PAPER_PAD_PT * zoom)) / zoom)
+        let margins = match self.fit.get() {
+            true => 0.0,
+            false => 2.0 * (SIDE_MARGIN_PX + PAPER_PAD_PT * zoom),
+        };
+        let page = ((width as f64 - margins) / zoom)
             .clamp(MIN_PAGE_WIDTH_PT, MAX_PAGE_WIDTH_PT)
             .floor();
         let ppp = zoom * self.device_scale();
@@ -402,14 +413,17 @@ impl WidgetImpl for SemEditor {
         let x0 = self.page_x(width);
         let pad = PAPER_PAD_PT * zoom;
 
-        // Paper.
-        let paper = graphene::Rect::new(
-            (x0 - pad) as f32,
-            (TOP_MARGIN_PX - pad - scroll) as f32,
-            (page_px + 2.0 * pad) as f32,
-            (self.content_height() - 2.0 * TOP_MARGIN_PX + 2.0 * pad) as f32,
-        );
-        snapshot.append_color(&gdk::RGBA::WHITE, &paper);
+        // Paper (a card around a fitted editor has its own).
+        let top_margin = self.top_margin();
+        if !self.fit.get() {
+            let paper = graphene::Rect::new(
+                (x0 - pad) as f32,
+                (top_margin - pad - scroll) as f32,
+                (page_px + 2.0 * pad) as f32,
+                (self.content_height() - 2.0 * top_margin + 2.0 * pad) as f32,
+            );
+            snapshot.append_color(&gdk::RGBA::WHITE, &paper);
+        }
         self.snapshot_ref_marks(snapshot, x0, scroll);
         self.snapshot_remarks(snapshot, x0, scroll);
         if obj.has_focus() {
@@ -421,7 +435,7 @@ impl WidgetImpl for SemEditor {
         }
 
         let snap = self.pixel_snapper();
-        let mut y = TOP_MARGIN_PX - scroll;
+        let mut y = top_margin - scroll;
         for view in self.views.borrow().iter() {
             let h = view.height_pt() * zoom;
             if y + h >= 0.0 && y <= height {
@@ -671,13 +685,22 @@ impl SemEditor {
             .iter()
             .map(|v| (v.height_pt() + BLOCK_SPACING_PT) * zoom)
             .sum();
-        blocks + 2.0 * TOP_MARGIN_PX
+        match self.fit.get() {
+            // No spacing after the last block.
+            true => (blocks - BLOCK_SPACING_PT * zoom).max(MIN_BLOCK_HEIGHT_PT * zoom),
+            false => blocks + 2.0 * TOP_MARGIN_PX,
+        }
+    }
+
+    /// Space above the first block, px.
+    fn top_margin(&self) -> f64 {
+        if self.fit.get() { 0.0 } else { TOP_MARGIN_PX }
     }
 
     /// Top of every block in content coordinates (px, unscrolled).
     fn block_tops(&self) -> Vec<f64> {
         let zoom = self.zoom.get();
-        let mut y = TOP_MARGIN_PX;
+        let mut y = self.top_margin();
         self.views
             .borrow()
             .iter()

@@ -48,6 +48,14 @@ impl SemEditor {
         self.imp().editor.borrow_mut().set_read_only(read_only);
     }
 
+    /// As tall as its content, without paper or margins, the text column as
+    /// wide as the widget: a small editor inside another widget (a remark's
+    /// card).
+    pub fn set_fit_content(&self, fit: bool) {
+        self.imp().fit.set(fit);
+        self.queue_resize();
+    }
+
     /// Replace the document and re-render every block.
     pub fn set_document(&self, doc: Document) {
         self.imp().set_document(doc);
