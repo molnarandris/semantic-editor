@@ -51,9 +51,15 @@ impl SemEditor {
 
     /// As tall as its content, without paper or margins, the text column as
     /// wide as the widget: a small editor inside another widget (a remark's
-    /// card).
+    /// card). Ink above the first line or below the last (a superscript)
+    /// draws outside the widget, into what is around it: it does not
+    /// scroll, so nothing needs cutting off.
     pub fn set_fit_content(&self, fit: bool) {
         self.imp().fit.set(fit);
+        self.set_overflow(match fit {
+            true => gtk::Overflow::Visible,
+            false => gtk::Overflow::Hidden,
+        });
         self.queue_resize();
     }
 
