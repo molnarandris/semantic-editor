@@ -379,7 +379,7 @@ impl SemEditor {
     pub(super) fn completions(&self) -> Vec<(String, String)> {
         let ed = self.editor.borrow();
         let Some(typed) = ed.ref_typing() else {
-            return vec![];
+            return self.name_completions(&ed);
         };
         if *self.completion_typed.borrow() != typed {
             self.completion.set(0);
@@ -422,6 +422,38 @@ impl SemEditor {
             .collect()
     }
 
+    /// The names offered while one is typed in a formula (two letters on):
+    /// Typst's symbols, functions and operators starting with it, those
+    /// the document uses most first, then plain names before variants
+    /// (`arrow` before `arrow.r`), shorter first. Each with its char, or
+    /// "function"/"operator".
+    fn name_completions(&self, ed: &model::Editor) -> Vec<(String, String)> {
+        let Some(typed) = ed.name_typing().filter(|t| t.chars().count() >= 2) else {
+            return vec![];
+        };
+        if *self.completion_typed.borrow() != typed {
+            self.completion.set(0);
+            *self.completion_typed.borrow_mut() = typed.clone();
+        }
+        let uses = ed.doc().math_usage();
+        let used = |name: &str, desc: &str| {
+            let by_char = match desc {
+                "function" | "operator" => 0,
+                c => uses.get(c).copied().unwrap_or(0),
+            };
+            uses.get(name).copied().unwrap_or(0) + by_char
+        };
+        let mut list: Vec<_> = typst_bridge::math_names()
+            .iter()
+            .filter(|(name, _)| name.starts_with(typed.as_str()))
+            .map(|(name, desc)| (std::cmp::Reverse(used(name, desc)), name, desc))
+            .collect();
+        list.sort_by_key(|(n, name, _)| (*n, name.matches('.').count(), name.len()));
+        list.into_iter()
+            .map(|(_, name, desc)| (name.clone(), desc.clone()))
+            .collect()
+    }
+
     /// Keys for the completion list while it shows: ↑/↓ choose, Enter or
     /// Tab take the chosen label. Returns whether the key was used.
     fn completion_key(&self, key: gdk::Key) -> bool {
@@ -444,7 +476,13 @@ impl SemEditor {
     }
 
     fn choose_completion(&self, label: &str) {
-        self.editor.borrow_mut().complete_ref(label);
+        let mut ed = self.editor.borrow_mut();
+        if ed.ref_typing().is_some() {
+            ed.complete_ref(label);
+        } else {
+            ed.complete_name(label);
+        }
+        drop(ed);
         self.after_command(true);
     }
 

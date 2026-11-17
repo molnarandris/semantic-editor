@@ -956,6 +956,43 @@ impl Editor {
         }
     }
 
+    /// The name being typed in a formula, for completion (not a `\` TeX
+    /// name).
+    pub fn name_typing(&self) -> Option<String> {
+        let p = self.row_pos()?;
+        let (_, name) = self.word_before(&p)?;
+        (!name.starts_with('\\')).then_some(name)
+    }
+
+    /// Take `name` (from the completion list) for the name being typed: a
+    /// symbol becomes its char; a function its call, the caret in the
+    /// first argument; anything else ends as a typed word would.
+    pub fn complete_name(&mut self, name: &str) -> bool {
+        let Some(p) = self.row_pos() else {
+            return false;
+        };
+        let Some((id, _)) = self.word_before(&p) else {
+            return false;
+        };
+        let node = MathNode {
+            id,
+            kind: MathKind::Ident(name.into()),
+            space: false,
+        };
+        let op = self.row_replace(p.row, p.offset - 1, node);
+        let after = self.caret.clone();
+        self.commit(vec![op], after, Last::Typing { space: false });
+        self.word = Some(self.caret.clone());
+        let Some(p) = self.row_pos() else {
+            return false;
+        };
+        if self.lookup(name, false).is_none() && self.make_call(&p, true) {
+            return true;
+        }
+        self.finish_word();
+        true
+    }
+
     /// Whether the word before the caret would become a call: always with
     /// `(` (`hat(`), with space only if it is not also a symbol (`sqrt`).
     pub(super) fn call_word(&self, p: &RowPos, paren: bool) -> Option<MathCallShape> {

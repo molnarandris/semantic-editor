@@ -31,7 +31,7 @@ pub use serialize::{
     fragment_source, serialize_block, serialize_block_numbered, serialize_block_open,
     serialize_block_styled, serialize_document, serialize_document_mapped, serialize_math_node,
 };
-pub use symbols::resolve_symbol;
+pub use symbols::{math_names, resolve_symbol};
 pub use worker::{CompileJob, CompileResult, Rendered, Worker};
 pub use world::BridgeWorld;
 

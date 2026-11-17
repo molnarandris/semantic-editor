@@ -4,18 +4,22 @@ Where the work stands. Delete items when done (git keeps the history). Bugs belo
 in GitHub issues; the ones below were found before that and are to be moved there.
 Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
 
+## Waiting for the user's test
+
+- Symbol completion in formulas: from the second letter, symbols, functions and
+  operators starting with what was typed; the ones this document uses most first
+  (user's choice: this document only).
+
 ## Next
 
 From the user's list of 2026-11-15, one group at a time:
 
-1. Formulas: symbol completion while typing a name, most used first (user: after
-   matrices).
-2. Remarks rework: a selection across a display formula remarks only the text before
+1. Remarks rework: a selection across a display formula remarks only the text before
    it; remark text in the editor's syntax, rendered by Typst; no prominent author,
    date or replies; the card shows the remarked text rendered; maybe in the margin
    instead of a sidebar (undecided).
-3. Chat: clickable references to the paper's parts; Claude can add remarks.
-4. Sidebar buttons look bad (postponed by the user, not important).
+2. Chat: clickable references to the paper's parts; Claude can add remarks.
+3. Sidebar buttons look bad (postponed by the user, not important).
 
 Then the planned features:
 

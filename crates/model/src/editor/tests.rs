@@ -819,6 +819,28 @@ fn matrices() {
     e.doc().check_invariants().unwrap();
 }
 
+/// Completing a name typed in a formula: a symbol becomes its char, a
+/// function its call with the caret inside; the document's usage counts
+/// symbols by char and calls by name.
+#[test]
+fn name_completion() {
+    let mut e = math_calls_editor();
+    e.insert_text("ph");
+    assert_eq!(e.name_typing().as_deref(), Some("ph"));
+    assert!(e.complete_name("phi"));
+    assert_eq!(e.name_typing(), None);
+    e.insert_text("+sq");
+    assert!(e.complete_name("sqrt"));
+    assert_eq!(labels(&e).last(), Some(&"argument"));
+    e.insert_text("x");
+    assert_eq!(display_of(&e, 0), "φ + sqrt(x)");
+    let uses = e.doc().math_usage();
+    assert_eq!(uses.get("φ"), Some(&1));
+    assert_eq!(uses.get("sqrt"), Some(&1));
+    assert_eq!(uses.get("x"), Some(&1));
+    e.doc().check_invariants().unwrap();
+}
+
 /// The options tab of a math call: ↑ from its arguments reaches it (the
 /// widget picks the char by x); ←/→ skip it and stay in it; every char is
 /// kept; ↓, Enter or Esc go into the first argument. Calls that take no

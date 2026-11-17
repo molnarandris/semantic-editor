@@ -1318,6 +1318,33 @@ impl Document {
             .find_map(|r| r.find_node(id))
     }
 
+    /// How often each symbol (by its char), call, word and code source is
+    /// used in the document's formulas.
+    pub fn math_usage(&self) -> std::collections::HashMap<String, usize> {
+        fn count(row: &MathRow, uses: &mut std::collections::HashMap<String, usize>) {
+            for node in &row.nodes {
+                let key = match &node.kind {
+                    MathKind::Sym(s) | MathKind::Ident(s) | MathKind::Code(s) => Some(s),
+                    MathKind::Call { name, .. } => Some(name),
+                    _ => None,
+                };
+                if let Some(key) = key {
+                    *uses.entry(key.clone()).or_default() += 1;
+                }
+                for (_, child) in node.children() {
+                    count(child, uses);
+                }
+            }
+        }
+        let mut uses = std::collections::HashMap::new();
+        let mut all = vec![];
+        all_blocks(&self.blocks, &mut all);
+        for row in all.iter().flat_map(|b| b.rows()) {
+            count(row, &mut uses);
+        }
+        uses
+    }
+
     /// The inline list owned by `owner`: a block's text inlines or an inline
     /// call's body.
     pub fn inlines_of_mut(&mut self, owner: NodeId) -> Option<&mut Vec<InlineNode>> {

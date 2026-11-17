@@ -114,6 +114,10 @@ structure as soon as it is unambiguous.
   names work). Text is only typed with `"`, and edited in place like code. `/`, `^`,
   `_` take the previous operand; `(` groups; `,` moves between arguments; `'`
   primes; `"` text; `&` and `\` + space for aligned lines. Tab visits empty slots.
+  From the second letter of a name, a list offers Typst's symbols (with their
+  variants), functions and operators starting with it, those the document uses most
+  first; ↑/↓ choose, Enter, Tab or a click take one (a function as its call), typing
+  on ignores it.
   Matrices (`mat`): `,` goes to the next cell of the row or adds one at its end,
   `;` or Enter add a row below, ↑/↓ move between rows keeping the column,
   Backspace in an empty cell that starts a row joins it to the row above.
