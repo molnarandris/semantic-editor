@@ -846,13 +846,7 @@ impl Importer<'_> {
                     SyntaxKind::LeftParen | SyntaxKind::RightParen => {}
                     SyntaxKind::Hash => {
                         let code = children.get(i + 1)?;
-                        let text = code.full_text();
-                        let atom =
-                            match drawing(&text, "box(baseline: 30%, cetz.canvas(length: 1em, {") {
-                                Some(src) => MathKind::Diagram(src),
-                                None => MathKind::Code(text.to_string()),
-                            };
-                        out.push(self.doc.node(atom));
+                        out.push(self.code_atom(code));
                         i += 1;
                         if children
                             .get(i + 1)
@@ -871,10 +865,24 @@ impl Importer<'_> {
                 }
                 i += 1;
             }
+        } else if is_code_expr(node.kind()) {
+            // A call's argument that is code alone (`attach(#x, b: i)`):
+            // the parser gives the expression after `#`, not a formula.
+            out.push(self.code_atom(node));
         } else {
             self.math_expr(node, &mut out)?;
         }
         Some(out)
+    }
+
+    /// The code after a `#` in a formula: an inline diagram or a code atom.
+    fn code_atom(&mut self, code: &SyntaxNode) -> MathNode {
+        let text = code.full_text();
+        let atom = match drawing(&text, "box(baseline: 30%, cetz.canvas(length: 1em, {") {
+            Some(src) => MathKind::Diagram(src),
+            None => MathKind::Code(text.to_string()),
+        };
+        self.doc.node(atom)
     }
 
     fn sym(&mut self, s: &str) -> MathNode {
@@ -1033,6 +1041,12 @@ impl Importer<'_> {
     fn math_call(&mut self, n: &SyntaxNode, out: &mut Vec<MathNode>) -> Option<()> {
         let call = n.cast::<ast::MathCall>()?;
         let name = call.callee().to_untyped().full_text().to_string();
+        if name == "attach"
+            && let Some(scripts) = self.attach(call)
+        {
+            out.push(scripts);
+            return Some(());
+        }
         let callable =
             resolve_symbol(&name).is_none() || math_call_shape(&self.sources, &name).is_some();
         if !callable {
@@ -1075,6 +1089,55 @@ impl Importer<'_> {
         out.push(self.doc.call_with(&name, &opts.join(", "), args));
         Some(())
     }
+
+    /// `attach(base, t: …, b: …)` as scripts, as `base^…_…`: how the
+    /// editor writes scripts on a base that `_`/`^` cannot follow (code,
+    /// a group). `None` for other arguments (corner scripts).
+    fn attach(&mut self, call: ast::MathCall) -> Option<MathNode> {
+        let (mut base, mut sup, mut sub) = (None, None, None);
+        for arg in call.args().arg_items() {
+            if arg.ends_in_semicolon {
+                return None;
+            }
+            match arg.arg {
+                ast::Arg::Pos(e) if base.is_none() => base = Some(self.math(e.to_untyped())?),
+                ast::Arg::Named(n) if n.name().as_str() == "t" && sup.is_none() => {
+                    sup = Some(self.math(n.expr().to_untyped())?)
+                }
+                ast::Arg::Named(n) if n.name().as_str() == "b" && sub.is_none() => {
+                    sub = Some(self.math(n.expr().to_untyped())?)
+                }
+                _ => return None,
+            }
+        }
+        if sup.is_none() && sub.is_none() {
+            return None;
+        }
+        Some(self.doc.scripts(base?, sup, sub))
+    }
+}
+
+/// A code expression, which in a formula comes only after `#` (a string
+/// is not: `"…"` is text there).
+fn is_code_expr(kind: SyntaxKind) -> bool {
+    use SyntaxKind::*;
+    matches!(
+        kind,
+        Ident
+            | FieldAccess
+            | FuncCall
+            | Int
+            | Float
+            | Numeric
+            | Bool
+            | None
+            | Auto
+            | Parenthesized
+            | CodeBlock
+            | ContentBlock
+            | Array
+            | Dict
+    )
 }
 
 /// A named argument of a math call as code (`size: #55%` gives
@@ -1561,5 +1624,26 @@ $ f(x) &= cases(1 "if" x > 0, 0) \
             "{}",
             serialize_document(&doc)
         );
+    }
+
+    /// Scripts the editor writes with `attach` (on code, on a group) paste
+    /// back as scripts, and the formula as it was copied (it pasted as
+    /// plain text).
+    #[test]
+    fn attach_pastes_as_scripts() {
+        for s in [
+            "\"Ker\" A_v = \"Ker\" lr(size: #55%, (attach(#bigbx, b: h ∈ ∂ v) φ_h)) (Λ)",
+            "attach(#bigbx, t: n, b: i) x",
+            "attach(a b, t: n)",
+        ] {
+            let model::Fragment::Math(nodes) = parse_fragment(s, true) else {
+                panic!("not a formula: {s}");
+            };
+            let mut d = Document::empty();
+            let block = d.display(nodes);
+            let back = crate::serialize_block_styled(&block, crate::Style::Readable).0;
+            assert_eq!(back, format!("$ {s} $"));
+            assert!(!format!("{block:?}").contains("\"attach\""), "{block:?}");
+        }
     }
 }
