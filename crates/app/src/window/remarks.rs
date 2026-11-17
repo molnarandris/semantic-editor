@@ -25,6 +25,9 @@ pub enum RemarkAction {
     SetText(u64, String),
     Resolve(u64, bool),
     Delete(u64),
+    /// Go to the paper's block with this label (Ctrl+click on a reference
+    /// to it in a card).
+    FollowRef(String),
 }
 
 type Callback = Rc<RefCell<Option<Box<dyn Fn(RemarkAction)>>>>;
@@ -289,6 +292,12 @@ impl RemarksPane {
         text.set_document(doc);
         text.set_read_only(!editable);
         text.set_outside_labels(self.labels.borrow().clone());
+        let on_action = self.on_action.clone();
+        text.connect_follow_outside(move |_, label| {
+            if let Some(f) = on_action.borrow().as_ref() {
+                f(RemarkAction::FollowRef(label.to_string()));
+            }
+        });
         if editable {
             self.connect_text(&text, id);
         }

@@ -288,6 +288,11 @@ impl Window {
                     this.editor.set_remark_resolved(id, resolved)
                 }
                 RemarkAction::Delete(id) => this.editor.delete_remark(id),
+                RemarkAction::FollowRef(label) => {
+                    if this.editor.follow_ref(&label) {
+                        this.editor.grab_focus();
+                    }
+                }
             }
         });
         let weak = Rc::downgrade(self);

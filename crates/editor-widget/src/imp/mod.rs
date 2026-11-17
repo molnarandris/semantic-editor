@@ -312,6 +312,11 @@ impl ObjectImpl for SemEditor {
                 Signal::builder("preview-rendered").build(),
                 // A block's render arrived (remark quotations follow).
                 Signal::builder("block-rendered").build(),
+                // Ctrl+click on a reference to an outside label (the
+                // paper's, from a remark's text). Param: the label.
+                Signal::builder("follow-outside")
+                    .param_types([String::static_type()])
+                    .build(),
                 // A heading's outline entry was rendered. Param: its id.
                 Signal::builder("outline-rendered")
                     .param_types([u64::static_type()])
@@ -519,6 +524,16 @@ impl SemEditor {
 
     /// After the caret jumped somewhere: as `after_command`, with the caret
     /// shown a third down the view.
+    /// Go to the block labelled `label` (Alt+← comes back).
+    pub(crate) fn follow_ref(&self, label: &str) -> bool {
+        if !self.editor.borrow_mut().follow_ref(label) {
+            return false;
+        }
+        self.goal_x.set(None);
+        self.after_jump();
+        true
+    }
+
     pub(crate) fn after_jump(&self) {
         self.reveal_third.set(true);
         self.after_command(true);

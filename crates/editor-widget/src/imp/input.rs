@@ -157,6 +157,12 @@ impl SemEditor {
                     // comes back).
                     imp.goal_x.set(None);
                     imp.after_jump();
+                } else if ctrl
+                    && let Some(label) = imp.ref_at(x, y)
+                    && imp.outside.borrow().iter().any(|o| o.label == label)
+                {
+                    // To the paper's label, from a remark's text.
+                    obj.emit_by_name::<()>("follow-outside", &[&label]);
                 } else if ctrl && let Some(url) = imp.link_at(x, y) {
                     // Ctrl+click on a web link: open it.
                     imp.open_link(&url);

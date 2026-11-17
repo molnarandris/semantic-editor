@@ -384,6 +384,25 @@ impl SemEditor {
         })
     }
 
+    /// Ctrl+click on a reference to an outside label (see
+    /// [`Self::set_outside_labels`]): `f` gets the label.
+    pub fn connect_follow_outside<F: Fn(&Self, &str) + 'static>(
+        &self,
+        f: F,
+    ) -> glib::SignalHandlerId {
+        self.connect_local("follow-outside", false, move |args| {
+            let obj = args[0].get::<Self>().expect("SemEditor");
+            f(&obj, &args[1].get::<String>().expect("label"));
+            None
+        })
+    }
+
+    /// Go to the block labelled `label`, as Ctrl+click on a reference to it
+    /// does (Alt+← comes back). `false` if there is none.
+    pub fn follow_ref(&self, label: &str) -> bool {
+        self.imp().follow_ref(label)
+    }
+
     /// Called after every command (caret, selection or document changed).
     pub fn connect_block_rendered<F: Fn(&Self) + 'static>(&self, f: F) -> glib::SignalHandlerId {
         self.connect_local("block-rendered", false, move |args| {
