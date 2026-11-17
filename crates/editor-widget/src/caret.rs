@@ -248,13 +248,21 @@ fn row_stops(
         if let MathKind::Code(source) | MathKind::Text(source) = &node.kind {
             let mut p = path.clone();
             p.extend([Step::Index(k), Step::Chars]);
-            let base = out.last().map_or(line, |s| s.line);
+            let before = out.last().expect("the stop before the atom");
+            let base = before.line;
+            // Not rendered yet (just typed): all at the stop before it.
+            let at_before = Rect {
+                x: before.x,
+                y: before.top,
+                w: 0.0,
+                h: before.bottom - before.top,
+            };
             let n = source.chars().count();
             let place = |offset, x, g: Rect, baseline| Stop {
                 depth: depth + 1,
                 ..stop(block, p.clone(), offset, x, g.y, g.bottom(), baseline)
             };
-            out.extend(code_stops(node.id, n, l, r.unwrap_or(rb), base, place));
+            out.extend(code_stops(node.id, n, l, r.unwrap_or(at_before), base, place));
         }
         if let Some(opts) = node.kind.tab() {
             let mut p = path.clone();
@@ -1250,6 +1258,34 @@ mod tests {
             .collect();
         assert_eq!(chars.len(), 5);
         assert!(chars.windows(2).all(|w| w[1] > w[0] + 1.0), "{chars:?}");
+    }
+
+    /// An empty text just typed (`"`): its one stop is after what is before
+    /// it, both once rendered and while the render is the one from before.
+    #[test]
+    fn stop_in_new_empty_text() {
+        let mut d = Document::empty();
+        let (x, y) = (d.ident("x"), d.ident("y"));
+        let text = d.node(MathKind::Text(String::new()));
+        let before = d.display(vec![x.clone(), y.clone()]);
+        let old = layout_of(&before, 300.0);
+        let mut block = before.clone();
+        let Block::DisplayMath(row) = &mut block.kind else {
+            unreachable!()
+        };
+        row.nodes.push(text);
+        let new = layout_of(&block, 300.0);
+        for (what, l) in [("stale", &old), ("rendered", &new)] {
+            let y_right = l.box_of(y.id).unwrap().right();
+            let s = super::stops(&block, Some(l));
+            let inner: Vec<f64> = s
+                .iter()
+                .filter(|s| s.cursor.path.ends_with(&[Step::Chars]))
+                .map(|s| s.x)
+                .collect();
+            assert_eq!(inner.len(), 1, "{what}");
+            assert!(inner[0] >= y_right - 0.5, "{what}: {inner:?} vs {y_right}");
+        }
     }
 
     /// A picture in a figure: stops at its box's edges, its options tab's
