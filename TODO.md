@@ -6,17 +6,10 @@ Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
 
 ## Waiting for the user's test
 
-- Copy and paste of formulas with scripts on code or groups (`attach`).
-- Formulas: unknown words are code (red when failing), text only with `"`; code
-  and text edited in place and outlined while the caret is in them.
-- Code pieces that fail show their source on red (inline pieces, inline calls,
-  block calls, code in formulas); a name defined nowhere typed with a space is
-  code. Code in formulas is edited in place (←/→ into it, Esc out).
-- The cleanup of 2026-11-16 (widget split into modules, `jobs::Targets`): no
-  behaviour change intended; worth a general look around.
+- Code pieces that fail show their source on red outside formulas (inline pieces,
+  inline calls, block calls); a name defined nowhere typed with a space is code.
 - Not confirmed yet, from earlier rounds: remarks sidebar (R2–R3), chat (C1–C2),
-  version history UI, projects and pictures, labels/outline/footnote navigation,
-  selection/copy/paste decisions.
+  projects and pictures, labels/outline/footnote navigation.
 
 ## Next
 
