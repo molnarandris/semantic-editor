@@ -6,7 +6,6 @@ Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
 
 ## Waiting for the user's test
 
-- Syntax highlighting in the header, code, raw Typst and diagram dialogs.
 - Formulas: unknown words are code (red when failing), text only with `"`; code
   and text edited in place and outlined while the caret is in them.
 - Code pieces that fail show their source on red (inline pieces, inline calls,
