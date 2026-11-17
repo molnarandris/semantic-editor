@@ -946,26 +946,30 @@ impl Writer {
             // into the text (a string's glyphs after a space map one char
             // early, measured). `;` ends it, so nothing after continues it.
             MathKind::Text(s) if w.style == Style::Edit => {
-                // Markup drops spaces at the ends of its block, a string
-                // keeps them: those are written `#" "` (measured: `#[if#" "]`
-                // is as wide as `"if "`), mapped like the rest. (A leading
-                // one may land a fraction of a pixel off, measured.)
-                let body = s.trim_matches(' ');
-                let lead = s.len() - s.trim_start_matches(' ').len();
-                let trail = s.len() - lead - body.len();
+                // Markup collapses spaces and drops them at the ends of its
+                // block, a string keeps every one: each is written `#" ";`
+                // (measured: `#[a#" "#" "b]` is as wide as `"a  b"`, also at
+                // the ends), mapped like the rest. `;` ends the expression,
+                // so a `(` or `.` after it is text. (A leading space may land
+                // a fraction of a pixel off, measured.)
+                // The first space after a word is a markup space (a string
+                // one is off by a pixel there, measured).
                 w.out.push_str("#[");
                 let mut starts = vec![];
-                for _ in 0..lead {
-                    starts.push(w.out.len());
-                    w.out.push_str("#\" \"");
-                }
-                w.text(node.id, body, false, false);
-                let (_, mut inner) = w.map.texts.pop().expect("just written");
-                inner.pop();
-                starts.append(&mut inner);
-                for _ in 0..trail {
-                    starts.push(w.out.len());
-                    w.out.push_str("#\" \"");
+                let words: Vec<&str> = s.split(' ').collect();
+                for (i, word) in words.iter().enumerate() {
+                    if i > 0 {
+                        starts.push(w.out.len());
+                        let after_word = !words[i - 1].is_empty();
+                        let inner = words[i..].iter().any(|w| !w.is_empty());
+                        w.out.push_str(if after_word && inner { " " } else { "#\" \";" });
+                    }
+                    if !word.is_empty() {
+                        w.text(node.id, word, false, false);
+                        let (_, mut inner) = w.map.texts.pop().expect("just written");
+                        inner.pop();
+                        starts.append(&mut inner);
+                    }
                 }
                 starts.push(w.out.len());
                 w.map.texts.push((node.id, starts));
@@ -1804,6 +1808,60 @@ mod tests {
                     "renders differ after {c:?} in {keys:?}:\n  edit:     {edit}\n  readable: {read}"
                 );
             }
+        }
+    }
+
+    /// Every space in a formula's text counts, as in a Typst string, also
+    /// several in a row and at the ends: the editor's render puts the
+    /// glyphs where the export does. (Not pixel for pixel: a space written
+    /// on its own splits the glyph run.)
+    #[test]
+    fn spaces_in_formula_text_are_kept() {
+        use typst::layout::{Frame, FrameItem, Point};
+        fn glyphs(frame: &Frame, at: Point, out: &mut Vec<(f64, char)>) {
+            for (p, item) in frame.items() {
+                let p = at + *p;
+                match item {
+                    FrameItem::Group(g) => glyphs(&g.frame, p, out),
+                    FrameItem::Text(t) => {
+                        let mut x = p.x;
+                        for g in &t.glyphs {
+                            let c = t.text[g.range()].chars().next().unwrap_or(' ');
+                            if c != ' ' {
+                                out.push(((x + g.x_offset.at(t.size)).to_pt(), c));
+                            }
+                            x += g.x_advance.at(t.size);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut world = BridgeWorld::new();
+        let mut layout = |snippet: &str| {
+            let (src, _) = block_document(&Around::default(), snippet, 400.0);
+            let doc = compile(&mut world, &src).unwrap_or_else(|e| panic!("{e:?}\n{src}"));
+            let mut out = vec![];
+            glyphs(&doc.pages()[0].frame, Point::zero(), &mut out);
+            out.sort_by(|a, b| a.0.total_cmp(&b.0));
+            out
+        };
+        let mut d = Document::empty();
+        let b = d.display(vec![]);
+        d.blocks = vec![b];
+        let mut e = model::Editor::new(d);
+        e.set_symbol_resolver(crate::resolve_symbol);
+        for c in "x \"  a   (b).c  d \" y".chars() {
+            e.insert_text(&c.to_string());
+        }
+        let block = &e.doc().blocks[0];
+        let edit = serialize_block_styled(block, Style::Edit).0;
+        let read = serialize_block_styled(block, Style::Readable).0;
+        assert!(read.contains("\"  a   (b).c  d \""), "{read}");
+        let (a, b) = (layout(&edit), layout(&read));
+        assert_eq!(a.len(), b.len(), "{edit}\n{read}");
+        for (g, h) in a.iter().zip(&b) {
+            assert!(g.1 == h.1 && (g.0 - h.0).abs() < 0.01, "{g:?} vs {h:?}\n{edit}\n{read}");
         }
     }
 

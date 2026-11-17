@@ -102,6 +102,10 @@ Learned the hard way (blurry text that Typesetter did not have):
   is a call.
 - A `;` right after an expression in markup ends it and vanishes; `#x;` is needed
   before `.`, `(`, `[` or text that would continue the expression.
+- A string in a formula keeps every space; markup (`#[…]`, which the editor uses
+  to map each char of a formula's text) collapses runs and drops them at its ends.
+  So the editor writes the first space after a word as markup and every other one
+  as `#" ";`: same layout, but split glyph runs anti-alias a pixel differently.
 - `liminf` contains a U+2009 thin space in Typst's text.
 - A blank line between a paragraph and its list adds space; a block call on lines of
   its own ends the paragraph above it.
