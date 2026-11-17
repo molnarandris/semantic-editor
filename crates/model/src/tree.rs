@@ -433,6 +433,10 @@ pub enum MathKind {
         #[serde(default, skip_serializing_if = "String::is_empty")]
         opts: String,
         args: Vec<MathRow>,
+        /// A matrix's rows (`mat(a, b; c, d)`): the argument each row after
+        /// the first starts with, ascending; empty for one row.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        rows: Vec<usize>,
     },
     /// Primes attached to what comes before, `f'`, `f''` (the count).
     Primes(usize),
@@ -458,6 +462,17 @@ pub const OPTION_CALLS: &[&str] = &[
     "mat", "minus", "mustache", "norm", "op", "paren", "round", "script", "shell", "sscript",
     "stretch", "tilde", "vec",
 ];
+
+/// The math call whose arguments are a grid, rows ended by `;`.
+pub const MATRIX: &str = "mat";
+
+/// The arguments of each row of a grid of `len` arguments whose rows after
+/// the first start at `rows`.
+pub fn grid_rows(rows: &[usize], len: usize) -> Vec<std::ops::Range<usize>> {
+    let starts = std::iter::once(0).chain(rows.iter().copied());
+    let ends = rows.iter().copied().chain(std::iter::once(len));
+    starts.zip(ends).map(|(s, e)| s..e).collect()
+}
 
 /// Bars Typst classes as fences: spaces written next to them show.
 pub const BARS: [&str; 3] = ["|", "‖", "⦀"];
@@ -1553,6 +1568,7 @@ impl Document {
             name: name.into(),
             opts: opts.into(),
             args,
+            rows: vec![],
         })
     }
 

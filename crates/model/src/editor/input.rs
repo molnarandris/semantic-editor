@@ -864,6 +864,7 @@ impl Editor {
             }
             ')' if self.groups.contains(&p.row) => self.escape() || changed,
             ',' if self.next_argument(&p) => true,
+            ';' if self.in_matrix(&p) => self.new_case(&p),
             // `"` starts text; `'` adds a prime; `&` is an alignment point.
             // `"` starts text, the caret in it.
             '"' => {
@@ -985,6 +986,7 @@ impl Editor {
                 name,
                 opts: String::new(),
                 args,
+                rows: vec![],
             },
             space: false,
         };
@@ -1004,25 +1006,49 @@ impl Editor {
             return false;
         };
         let node = self.row_nodes(prow)[j].clone();
-        let MathKind::Call { name, args, .. } = &node.kind else {
+        let MathKind::Call {
+            name, args, rows, ..
+        } = &node.kind
+        else {
             return false;
         };
         let next = cursor(p.block, child_path(&parent, j, Step::Arg(i + 1)), 0);
-        if i + 1 < args.len() {
+        // In a matrix, only within the row: at its end, a new cell.
+        if i + 1 < args.len() && !rows.contains(&(i + 1)) {
             return self.jump(next);
         }
         if !self.math_call_shape(name).is_some_and(|s| s.variadic) {
             return false;
         }
+        let node = self.with_cell(&node, p.row, i + 1, false);
+        self.commit(vec![self.row_replace(prow, j, node)], next, Last::Other)
+    }
+
+    /// `call` with a new empty argument at `at`, starting a matrix row if
+    /// `row_start`. Left with `)` like `after` (the argument it follows).
+    fn with_cell(
+        &mut self,
+        call: &MathNode,
+        after: NodeId,
+        at: usize,
+        row_start: bool,
+    ) -> MathNode {
         let row = self.doc.row(vec![]);
-        if self.groups.contains(&p.row) {
+        if self.groups.contains(&after) {
             self.groups.insert(row.id);
         }
-        let mut node = node.clone();
-        if let MathKind::Call { args, .. } = &mut node.kind {
-            args.insert(i + 1, row);
+        let mut node = call.clone();
+        if let MathKind::Call { args, rows, .. } = &mut node.kind {
+            args.insert(at, row);
+            for r in rows.iter_mut().filter(|r| **r >= at) {
+                *r += 1;
+            }
+            if row_start {
+                rows.push(at);
+                rows.sort();
+            }
         }
-        self.commit(vec![self.row_replace(prow, j, node)], next, Last::Other)
+        node
     }
 
     /// Whether the caret's row is the argument of an `lr` call.
@@ -1065,19 +1091,36 @@ impl Editor {
         let Some(prow) = self.row_id_at(p.block, &parent) else {
             return false;
         };
-        let mut node = self.row_nodes(prow)[j].clone();
-        let row = self.doc.row(vec![]);
-        let row_id = row.id;
-        let MathKind::Call { args, .. } = &mut node.kind else {
+        let node = self.row_nodes(prow)[j].clone();
+        let MathKind::Call {
+            name, args, rows, ..
+        } = &node.kind
+        else {
             return false;
         };
+        // In a matrix: a new row after the caret's, one empty cell.
+        let matrix = name == MATRIX;
+        let at = match matrix {
+            true => grid_rows(rows, args.len())
+                .into_iter()
+                .find(|r| r.contains(&i))
+                .map_or(i + 1, |r| r.end),
+            false => i + 1,
+        };
         // A call opened with `(` is left with `)` from the new case too.
-        if self.groups.contains(&args[i].id) {
-            self.groups.insert(row_id);
-        }
-        args.insert(i + 1, row);
-        let after = cursor(p.block, child_path(&parent, j, Step::Arg(i + 1)), 0);
+        let node = self.with_cell(&node, args[i].id, at, matrix);
+        let after = cursor(p.block, child_path(&parent, j, Step::Arg(at)), 0);
         self.commit(vec![self.row_replace(prow, j, node)], after, Last::Other)
+    }
+
+    /// Whether the innermost call taking more arguments around the caret is
+    /// a matrix (where `;` starts a row).
+    pub(super) fn in_matrix(&self, p: &RowPos) -> bool {
+        self.case_around(p).is_some_and(|(parent, j, _)| {
+            self.row_id_at(p.block, &parent)
+                .and_then(|prow| self.row_nodes(prow).get(j))
+                .is_some_and(|n| matches!(&n.kind, MathKind::Call { name, .. } if name == MATRIX))
+        })
     }
 
     /// End the identifier being typed: a known name becomes its symbol.

@@ -8,7 +8,7 @@
 //! raw as a whole.
 
 use model::{
-    Block, BlockNode, Document, Fragment, Inline, InlineNode, ListKind, MathKind, MathNode,
+    Block, BlockNode, Document, Fragment, Inline, InlineNode, ListKind, MATRIX, MathKind, MathNode,
     OPERATORS, TitleFields, spaced_gap,
 };
 use typst::syntax::ast::{self, AstNode, MathTextKind};
@@ -1072,6 +1072,8 @@ impl Importer<'_> {
         }
         let mut args = vec![];
         let mut opts = vec![];
+        // A matrix's rows: the argument after each `;`.
+        let mut rows = vec![];
         for arg in call.args().arg_items() {
             if let ast::Arg::Named(named) = arg.arg {
                 opts.push(code_opt(named)?);
@@ -1080,13 +1082,22 @@ impl Importer<'_> {
             let ast::Arg::Pos(e) = arg.arg else {
                 return None;
             };
-            if arg.ends_in_semicolon {
-                return None;
-            }
             let row = self.math(e.to_untyped())?;
             args.push(self.doc.row(row));
+            if arg.ends_in_semicolon {
+                if name != MATRIX {
+                    return None;
+                }
+                rows.push(args.len());
+            }
         }
-        out.push(self.doc.call_with(&name, &opts.join(", "), args));
+        // A `;` after the last argument ends no row.
+        rows.retain(|&r| r < args.len());
+        let mut node = self.doc.call_with(&name, &opts.join(", "), args);
+        if let MathKind::Call { rows: r, .. } = &mut node.kind {
+            *r = rows;
+        }
+        out.push(node);
         Some(())
     }
 
@@ -1540,6 +1551,8 @@ $ f(x) &= cases(1 "if" x > 0, 0) \
             "$Delta^(|∂ P_i|-2)(d) dot z_(|x_(i+1)|-1)$",
             "$|x||y| + |[a]| + |-x| + |=|$",
             "$x \"if\"y$ and $x\"if\" y$",
+            "$ mat(1, 2; 3, 4) $",
+            "$ mat(delim: \"[\", a, b, c; d, e; f) $",
         ] {
             let doc = renders_the_same(src);
             assert!(
@@ -1555,7 +1568,6 @@ $ f(x) &= cases(1 "if" x > 0, 0) \
     #[test]
     fn unknown_parts_stay_raw() {
         for src in [
-            "$ mat(1, 2; 3, 4) $",
             // (`Text #h(1em) more` is a paragraph with a code piece now.)
             "#lorem(5)",
             "Text // comment",

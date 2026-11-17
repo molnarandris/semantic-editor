@@ -133,7 +133,32 @@ impl Editor {
             // The cases of `cases` (a call taking more arguments) are stacked.
             let stacked = matches!(&node.kind, MathKind::Call { name, .. }
                 if self.math_call_shape(name).is_some_and(|s| s.variadic));
+            // A matrix's cells: the same column (or the last) in the row
+            // above or below.
+            let cell = match (&node.kind, step) {
+                (
+                    MathKind::Call {
+                        name, args, rows, ..
+                    },
+                    Step::Arg(i),
+                ) if name == MATRIX => {
+                    let grid = grid_rows(rows, args.len());
+                    let r = grid.iter().position(|g| g.contains(&i))?;
+                    let col = i - grid[r].start;
+                    let other = if down {
+                        grid.get(r + 1)
+                    } else {
+                        r.checked_sub(1).map(|r| &grid[r])
+                    };
+                    Some(other.map(|g| Step::Arg((g.start + col).min(g.end - 1))))
+                }
+                _ => None,
+            };
             let to = match (step, down) {
+                _ if cell.is_some_and(|c| c.is_some()) => cell.flatten(),
+                // At the top of a matrix: its options tab; at its bottom: out.
+                (Step::Arg(_), false) if cell.is_some() => Some(Step::Opts),
+                _ if cell.is_some() => None,
                 (Step::Num, true) => Some(Step::Den),
                 (Step::Den, false) => Some(Step::Num),
                 (Step::Sup, true) | (Step::Sub, false) => Some(Step::Base),

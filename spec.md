@@ -114,6 +114,9 @@ structure as soon as it is unambiguous.
   names work). Text is only typed with `"`, and edited in place like code. `/`, `^`,
   `_` take the previous operand; `(` groups; `,` moves between arguments; `'`
   primes; `"` text; `&` and `\` + space for aligned lines. Tab visits empty slots.
+  Matrices (`mat`): `,` goes to the next cell of the row or adds one at its end,
+  `;` or Enter add a row below, ↑/↓ move between rows keeping the column,
+  Backspace in an empty cell that starts a row joins it to the row above.
   Options of math calls are edited in a tab above the call. Code in a formula
   (`#sym.brace.l`) is walked through by ←/→ and edited in place, its source showing
   while the caret is in it; Esc leaves it.

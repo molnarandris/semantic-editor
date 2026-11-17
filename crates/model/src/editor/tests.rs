@@ -724,7 +724,7 @@ fn fake_math_calls(_: &[&str], name: &str) -> Option<MathCallShape> {
     let (slots, variadic) = match name {
         "sqrt" | "hat" | "lr" | "abs" => (1, false),
         "root" => (2, false),
-        "cases" => (1, true),
+        "cases" | "mat" => (1, true),
         _ => return None,
     };
     Some(MathCallShape { slots, variadic })
@@ -779,6 +779,44 @@ fn math_calls() {
     let mut e = math_calls_editor();
     e.insert_text("sqrt(a,b)");
     assert_eq!(display_of(&e, 0), "sqrt(a , b)");
+}
+
+/// Matrices: `,` goes to the next cell of the row or adds one at its end;
+/// `;` or Enter add a row below the caret's; ↑/↓ keep the column (or take
+/// the row's last); Backspace in an empty cell starting a row joins the
+/// row to the one above.
+#[test]
+fn matrices() {
+    let vertical = |e: &mut Editor, down: bool| {
+        let t = e.vertical_target(down).unwrap();
+        e.set_caret(t);
+    };
+    let mut e = math_calls_editor();
+    e.insert_text("mat(1,2;3,4");
+    assert_eq!(display_of(&e, 0), "mat(1, 2; 3, 4)");
+    assert!(e.hint().starts_with(", → next cell"), "{}", e.hint());
+    vertical(&mut e, false);
+    assert_eq!(e.caret().path.last(), Some(&Step::Arg(1)), "above 4 is 2");
+    e.insert_text(",5");
+    assert_eq!(display_of(&e, 0), "mat(1, 2, 5; 3, 4)");
+    vertical(&mut e, true);
+    assert_eq!(e.caret().path.last(), Some(&Step::Arg(4)), "the row's last");
+    // A row inserted between the two.
+    vertical(&mut e, false);
+    assert_eq!(e.caret().path.last(), Some(&Step::Arg(1)));
+    assert!(e.enter());
+    e.insert_text("a,b");
+    assert_eq!(display_of(&e, 0), "mat(1, 2, 5; a, b; 3, 4)");
+    // ↓ from the last row leaves nothing to go to in the matrix.
+    vertical(&mut e, true);
+    assert_eq!(e.caret().path.last(), Some(&Step::Arg(6)));
+    assert!(e.vertical_target(true).is_none());
+    // Emptying the row's first cell and Backspace again joins the rows.
+    e.move_left();
+    e.backspace();
+    e.backspace();
+    assert_eq!(display_of(&e, 0), "mat(1, 2, 5; a, b, 4)");
+    e.doc().check_invariants().unwrap();
 }
 
 /// The options tab of a math call: ↑ from its arguments reaches it (the
@@ -1054,14 +1092,23 @@ fn show(row: &crate::tree::MathRow) -> String {
             MathKind::Text(t) => format!("\"{t}\""),
             MathKind::Align => "&".into(),
             MathKind::Linebreak => "\\".into(),
-            MathKind::Call { name, opts, args } => format!(
+            MathKind::Call {
+                name,
+                opts,
+                args,
+                rows,
+            } => format!(
                 "{name}{}({})",
                 if opts.is_empty() {
                     String::new()
                 } else {
                     format!("[{opts}]")
                 },
-                args.iter().map(show).collect::<Vec<_>>().join(", ")
+                crate::tree::grid_rows(rows, args.len())
+                    .into_iter()
+                    .map(|r| args[r].iter().map(show).collect::<Vec<_>>().join(", "))
+                    .collect::<Vec<_>>()
+                    .join("; ")
             ),
             MathKind::Frac { num, den } => format!("frac({}, {})", show(num), show(den)),
             MathKind::Scripts { base, sup, sub } => format!(

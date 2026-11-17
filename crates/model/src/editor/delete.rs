@@ -649,8 +649,13 @@ impl Editor {
                     (vec![remove], at(j))
                 } else if i > 0 && args.len() > min {
                     let mut n = node.clone();
-                    if let MathKind::Call { args, .. } = &mut n.kind {
+                    // A matrix row it starts joins the one above.
+                    if let MathKind::Call { args, rows, .. } = &mut n.kind {
                         args.remove(i);
+                        rows.retain(|&r| r != i);
+                        for r in rows.iter_mut().filter(|r| **r > i) {
+                            *r -= 1;
+                        }
                     }
                     let prev = cursor(
                         p.block,

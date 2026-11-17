@@ -626,6 +626,36 @@ mod tests {
         assert!(n.bottom() <= dn.y + 1.0);
     }
 
+    /// A matrix's cells, an empty one too, have boxes in their places.
+    #[test]
+    fn matrix_cells_have_boxes() {
+        let mut d = Document::empty();
+        let cells: Vec<_> = ["a", "b", "c", ""]
+            .iter()
+            .map(|s| {
+                let nodes = if s.is_empty() {
+                    vec![]
+                } else {
+                    vec![d.ident(s)]
+                };
+                d.row(nodes)
+            })
+            .collect();
+        let ids: Vec<_> = cells.iter().map(|c| c.id).collect();
+        let mut m = d.call("mat", cells);
+        if let MathKind::Call { rows, .. } = &mut m.kind {
+            *rows = vec![2];
+        }
+        let block = d.display(vec![m]);
+        let l = layout_of(&block);
+        let b: Vec<_> = ids
+            .iter()
+            .map(|id| l.box_of(*id).expect("cell box"))
+            .collect();
+        assert!(b[0].right() <= b[1].x && b[2].right() <= b[3].x, "{b:?}");
+        assert!(b[0].bottom() <= b[2].y && b[1].bottom() <= b[3].y, "{b:?}");
+    }
+
     /// Paired brackets grow with their content, as in plain Typst.
     #[test]
     fn brackets_scale_around_fractions() {

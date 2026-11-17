@@ -992,7 +992,12 @@ impl Writer {
             }
             MathKind::Align => w.out.push('&'),
             MathKind::Linebreak => w.out.push('\\'),
-            MathKind::Call { name, opts, args } => {
+            MathKind::Call {
+                name,
+                opts,
+                args,
+                rows,
+            } => {
                 // Inside the arguments a comma is written `comma`, so it
                 // cannot split them.
                 // A function of the document's own draws with the spans of
@@ -1011,7 +1016,9 @@ impl Writer {
                 w.out.push('(');
                 w.out.push_str(&math_opts(opts));
                 for (i, arg) in args.iter().enumerate() {
-                    if i > 0 || !opts.is_empty() {
+                    if rows.contains(&i) {
+                        w.out.push_str("; ");
+                    } else if i > 0 || !opts.is_empty() {
                         w.out.push_str(", ");
                     }
                     w.row(arg);

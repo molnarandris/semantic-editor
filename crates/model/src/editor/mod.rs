@@ -18,8 +18,8 @@ use crate::remarks::{Anchor, Remark, Reply};
 use crate::selection::{Fragment, SelRange, Selection};
 use crate::symbols;
 use crate::tree::{
-    Block, BlockNode, Document, Inline, InlineNode, ListKind, MathKind, MathNode, NodeId, Place,
-    spaced_gap,
+    Block, BlockNode, Document, Inline, InlineNode, ListKind, MATRIX, MathKind, MathNode, NodeId,
+    Place, grid_rows, spaced_gap,
 };
 
 mod delete;
@@ -1289,6 +1289,9 @@ impl Editor {
                 } else {
                     "( → function with its arguments · space → symbol"
                 }
+            }
+            (None, Some(p)) if self.in_matrix(&p) => {
+                ", → next cell · Enter or ; → new row · ↑/↓ → row above/below · Esc → leave"
             }
             (None, Some(p)) if self.case_around(&p).is_some() => {
                 "Enter → new case · ↑/↓ → case above/below · Esc → leave"

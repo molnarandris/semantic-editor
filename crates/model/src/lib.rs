@@ -23,6 +23,7 @@ pub use remarks::{Anchor, Point, Remark, Reply};
 pub use selection::{Fragment, SelRange, Selection};
 pub use symbols::OPERATORS;
 pub use tree::{
-    BARS, Block, BlockNode, Document, Inline, InlineNode, ListKind, MathKind, MathNode, MathRow,
-    NodeId, OPTION_CALLS, Place, TitleFields, bib_keys, embedded_bib_keys, spaced_gap,
+    BARS, Block, BlockNode, Document, Inline, InlineNode, ListKind, MATRIX, MathKind, MathNode,
+    MathRow, NodeId, OPTION_CALLS, Place, TitleFields, bib_keys, embedded_bib_keys, grid_rows,
+    spaced_gap,
 };
