@@ -11,10 +11,9 @@ Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
   remark card as it gets truncated"); typing, ↑/↓, Enter/Tab and clicking a row
   should work as before, in the paper too.
 
-## To fix next (user, 2026-11-17)
-
-- "The size of the letters/citation is weird. If I make the window larger, the size
-  of the font seems to shrink." (the card's text and the quotation)
+- A card's quotation at the size of the card's text, whatever the window, the zoom
+  or the screen; shrunk only when the paper's lines are wider than the card ("If I
+  make the window larger, the size of the font seems to shrink").
 
 ## Next
 

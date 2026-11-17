@@ -157,7 +157,9 @@ Learned the hard way (blurry text that Typesetter did not have):
   content).
 - **Remark quotations** are cut from the blocks' textures (`imp/quote.rs`), not
   rendered again, so the lines are the paper's; a key of the blocks' render
-  generations and the cut tells the sidebar when to redo one. Screenshots under
+  generations and the cut tells the sidebar when to redo one. Shown at the card
+  text's zoom (a paintable scaling the texture's pixels, `remarks.rs` `scaled`),
+  shrunk only when wider than the card. Screenshots under
   Broadway fail while the remarks sidebar opens at startup (an AdwBin gets a garbage
   width; not seen on Wayland).
 - **References from a remark to the paper**: a card's editor is a document of its

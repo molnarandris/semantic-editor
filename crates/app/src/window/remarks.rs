@@ -213,8 +213,9 @@ impl RemarksPane {
                 continue;
             }
             let texture = new.as_ref().and_then(|_| quote(card.id));
-            card.quote.set_paintable(texture.as_ref().map(|(t, _)| t));
-            card.quote.set_visible(texture.is_some());
+            let shown = texture.map(|(t, ppp)| scaled::Scaled::new(t, ppp, CARD_ZOOM));
+            card.quote.set_paintable(shown.as_ref());
+            card.quote.set_visible(shown.is_some());
             *card.key.borrow_mut() = new;
         }
     }
@@ -451,6 +452,76 @@ fn load_css() {
         &css,
         gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
+}
+
+mod scaled {
+    //! A quotation's texture at the size of the card's text: its pixels
+    //! (rendered at the paper's pixels per point) count as points at the
+    //! card's zoom, so the letters do not change with the paper's zoom or
+    //! the screen. The picture shrinks it only if the card is narrower.
+
+    use std::cell::{Cell, OnceCell};
+
+    use gtk::prelude::*;
+    use gtk::subclass::prelude::*;
+    use gtk::{gdk, glib};
+
+    mod imp {
+        use super::*;
+
+        #[derive(Default)]
+        pub struct Scaled {
+            pub texture: OnceCell<gdk::Texture>,
+            /// Logical pixels per texture pixel.
+            pub scale: Cell<f64>,
+        }
+
+        #[glib::object_subclass]
+        impl ObjectSubclass for Scaled {
+            const NAME: &'static str = "SemScaledQuote";
+            type Type = super::Scaled;
+            type Interfaces = (gdk::Paintable,);
+        }
+
+        impl ObjectImpl for Scaled {}
+
+        impl PaintableImpl for Scaled {
+            fn intrinsic_width(&self) -> i32 {
+                let w = self.texture.get().map_or(0, |t| t.width());
+                (w as f64 * self.scale.get()).round() as i32
+            }
+
+            fn intrinsic_height(&self) -> i32 {
+                let h = self.texture.get().map_or(0, |t| t.height());
+                (h as f64 * self.scale.get()).round() as i32
+            }
+
+            fn flags(&self) -> gdk::PaintableFlags {
+                gdk::PaintableFlags::STATIC_SIZE | gdk::PaintableFlags::STATIC_CONTENTS
+            }
+
+            fn snapshot(&self, snapshot: &gdk::Snapshot, width: f64, height: f64) {
+                if let Some(texture) = self.texture.get() {
+                    texture.snapshot(snapshot, width, height);
+                }
+            }
+        }
+    }
+
+    glib::wrapper! {
+        pub struct Scaled(ObjectSubclass<imp::Scaled>) @implements gdk::Paintable;
+    }
+
+    impl Scaled {
+        /// `texture` rendered at `pixel_per_pt` device pixels per point,
+        /// shown at `zoom` logical pixels per point.
+        pub fn new(texture: gdk::Texture, pixel_per_pt: f64, zoom: f64) -> Self {
+            let obj: Self = glib::Object::new();
+            let _ = obj.imp().texture.set(texture);
+            obj.imp().scale.set(zoom / pixel_per_pt);
+            obj
+        }
+    }
 }
 
 #[cfg(test)]
