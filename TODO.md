@@ -4,11 +4,6 @@ Where the work stands. Delete items when done (git keeps the history). Bugs belo
 in GitHub issues; the ones below were found before that and are to be moved there.
 Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
 
-## Waiting for the user's test
-
-- Remarks across blocks: a selection over a display formula remarks all of it,
-  from where it starts to where it ends (shaded across the formula).
-
 ## Next
 
 From the user's list of 2026-11-15, one group at a time:
