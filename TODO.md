@@ -4,13 +4,6 @@ Where the work stands. Delete items when done (git keeps the history). Bugs belo
 in GitHub issues; the ones below were found before that and are to be moved there.
 Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
 
-## Waiting for the user's test
-
-- Code pieces that fail show their source on red outside formulas (inline pieces,
-  inline calls, block calls); a name defined nowhere typed with a space is code.
-- Not confirmed yet, from earlier rounds: remarks sidebar (R2–R3), chat (C1–C2),
-  projects and pictures, labels/outline/footnote navigation.
-
 ## Next
 
 From the user's list of 2026-11-15, one group at a time:
