@@ -359,9 +359,9 @@ fn dim(text: &str) -> gtk::Label {
         .build()
 }
 
-/// Cards on old-paper yellow: the theme's background tinted yellow (cream
-/// in a light theme, warm dark in a dark one, so the quotation rendered in
-/// the text colour reads in both); the cards the caret is in outlined.
+/// Cards on old-paper yellow with dark text in any theme, as the paper is
+/// white in any theme (the quotation and the remark are rendered in black);
+/// the cards the caret is in outlined.
 fn load_css() {
     thread_local!(static LOADED: Cell<bool> = const { Cell::new(false) });
     if LOADED.replace(true) {
@@ -374,11 +374,12 @@ fn load_css() {
     css.load_from_string(
         ".remark-list { background: none; }
          .remark-list > row { padding: 4px 8px; background: none; }
-         .remark-card { background: mix(@window_bg_color, #e9c46a, 0.22); border-radius: 6px;
+         .remark-card { background: #f8f0d8; color: #2e2a22; border-radius: 6px;
                         padding: 8px; border: 1px solid alpha(#9a7a20, 0.3); }
+         .remark-card button { color: #2e2a22; }
          .remark-list > row:selected .remark-card { border-color: alpha(#c08a00, 0.9);
                         box-shadow: 0 0 0 1px alpha(#c08a00, 0.9); }
-         .remark-text, .remark-text text { background: none; }
+         .remark-text, .remark-text text { background: none; color: #2e2a22; }
          .remark-quote { padding-bottom: 6px; margin-bottom: 2px;
                          border-bottom: 1px solid alpha(#9a7a20, 0.3); }",
     );
