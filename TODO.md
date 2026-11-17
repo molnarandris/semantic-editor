@@ -2,6 +2,7 @@
 
 Where the work stands. Delete items when done (git keeps the history). Bugs belong
 in GitHub issues; the ones below were found before that and are to be moved there.
+Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
 
 ## Waiting for the user's test
 
@@ -20,21 +21,20 @@ in GitHub issues; the ones below were found before that and are to be moved ther
 
 From the user's list of 2026-11-15, one group at a time:
 
-1. A way to turn greedy line breaking off.
-2. Syntax highlighting in the header, code and figure editors (GtkSourceView with
+1. Syntax highlighting in the header, code and figure editors (GtkSourceView with
    Typesetter's Typst language file, GPL).
-3. Formulas (in progress, user decision 2026-11-16): text only with `"` (done:
+2. Formulas (in progress, user decision 2026-11-16): text only with `"` (done:
    other words are code); text and code edited in place, typing anywhere in them
    (done); outlined while the caret is in them, like calls (done). Then:
    typing `#` in a formula to start code; copy and paste of a formula holding
    `#bigbx` breaks subscripts; symbol completion while typing a name, most used
    first; matrices.
-4. Remarks rework: a selection across a display formula remarks only the text before
+3. Remarks rework: a selection across a display formula remarks only the text before
    it; remark text in the editor's syntax, rendered by Typst; no prominent author,
    date or replies; the card shows the remarked text rendered; maybe in the margin
    instead of a sidebar (undecided).
-5. Chat: clickable references to the paper's parts; Claude can add remarks.
-6. Sidebar buttons look bad (postponed by the user, not important).
+4. Chat: clickable references to the paper's parts; Claude can add remarks.
+5. Sidebar buttons look bad (postponed by the user, not important).
 
 Then the planned features:
 
