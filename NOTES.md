@@ -162,6 +162,11 @@ Learned the hard way (blurry text that Typesetter did not have):
   shrunk only when wider than the card. Screenshots under
   Broadway fail while the remarks sidebar opens at startup (an AdwBin gets a garbage
   width; not seen on Wayland).
+- **No widget-tree changes inside a focus handler**: removing the widget that is
+  losing the focus (an empty remark card deleted on leave) makes GTK loop for ever
+  on `gtk_widget_get_parent` criticals (frozen window). Defer with
+  `idle_add_local_once`. A hung app shows it in `journalctl --user`; `eu-stack -p`
+  plus `eu-addr2line` on `build-dir/files/lib/debug` names the frames.
 - **References from a remark to the paper**: a card's editor is a document of its
   own, so the paper hands it its labels (`outside_labels`: unique, reported, with
   stand-in element and number) and the card's jobs add the same `ref_stub` stand-ins
