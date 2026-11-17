@@ -626,11 +626,12 @@ mod tests {
         assert!(n.bottom() <= dn.y + 1.0);
     }
 
-    /// A matrix's cells, an empty one too, have boxes in their places.
+    /// A matrix's cells, empty ones too, have boxes in their places (an
+    /// empty cell ending a row keeps the row's end).
     #[test]
     fn matrix_cells_have_boxes() {
         let mut d = Document::empty();
-        let cells: Vec<_> = ["a", "b", "c", ""]
+        let cells: Vec<_> = ["a", "", "c", ""]
             .iter()
             .map(|s| {
                 let nodes = if s.is_empty() {

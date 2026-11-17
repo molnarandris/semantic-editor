@@ -1552,6 +1552,7 @@ $ f(x) &= cases(1 "if" x > 0, 0) \
             "$|x||y| + |[a]| + |-x| + |=|$",
             "$x \"if\"y$ and $x\"if\" y$",
             "$ mat(1, 2; 3, 4) $",
+            "$ mat(a, #sym.brace.l; c, x_#sym.brace.r; d) $",
             "$ mat(delim: \"[\", a, b, c; d, e; f) $",
         ] {
             let doc = renders_the_same(src);

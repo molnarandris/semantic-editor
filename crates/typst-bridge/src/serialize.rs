@@ -1017,6 +1017,10 @@ impl Writer {
                 w.out.push_str(&math_opts(opts));
                 for (i, arg) in args.iter().enumerate() {
                     if rows.contains(&i) {
+                        // Right after code, Typst takes `;` as the code's end.
+                        if ends_in_code(&args[i - 1]) {
+                            w.out.push(' ');
+                        }
                         w.out.push_str("; ");
                     } else if i > 0 || !opts.is_empty() {
                         w.out.push_str(", ");
@@ -1074,6 +1078,19 @@ impl Writer {
                 }
             }
         });
+    }
+}
+
+/// Whether a row's source may end in embedded code (`#x`, an empty slot):
+/// it is empty, its last node is code, or a script or denominator that may end so.
+fn ends_in_code(row: &MathRow) -> bool {
+    match row.nodes.last().map(|n| &n.kind) {
+        None | Some(MathKind::Code(_) | MathKind::Slot | MathKind::Diagram(_)) => true,
+        Some(MathKind::Scripts { sup, sub, .. }) => {
+            sub.as_ref().or(sup.as_ref()).is_some_and(ends_in_code)
+        }
+        Some(MathKind::Frac { den, .. }) => ends_in_code(den),
+        _ => false,
     }
 }
 
