@@ -278,11 +278,17 @@ impl Window {
                 return;
             };
             match action {
+                // Showing a remark selects its range in the paper; that is
+                // not a selection to ask the chat about.
                 RemarkAction::Select(id) => {
                     this.editor.select_remark(id);
+                    this.chat.set_quote(None);
                     this.editor.grab_focus();
                 }
-                RemarkAction::Show(id) => this.editor.select_remark(id),
+                RemarkAction::Show(id) => {
+                    this.editor.select_remark(id);
+                    this.chat.set_quote(None);
+                }
                 RemarkAction::SetText(id, text) => this.editor.set_remark_text(id, &text),
                 RemarkAction::Resolve(id, resolved) => {
                     this.editor.set_remark_resolved(id, resolved)
@@ -618,6 +624,8 @@ impl Window {
         self.right_pages.set_visible_child_name("remarks");
         self.update_remarks();
         self.remarks.edit(id);
+        // The selection now belongs to the remark, not to the chat.
+        self.chat.set_quote(None);
     }
 
     /// Ask for a version's name ("arXiv submission").
