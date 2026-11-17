@@ -4,11 +4,6 @@ Where the work stands. Delete items when done (git keeps the history). Bugs belo
 in GitHub issues; the ones below were found before that and are to be moved there.
 Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
 
-## Waiting for the user's test
-
-- Matrices: `mat(a, b; c, d)` typed, imported and exported with its rows; `,` next
-  cell, `;`/Enter new row, ↑/↓ between rows, Backspace joins rows.
-
 ## Next
 
 From the user's list of 2026-11-15, one group at a time:
