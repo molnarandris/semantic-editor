@@ -4,12 +4,6 @@ Where the work stands. Delete items when done (git keeps the history). Bugs belo
 in GitHub issues; the ones below were found before that and are to be moved there.
 Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
 
-## Waiting for the user's test
-
-- Symbol completion in formulas: from the second letter, symbols, functions and
-  operators starting with what was typed; the ones this document uses most first
-  (user's choice: this document only).
-
 ## Next
 
 From the user's list of 2026-11-15, one group at a time:
