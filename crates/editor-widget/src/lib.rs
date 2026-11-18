@@ -161,6 +161,16 @@ impl SemEditor {
         added
     }
 
+    /// Add a remark at `anchor` (one from Claude): its id, `None` if
+    /// read-only.
+    pub fn add_remark_at(&self, anchor: model::Anchor, text: &str) -> Option<u64> {
+        let added = self.imp().editor.borrow_mut().add_remark_at(anchor, text);
+        if added.is_some() {
+            self.imp().after_command(false);
+        }
+        added
+    }
+
     /// The selection as Typst, as Copy puts it on the clipboard.
     pub fn selection_source(&self) -> Option<String> {
         let fragment = self.imp().editor.borrow().selection_fragment()?;

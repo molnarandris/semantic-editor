@@ -277,6 +277,38 @@ impl Window {
                 this.go_to_place(place);
             }
         });
+        let (find, add, show) = (
+            Rc::downgrade(self),
+            Rc::downgrade(self),
+            Rc::downgrade(self),
+        );
+        self.chat.connect_remarks(chat::RemarkHooks {
+            find: Box::new(move |block, at| {
+                find.upgrade().is_some_and(|this| {
+                    let doc = this.editor.document();
+                    doc.phrase_anchor(model::NodeId(block), at).is_some()
+                })
+            }),
+            add: Box::new(move |block, at, text| {
+                let this = add.upgrade()?;
+                let anchor = this
+                    .editor
+                    .document()
+                    .phrase_anchor(model::NodeId(block), at)?;
+                let id = this.editor.add_remark_at(anchor, text)?;
+                this.update_remarks();
+                Some(id)
+            }),
+            show: Box::new(move |id| {
+                if let Some(this) = show.upgrade() {
+                    this.split_remarks.set_show_sidebar(true);
+                    this.right_pages.set_visible_child_name("remarks");
+                    this.editor.select_remark(id);
+                    this.chat.set_quote(None);
+                    this.update_remarks();
+                }
+            }),
+        });
         let weak = Rc::downgrade(self);
         self.remarks.connect_action(move |action| {
             let Some(this) = weak.upgrade() else {

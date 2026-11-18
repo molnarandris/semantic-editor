@@ -5,7 +5,9 @@
 //! back into the input box. Answers are plain text while they stream in,
 //! then shown by a read-only editor like the paper's (its definitions in
 //! force): `@label` shows the paper's number, and a click on it goes there
-//! in the paper. Copy puts an answer's Typst on the clipboard. The
+//! in the paper. A remark Claude proposes (`#remark(block: N, at: "…")[…]`)
+//! shows as a card with Go There and Add; nothing is added without Add.
+//! Copy puts an answer's Typst on the clipboard. The
 //! conversation is not kept: it ends with the window or the document.
 
 use std::cell::{Cell, RefCell};
@@ -20,11 +22,28 @@ use crate::chat::{self, Author, Event, Message, Quote};
 
 /// Logical pixels per point of an answer (as when they were pictures).
 const ANSWER_ZOOM: f64 = 1.25;
+/// The text colour of a remark card (cream in either theme).
+const REMARK_TEXT: &str = "#2e2a22";
 
 type Paper = Box<dyn Fn() -> String>;
 /// The paper's header and labels, for an answer to be shown with.
 type Context = Box<dyn Fn() -> (String, Vec<Outside>)>;
 type Follow = Box<dyn Fn(Place)>;
+
+/// Whether a place (block id, phrase) is in the paper.
+type FindPlace = dyn Fn(u64, Option<&str>) -> bool;
+/// Add a remark (place, text): its id.
+type AddRemark = dyn Fn(u64, Option<&str>, &str) -> Option<u64>;
+
+/// What the chat asks of the paper for a remark Claude proposes.
+pub struct RemarkHooks {
+    /// Whether its place (block id, phrase) is in the paper.
+    pub find: Box<FindPlace>,
+    /// Add it (place, text): its id, `None` if it cannot be added.
+    pub add: Box<AddRemark>,
+    /// Show the remark's card.
+    pub show: Box<dyn Fn(u64)>,
+}
 
 /// A place of the paper an answer points at.
 pub enum Place {
@@ -59,6 +78,7 @@ pub struct ChatPane {
     /// Go to a place of the paper (a click on a reference or a link in an
     /// answer).
     follow: Rc<RefCell<Option<Follow>>>,
+    remark_hooks: RefCell<Option<Rc<RemarkHooks>>>,
 }
 
 impl ChatPane {
@@ -169,6 +189,7 @@ impl ChatPane {
             paper: RefCell::default(),
             context: RefCell::default(),
             follow: Rc::default(),
+            remark_hooks: RefCell::default(),
         });
 
         let weak = Rc::downgrade(&this);
@@ -218,6 +239,11 @@ impl ChatPane {
     /// Call `f` with the place of the paper a click in an answer goes to.
     pub fn connect_follow(&self, f: impl Fn(Place) + 'static) {
         *self.follow.borrow_mut() = Some(Box::new(f));
+    }
+
+    /// How remarks Claude proposes are found, added and shown.
+    pub fn connect_remarks(&self, hooks: RemarkHooks) {
+        *self.remark_hooks.borrow_mut() = Some(Rc::new(hooks));
     }
 
     /// Let the answers' references show the paper's labels as now
@@ -413,10 +439,19 @@ impl ChatPane {
         self.scroll_to_end();
     }
 
-    /// An answer: its Typst shown by a read-only editor, Copy below.
+    /// An answer: its Typst shown by a read-only editor, with each remark
+    /// Claude proposes as a card in its place; Copy below.
     fn answer_view(&self, text: &str) -> gtk::Box {
-        let view = gtk::Box::new(gtk::Orientation::Vertical, 2);
-        view.append(&self.answer_editor(text));
+        let view = gtk::Box::new(gtk::Orientation::Vertical, 6);
+        for part in chat::parts(text) {
+            match part {
+                chat::Part::Text(t) if t.trim().is_empty() => {}
+                chat::Part::Text(t) => view.append(&self.answer_editor(&t, None)),
+                chat::Part::Remark { block, at, text } => {
+                    view.append(&self.proposal(block, at, &text))
+                }
+            }
+        }
         let copy = gtk::Button::builder()
             .label("Copy")
             .tooltip_text("Copy the Answer as Typst")
@@ -429,10 +464,76 @@ impl ChatPane {
         view
     }
 
+    /// A remark Claude proposes, as a card like the Remarks tab's: its
+    /// text, a link to its place and Add, which then becomes Show Remark.
+    /// A place not in the paper has no Add and says so.
+    fn proposal(&self, block: u64, at: Option<String>, text: &str) -> gtk::Box {
+        let card = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(4)
+            .css_classes(["remark-card"])
+            .build();
+        card.append(&self.answer_editor(text, Some(REMARK_TEXT)));
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        let go = gtk::Button::builder()
+            .label("Go There")
+            .tooltip_text("Show Its Place in the Paper")
+            .css_classes(["flat", "caption"])
+            .build();
+        let follow = self.follow.clone();
+        go.connect_clicked(move |_| {
+            if let Some(f) = follow.borrow().as_ref() {
+                f(Place::Block(model::NodeId(block)));
+            }
+        });
+        row.append(&go);
+        card.append(&row);
+        let Some(hooks) = self.remark_hooks.borrow().clone() else {
+            return card;
+        };
+        if !(hooks.find)(block, at.as_deref()) {
+            go.set_visible((hooks.find)(block, None));
+            row.append(&note("Its place is not in the paper."));
+            return card;
+        }
+        let add = gtk::Button::builder()
+            .label("Add")
+            .tooltip_text("Add to the Remarks")
+            .hexpand(true)
+            .halign(gtk::Align::End)
+            .css_classes(["caption"])
+            .build();
+        let text = text.to_string();
+        add.connect_clicked(move |add| {
+            let Some(row) = add.parent().and_downcast::<gtk::Box>() else {
+                return;
+            };
+            row.remove(add);
+            match (hooks.add)(block, at.as_deref(), &text) {
+                Some(id) => {
+                    let show = gtk::Button::builder()
+                        .label("Show Remark")
+                        .hexpand(true)
+                        .halign(gtk::Align::End)
+                        .css_classes(["flat", "caption"])
+                        .build();
+                    let hooks = hooks.clone();
+                    show.connect_clicked(move |_| (hooks.show)(id));
+                    row.append(&show);
+                }
+                None => row.append(&note(
+                    "Not added: its place is gone, or this is an old version.",
+                )),
+            }
+        });
+        row.append(&add);
+        card
+    }
+
     /// A read-only editor showing an answer's Typst with the paper's
-    /// header and labels, in the chat's text colour (the chat's text rule:
-    /// 11pt, not justified, wide formulas scaled down).
-    fn answer_editor(&self, text: &str) -> SemEditor {
+    /// header and labels, in the chat's text colour or `color` (the chat's
+    /// text rule: 11pt, not justified, wide formulas scaled down).
+    fn answer_editor(&self, text: &str, color: Option<&str>) -> SemEditor {
         let (header, labels) = self
             .context
             .borrow()
@@ -441,12 +542,14 @@ impl ChatPane {
             .unwrap_or_default();
         let c = self.widget.color();
         let hex = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
-        let color = format!(
-            "rgb(\"#{:02x}{:02x}{:02x}\")",
-            hex(c.red()),
-            hex(c.green()),
-            hex(c.blue())
-        );
+        let color = color.map(|c| format!("rgb(\"{c}\")")).unwrap_or_else(|| {
+            format!(
+                "rgb(\"#{:02x}{:02x}{:02x}\")",
+                hex(c.red()),
+                hex(c.green()),
+                hex(c.blue())
+            )
+        });
         let mut doc = typst_bridge::import_typ(text);
         doc.header = format!("{header}\n{}", typst_bridge::snippet_rule(&color));
         let editor = SemEditor::new();
@@ -502,6 +605,17 @@ impl ChatPane {
             self.clear();
         }
     }
+}
+
+/// A short dim note in a proposal's row.
+fn note(text: &str) -> gtk::Label {
+    gtk::Label::builder()
+        .label(text)
+        .xalign(0.0)
+        .wrap(true)
+        .hexpand(true)
+        .css_classes(["caption", "dim-label"])
+        .build()
 }
 
 fn text_label(text: &str) -> gtk::Label {

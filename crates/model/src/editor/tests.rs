@@ -2597,3 +2597,47 @@ fn remarks_for_the_sidebar() {
     assert!(!e.delete_remark(range));
     assert_eq!(e.doc().remarks.len(), 1);
 }
+
+/// A remark from Claude: a block, or a phrase found in its text (line
+/// breaks as spaces, across emphasis) made a range; a phrase through a
+/// formula, or in no block, is not found.
+#[test]
+fn remarks_from_claude() {
+    let doc = typst_free_doc();
+    let mut e = Editor::new(doc);
+    let p = e.doc().blocks[0].id;
+    assert_eq!(e.doc().phrase_anchor(p, None), Some(Anchor::Block(p)));
+    assert_eq!(e.doc().phrase_anchor(NodeId(9999), None), None);
+    let range = |e: &Editor, phrase| {
+        let anchor = e.doc().phrase_anchor(p, Some(phrase))?;
+        let mut d = e.doc().clone();
+        let id = d.add_remark(anchor, "");
+        let r = d.remarks.iter().find(|r| r.id == id).unwrap();
+        let (a, b) = d.remark_range(r).unwrap();
+        Some((a.path, a.offset, b.path, b.offset))
+    };
+    // "For every\n compact set " · _space_ · " we have " · $x$ · " ok."
+    let (_, a, _, b) = range(&e, "every compact").unwrap();
+    assert_eq!((a, b), (4, 20));
+    let (pa, _, pb, b) = range(&e, "set space we").unwrap();
+    assert_ne!(pa, pb, "ends in different texts");
+    assert_eq!(b, 3);
+    assert_eq!(range(&e, "have x ok"), None, "through a formula");
+    assert_eq!(range(&e, "nowhere"), None);
+    let id = e.add_remark_at(Anchor::Block(p), "Check.").unwrap();
+    assert_eq!(e.doc().remarks[0].id, id);
+}
+
+/// "For every\n compact set _space_ we have $x$ ok."
+fn typst_free_doc() -> Document {
+    let mut d = Document::empty();
+    let t0 = d.text("For every\n   compact set ");
+    let sp = d.text("space");
+    let em = d.inline_call("emph", "", vec![sp]);
+    let t1 = d.text(" we have ");
+    let x = d.ident("x");
+    let m = d.math(vec![x]);
+    let t2 = d.text(" ok.");
+    d.blocks = vec![d.paragraph(vec![t0, em, t1, m, t2])];
+    d
+}

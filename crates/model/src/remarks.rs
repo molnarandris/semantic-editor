@@ -195,6 +195,71 @@ impl Document {
         ))
     }
 
+    /// Where a remark from Claude goes: block `block` (top-level or
+    /// nested), or with `phrase` the first range of its text that reads
+    /// `phrase` (spaces and line breaks count as one space; a formula or
+    /// other non-text part in between breaks a match). `None` if there is
+    /// no such block or phrase.
+    pub fn phrase_anchor(&self, block: NodeId, phrase: Option<&str>) -> Option<Anchor> {
+        let node = self.block(block)?;
+        let Some(phrase) = phrase else {
+            return Some(Anchor::Block(block));
+        };
+        let phrase: Vec<char> = phrase
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .chars()
+            .collect();
+        if phrase.is_empty() {
+            return None;
+        }
+        // The block's text, one char per position, each with its point
+        // and its block; whitespace runs as one space, '\0' for a part
+        // that is not text.
+        let mut chars: Vec<(char, Point, NodeId)> = vec![];
+        for c in self.positions(node) {
+            let ch = match self.resolve(&c) {
+                Some(Target::Text { text, .. }) => match text.chars().nth(c.offset) {
+                    Some(ch) => ch,
+                    // The end of a text: the next position goes on.
+                    None => continue,
+                },
+                _ => '\0',
+            };
+            let ch = if ch.is_whitespace() { ' ' } else { ch };
+            if ch == ' ' && chars.last().is_some_and(|l| l.0 == ' ') {
+                continue;
+            }
+            let Some(point) = self.point_at(&c) else {
+                chars.push((
+                    '\0',
+                    Point {
+                        node: block,
+                        offset: 0,
+                    },
+                    c.block,
+                ));
+                continue;
+            };
+            chars.push((ch, point, c.block));
+        }
+        let start = chars
+            .windows(phrase.len())
+            .position(|w| w.iter().map(|x| x.0).eq(phrase.iter().copied()))?;
+        let (_, first, first_block) = chars[start];
+        let (_, last, last_block) = chars[start + phrase.len() - 1];
+        Some(Anchor::Range {
+            block: first_block,
+            start: first,
+            end_block: last_block,
+            end: Point {
+                offset: last.offset + 1,
+                ..last
+            },
+        })
+    }
+
     /// Add a remark; returns its id.
     pub fn add_remark(&mut self, anchor: Anchor, text: &str) -> u64 {
         let id = self.remarks.iter().map(|r| r.id).max().unwrap_or(0) + 1;

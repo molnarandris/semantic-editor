@@ -892,6 +892,15 @@ impl Editor {
         self.doc.remarks.iter_mut().find(|r| r.id == id)
     }
 
+    /// Add a remark at `anchor` (a remark from Claude, see
+    /// [`Document::phrase_anchor`]). Not part of undo. Returns its id.
+    pub fn add_remark_at(&mut self, anchor: Anchor, text: &str) -> Option<u64> {
+        if self.read_only {
+            return None;
+        }
+        Some(self.doc.add_remark(anchor, text))
+    }
+
     /// Change remark `id`'s text. Not part of undo.
     pub fn set_remark_text(&mut self, id: u64, text: &str) -> bool {
         let Some(remark) = self.remark_mut(id) else {

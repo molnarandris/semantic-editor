@@ -175,6 +175,14 @@ Learned the hard way (blurry text that Typesetter did not have):
   `#link("block:N")[…]` (an earlier phrase search, `paper:<phrase>`, is gone);
   `link_url` accepts `block:`, a read-only editor emits `follow-place` with the id
   on a plain click, `go_to_block` finds nested blocks.
+- **Claude's remark proposals** are cut out of the answer text before import
+  (`chat::parts`, a small bracket/string matcher, not the Typst parser: `remark`
+  is not a function the answer could compile). Each shows as a `remark-card` with
+  its own read-only editor in the card's dark text colour. The place is a block id
+  plus a phrase; `Document::phrase_anchor` reads the block's text one caret
+  position at a time (whitespace runs as one space, any non-text position a
+  break), so the phrase must be plain text: Claude is told so. The first match
+  wins. Add looks the place up again (the paper may have changed since).
 - **No widget-tree changes inside a focus handler**: removing the widget that is
   losing the focus (an empty remark card deleted on leave) makes GTK loop for ever
   on `gtk_widget_get_parent` criticals (frozen window). Defer with
