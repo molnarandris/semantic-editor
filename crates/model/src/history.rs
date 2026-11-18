@@ -17,6 +17,8 @@ struct Txn {
 pub struct History {
     undo: Vec<Txn>,
     redo: Vec<Txn>,
+    /// Edits applied so far, undo and redo included (see [`Self::edits`]).
+    edits: u64,
 }
 
 impl History {
@@ -33,6 +35,7 @@ impl History {
         after: CursorPath,
     ) -> Result<(), OpError> {
         let ops = doc.apply_all(ops)?;
+        self.edits += 1;
         self.undo.push(Txn { ops, before, after });
         self.redo.clear();
         Ok(())
@@ -51,6 +54,7 @@ impl History {
             return self.apply(doc, ops, before, after);
         };
         let mut inverse = doc.apply_all(ops)?;
+        self.edits += 1;
         // Undo the newer edit first.
         inverse.append(&mut last.ops);
         last.ops = inverse;
@@ -63,6 +67,7 @@ impl History {
     pub fn undo(&mut self, doc: &mut Document) -> Option<CursorPath> {
         let txn = self.undo.pop()?;
         let ops = doc.apply_all(txn.ops).expect("undo ops apply");
+        self.edits += 1;
         let caret = txn.before.clone();
         self.redo.push(Txn { ops, ..txn });
         Some(caret)
@@ -72,9 +77,16 @@ impl History {
     pub fn redo(&mut self, doc: &mut Document) -> Option<CursorPath> {
         let txn = self.redo.pop()?;
         let ops = doc.apply_all(txn.ops).expect("redo ops apply");
+        self.edits += 1;
         let caret = txn.after.clone();
         self.undo.push(Txn { ops, ..txn });
         Some(caret)
+    }
+
+    /// How many edits were applied (undo and redo count too): unchanged
+    /// means the document is unchanged, a cheap test for the view.
+    pub fn edits(&self) -> u64 {
+        self.edits
     }
 
     pub fn can_undo(&self) -> bool {

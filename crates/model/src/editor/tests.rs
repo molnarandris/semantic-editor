@@ -2641,3 +2641,33 @@ fn typst_free_doc() -> Document {
     d.blocks = vec![d.paragraph(vec![t0, em, t1, m, t2])];
     d
 }
+
+/// The edit count (the view's cheap "did the document change" test):
+/// typing, undo and redo count; moving through text does not, unless the
+/// move finishes a word (`chi` → χ).
+#[test]
+fn edits_count_changes_only() {
+    let mut e = Editor::default();
+    e.insert_text("ab");
+    let typed = e.edits();
+    assert!(typed > 0);
+    e.move_left();
+    e.move_left();
+    e.move_right();
+    assert_eq!(e.edits(), typed, "moves alone");
+    e.undo();
+    assert!(e.edits() > typed);
+    let undone = e.edits();
+    e.redo();
+    assert!(e.edits() > undone);
+
+    let mut e = Editor::default();
+    e.insert_text("$$chi");
+    let typed = e.edits();
+    e.move_left();
+    assert!(e.edits() > typed, "finishing the word is an edit");
+    let finished = e.edits();
+    e.move_right();
+    e.move_left();
+    assert_eq!(e.edits(), finished);
+}

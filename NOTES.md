@@ -183,6 +183,14 @@ Learned the hard way (blurry text that Typesetter did not have):
   position at a time (whitespace runs as one space, any non-text position a
   break), so the phrase must be plain text: Claude is told so. The first match
   wins. Add looks the place up again (the paper may have changed since).
+- **A caret move skips the search for blocks to compile** (`after_move`, `Moved`
+  in `input.rs`): that search builds every block's source (~10 ms on the sample in
+  a debug build, more in a long paper), and a held arrow key's auto-repeat outran
+  it, so GTK drew only on key up. A move needs it only if it edited (finishing a
+  word, dropping an empty call: the model's `edits` count, kept by `History`),
+  opened or closed a code atom, or left the block being typed in (normal line
+  breaks again). Like GtkTextView, there is no key-repeat detection (GTK 4 has no
+  repeat flag); every move is simply cheap.
 - **No widget-tree changes inside a focus handler**: removing the widget that is
   losing the focus (an empty remark card deleted on leave) makes GTK loop for ever
   on `gtk_widget_get_parent` criticals (frozen window). Defer with

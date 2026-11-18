@@ -7,7 +7,7 @@ impl SemEditor {
     /// Which top-level block is being typed in: the caret's, once it has
     /// changed while the caret was in it, until the caret leaves it. (Not
     /// on merely entering it, so reading with the caret reflows nothing.)
-    fn track_editing(&self, ed: &Editor) {
+    pub(super) fn track_editing(&self, ed: &Editor) {
         let doc = ed.doc();
         let top = doc.top_index(ed.caret().block).map(|i| &doc.blocks[i]);
         let mut last = self.caret_block.borrow_mut();

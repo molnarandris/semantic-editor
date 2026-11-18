@@ -516,6 +516,22 @@ impl SemEditor {
         self.obj().emit_by_name::<()>("caret-moved", &[]);
     }
 
+    /// As `after_command`, after a caret move that changed nothing a
+    /// block's render depends on (see `Moved` in `input.rs`): no search for
+    /// blocks to compile, which builds every block's source and is slow in
+    /// a long paper (a held arrow key outran it, and GTK drew only on key
+    /// up). The block views stay as they are.
+    pub(crate) fn after_move(&self) {
+        self.track_editing(&self.editor.borrow());
+        self.obj().queue_draw();
+        self.reveal.set(true);
+        self.reveal_caret();
+        self.update_im_location();
+        self.update_completions();
+        self.restart_blink();
+        self.obj().emit_by_name::<()>("caret-moved", &[]);
+    }
+
     /// Bring the view in line with the model after a command. Any command
     /// may change the document (moving the caret finishes a word, `chi` →
     /// χ); only blocks whose source changed are recompiled.

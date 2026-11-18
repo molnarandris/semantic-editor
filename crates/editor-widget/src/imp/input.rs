@@ -280,6 +280,7 @@ impl SemEditor {
         }
         // Commands report whether they changed anything, but the view syncs
         // by comparing sources anyway, so the results are not needed.
+        let before = Moved::before(&self.editor.borrow());
         let mut ed = self.editor.borrow_mut();
         match cmd {
             Command::Left => _ = ed.move_left(),
@@ -363,7 +364,11 @@ impl SemEditor {
             }
         }
         drop(ed);
-        self.after_command(true);
+        if cmd.is_move() && before.nothing_to_compile(&self.editor.borrow(), self.editing.get()) {
+            self.after_move();
+        } else {
+            self.after_command(true);
+        }
     }
 
     /// Ask the app to open the caret's raw/diagram block, or the code atom
@@ -598,4 +603,42 @@ fn command_for(key: gdk::Key, state: gdk::ModifierType) -> Option<Command> {
         },
         _ => return None,
     })
+}
+
+/// What decides, after a caret move, whether any block must be compiled
+/// again: taken before the move, compared after it.
+struct Moved {
+    /// The model's edit count: a move may still edit (it finishes a word,
+    /// drops an empty call it leaves).
+    edits: u64,
+    /// The code atom showing its source.
+    open_code: Option<NodeId>,
+    /// The top-level block the caret is in.
+    top: Option<NodeId>,
+}
+
+impl Moved {
+    fn before(ed: &Editor) -> Self {
+        Self {
+            edits: ed.edits(),
+            open_code: ed.open_code(),
+            top: top_block(ed),
+        }
+    }
+
+    /// True if the move changed nothing a block's render depends on: no
+    /// edit, the same code atom open, and it did not leave the block being
+    /// typed in (`editing`, which then gets its normal line breaks back).
+    /// Then the whole-document search for blocks to compile is skipped.
+    fn nothing_to_compile(&self, ed: &Editor, editing: Option<NodeId>) -> bool {
+        let left = self.top != top_block(ed);
+        ed.edits() == self.edits
+            && ed.open_code() == self.open_code
+            && !(left && editing.is_some() && editing == self.top)
+    }
+}
+
+fn top_block(ed: &Editor) -> Option<NodeId> {
+    let doc = ed.doc();
+    doc.top_index(ed.caret().block).map(|i| doc.blocks[i].id)
 }

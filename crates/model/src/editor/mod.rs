@@ -407,6 +407,11 @@ impl Editor {
         self.drop_left_call(&old);
     }
 
+    /// How many edits were applied (see [`History::edits`]).
+    pub fn edits(&self) -> u64 {
+        self.history.edits()
+    }
+
     pub fn can_undo(&self) -> bool {
         self.history.can_undo()
     }
