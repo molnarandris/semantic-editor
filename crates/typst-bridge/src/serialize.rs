@@ -221,6 +221,9 @@ struct Writer {
     /// Code pieces and calls that failed to compile (Edit style): their
     /// source shows, on red.
     failed: Vec<NodeId>,
+    /// Each block's id in a comment on the line before it,
+    /// `/* block 17 */` (the paper as Claude reads it: never compiled).
+    ids: bool,
 }
 
 /// Whether inline call `i` of `inlines` (bold or italic) can be written as
@@ -294,6 +297,10 @@ impl Writer {
     }
 
     fn block(&mut self, block: &BlockNode) {
+        if self.ids {
+            self.out.push_str(&format!("/* block {} */", block.id.0));
+            self.nl();
+        }
         self.node(block.id, |w| w.block_kind(block));
         // The label, as in Typst: right after what it labels.
         if !block.label.is_empty() && block.kind.labelable() {
@@ -1352,13 +1359,13 @@ pub fn serialize_block(block: &BlockNode) -> (String, SpanMap) {
 
 /// Serialize one block in the given style.
 pub fn serialize_block_styled(block: &BlockNode, style: Style) -> (String, SpanMap) {
-    serialize_with(block, style, None, None, &[])
+    serialize_with(block, style, None, None, &[], false)
 }
 
 /// Serialize one block for the editor; a numbered list item shows `number`
 /// (its place in the list, as the block is rendered on its own).
 pub fn serialize_block_numbered(block: &BlockNode, number: Option<usize>) -> (String, SpanMap) {
-    serialize_with(block, Style::Edit, number, None, &[])
+    serialize_with(block, Style::Edit, number, None, &[], false)
 }
 
 /// [`serialize_block_numbered`], with the source of code piece `open` (the
@@ -1370,7 +1377,7 @@ pub fn serialize_block_open(
     open: Option<NodeId>,
     failed: &[NodeId],
 ) -> (String, SpanMap) {
-    serialize_with(block, Style::Edit, number, open, failed)
+    serialize_with(block, Style::Edit, number, open, failed, false)
 }
 
 /// A standalone snippet showing only math node `node` (an inline diagram
@@ -1386,6 +1393,7 @@ pub fn serialize_math_node(node: &MathNode) -> String {
         markup: vec![],
         open: None,
         failed: vec![],
+        ids: false,
     };
     if matches!(node.kind, MathKind::Diagram(_))
         || matches!(&node.kind, MathKind::Code(s) if s.contains("cetz"))
@@ -1424,6 +1432,7 @@ fn serialize_with(
     number: Option<usize>,
     open: Option<NodeId>,
     failed: &[NodeId],
+    ids: bool,
 ) -> (String, SpanMap) {
     let mut out = String::new();
     // Standalone block documents import CeTZ themselves; a diagram block
@@ -1442,6 +1451,7 @@ fn serialize_with(
         markup: vec![],
         open,
         failed: failed.to_vec(),
+        ids,
     };
     w.block(block);
     (w.out, w.map)
@@ -1486,6 +1496,17 @@ pub fn serialize_document(doc: &Document) -> String {
 /// The whole document as one readable Typst file, with a span map over all
 /// blocks.
 pub fn serialize_document_mapped(doc: &Document) -> (String, SpanMap) {
+    document(doc, false)
+}
+
+/// The document as Claude reads it in the chat: the export's Typst with each
+/// block's id in a comment on the line before it, `/* block 17 */`, nested
+/// blocks included. Not meant to be compiled.
+pub fn serialize_document_with_ids(doc: &Document) -> String {
+    document(doc, true).0
+}
+
+fn document(doc: &Document, ids: bool) -> (String, SpanMap) {
     let mut out = String::from(PREAMBLE);
     // The metadata first, so the header's rules (a template) can read it.
     if let Some(fields) = doc.title() {
@@ -1510,7 +1531,7 @@ pub fn serialize_document_mapped(doc: &Document) -> (String, SpanMap) {
             out.push('\n');
         }
 
-        let (snippet, mut block_map) = serialize_block_styled(block, Style::Readable);
+        let (snippet, mut block_map) = serialize_with(block, Style::Readable, None, None, &[], ids);
         block_map.shift(out.len());
         map.entries.append(&mut block_map.entries);
         map.texts.append(&mut block_map.texts);
@@ -1531,6 +1552,26 @@ mod tests {
 
     /// Copied pieces as Typst: inlines as text, math nodes without `$`,
     /// blocks as in the export.
+    /// The paper as Claude reads it: every block, nested ones too, after
+    /// its id in a comment.
+    #[test]
+    fn document_with_block_ids() {
+        let mut d = Document::empty();
+        let t = d.text("Let X be compact.");
+        let inner = d.paragraph(vec![t]);
+        let inner_id = inner.id.0;
+        let lemma = d.env("lemma", vec![inner]);
+        let lemma_id = lemma.id.0;
+        d.blocks = vec![lemma];
+        let typ = serialize_document_with_ids(&d);
+        let at = |s: &str| typ.find(s).unwrap_or_else(|| panic!("{s} in {typ}"));
+        assert!(
+            at(&format!("/* block {lemma_id} */\n#lemma")) < at(&format!("/* block {inner_id} */"))
+        );
+        assert!(at(&format!("/* block {inner_id} */")) < at("Let X be"));
+        assert!(!serialize_document(&d).contains("/* block"));
+    }
+
     #[test]
     fn fragments_as_typst() {
         let mut d = Document::empty();

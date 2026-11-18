@@ -30,8 +30,8 @@ type Follow = Box<dyn Fn(Place)>;
 pub enum Place {
     /// A reference to its label (`@label`).
     Label(String),
-    /// A link to a phrase copied from it (`#link("paper:…")[…]`).
-    Phrase(String),
+    /// A link to its block's id (`#link("block:17")[…]`).
+    Block(model::NodeId),
 }
 
 pub struct ChatPane {
@@ -464,9 +464,9 @@ impl ChatPane {
             }
         });
         let follow = self.follow.clone();
-        editor.connect_follow_place(move |_, phrase| {
+        editor.connect_follow_place(move |_, id| {
             if let Some(f) = follow.borrow().as_ref() {
-                f(Place::Phrase(phrase.to_string()));
+                f(Place::Block(id));
             }
         });
         self.answers.borrow_mut().push(editor.clone());

@@ -168,11 +168,13 @@ Learned the hard way (blurry text that Typesetter did not have):
   (read-only editors only; cards need Ctrl), and they re-flow with the width. Their
   header is `full_header` (the header plus the code blocks' definitions) and the
   chat's text rule (`snippet_rule`) in the theme's text colour.
-- **Chat links to unlabelled places** are `#link("paper:<phrase>")[…]`: Claude has
-  no block ids, but sees the Readable Typst, so a phrase from it finds the block
-  (`chat::find_phrase` over `serialize_block_styled(…, Readable)`, whitespace
-  collapsed; the Edit style would not match). `link_url` accepts `paper:`; a
-  read-only editor emits `follow-place` on a plain click.
+- **Chat places are block ids**: Claude reads `serialize_document_with_ids`, the
+  Readable Typst with `/* block N */` on the line before every block (nested too;
+  never compiled, so the comment may break list layout). Not `document.json`: 4.5×
+  longer, formulas as node trees, and char offsets Claude cannot count. Links are
+  `#link("block:N")[…]` (an earlier phrase search, `paper:<phrase>`, is gone);
+  `link_url` accepts `block:`, a read-only editor emits `follow-place` with the id
+  on a plain click, `go_to_block` finds nested blocks.
 - **No widget-tree changes inside a focus handler**: removing the widget that is
   losing the focus (an empty remark card deleted on leave) makes GTK loop for ever
   on `gtk_widget_get_parent` criticals (frozen window). Defer with

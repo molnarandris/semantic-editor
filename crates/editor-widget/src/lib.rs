@@ -137,9 +137,10 @@ impl SemEditor {
         Some((k + 1, problems.len(), problems[k].1.clone()))
     }
 
-    /// Put the caret at the start of top-level block `id` and show it.
-    pub fn go_to_block(&self, id: NodeId) {
-        self.imp().go_to_block(id);
+    /// Put the caret at the start of block `id` (top-level or nested) and
+    /// show it. `false` if there is no such block.
+    pub fn go_to_block(&self, id: NodeId) -> bool {
+        self.imp().go_to_block(id)
     }
 
     /// Heading `id` rendered by Typst as an outline entry (number and
@@ -395,15 +396,15 @@ impl SemEditor {
         })
     }
 
-    /// Called with the phrase when a link to a place of the paper
-    /// (`paper:` and the phrase) is clicked in a read-only text.
-    pub fn connect_follow_place<F: Fn(&Self, &str) + 'static>(
+    /// Called with the block id when a link to a block of the paper
+    /// (`block:` and its id) is clicked in a read-only text.
+    pub fn connect_follow_place<F: Fn(&Self, NodeId) + 'static>(
         &self,
         f: F,
     ) -> glib::SignalHandlerId {
         self.connect_local("follow-place", false, move |args| {
             let obj = args[0].get::<Self>().expect("SemEditor");
-            f(&obj, &args[1].get::<String>().expect("phrase"));
+            f(&obj, NodeId(args[1].get::<u64>().expect("block id")));
             None
         })
     }

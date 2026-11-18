@@ -1426,8 +1426,8 @@ impl Document {
 
     /// The web address of the link that is or holds inline `id`,
     /// `#link("https://…")[…]`: `http`, `https` and `mailto` only (not a
-    /// link to a label or a local file), or `paper:` (a chat answer's link
-    /// to a place of the paper, by a phrase from it).
+    /// link to a label or a local file), or `block:` (a chat answer's link
+    /// to a place of the paper, by its block id).
     pub fn link_url(&self, id: NodeId) -> Option<String> {
         /// The arguments of the innermost link around `id` (`link` around
         /// this list), if `id` is in it.
@@ -1455,7 +1455,7 @@ impl Document {
         let block = self.block(self.inline_block(id)?)?;
         let args = find(block.kind.text_inlines()?, id, None)??;
         let url = string_literal(args)?;
-        ["http://", "https://", "mailto:", "paper:"]
+        ["http://", "https://", "mailto:", "block:"]
             .iter()
             .any(|scheme| url.starts_with(scheme))
             .then_some(url)
@@ -1882,12 +1882,12 @@ beta-2:
         let t4 = doc.text(" ");
         let place = doc.text("the lemma");
         let place_id = place.id;
-        let to_place = doc.inline_call("link", r#""paper:Let X be""#, vec![place]);
+        let to_place = doc.inline_call("link", r#""block:17""#, vec![place]);
         let p = doc.paragraph(vec![
             t0, web, t1, to_label, t2, mail, t4, to_file, t3, to_place,
         ]);
         doc.blocks = vec![p];
-        assert_eq!(doc.link_url(place_id).as_deref(), Some("paper:Let X be"));
+        assert_eq!(doc.link_url(place_id).as_deref(), Some("block:17"));
         assert_eq!(
             doc.link_url(word_id).as_deref(),
             Some("https://a.org/?q=\"x\"")

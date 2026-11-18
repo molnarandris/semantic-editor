@@ -167,10 +167,11 @@ impl SemEditor {
                     obj.emit_by_name::<()>("follow-outside", &[&label]);
                 } else if imp.editor.borrow().read_only()
                     && let Some(url) = imp.link_at(x, y)
-                    && let Some(phrase) = url.strip_prefix("paper:")
+                    && let Some(id) = url.strip_prefix("block:")
+                    && let Ok(id) = id.trim().parse::<u64>()
                 {
-                    // To a place of the paper, from a chat answer.
-                    obj.emit_by_name::<()>("follow-place", &[&phrase]);
+                    // To a block of the paper, from a chat answer.
+                    obj.emit_by_name::<()>("follow-place", &[&id]);
                 } else if ctrl && let Some(url) = imp.link_at(x, y) {
                     // Ctrl+click on a web link: open it.
                     imp.open_link(&url);

@@ -262,7 +262,7 @@ impl Window {
         self.chat.connect_paper(move || match weak.upgrade() {
             Some(this) => {
                 this.apply_block_edit();
-                typst_bridge::serialize_document(&this.editor.document())
+                typst_bridge::serialize_document_with_ids(&this.editor.document())
             }
             None => String::new(),
         });
@@ -494,29 +494,11 @@ impl Window {
     }
 
     /// Go to the place of the paper a chat answer points at: a label's
-    /// block, or the first block whose Typst (as Claude read it) holds the
-    /// phrase, as the outline goes to a heading.
+    /// block, or a block by its id, as the outline goes to a heading.
     fn go_to_place(&self, place: chat::Place) {
-        let found = match &place {
-            chat::Place::Label(label) => self.editor.follow_ref(label),
-            chat::Place::Phrase(phrase) => {
-                let blocks: Vec<_> = self
-                    .editor
-                    .document()
-                    .blocks
-                    .iter()
-                    .map(|b| {
-                        let (typst, _) =
-                            typst_bridge::serialize_block_styled(b, typst_bridge::Style::Readable);
-                        (b.id, typst)
-                    })
-                    .collect();
-                let id = crate::chat::find_phrase(blocks, phrase);
-                if let Some(id) = id {
-                    self.editor.go_to_block(id);
-                }
-                id.is_some()
-            }
+        let found = match place {
+            chat::Place::Label(label) => self.editor.follow_ref(&label),
+            chat::Place::Block(id) => self.editor.go_to_block(id),
         };
         if found {
             self.editor.grab_focus();

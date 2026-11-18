@@ -29,7 +29,8 @@ pub use layout::{BlockLayout, GlyphBox, RawLayout, Rect, raw_layout};
 pub use serialize::{
     CETZ_IMPORT, CETZ_VERSION, DEFAULT_HEADER, HEADER_SPECIMEN, PREAMBLE, SpanMap, Style,
     fragment_source, serialize_block, serialize_block_numbered, serialize_block_open,
-    serialize_block_styled, serialize_document, serialize_document_mapped, serialize_math_node,
+    serialize_block_styled, serialize_document, serialize_document_mapped,
+    serialize_document_with_ids, serialize_math_node,
 };
 pub use symbols::{math_names, resolve_symbol};
 pub use worker::{CompileJob, CompileResult, Rendered, Worker};

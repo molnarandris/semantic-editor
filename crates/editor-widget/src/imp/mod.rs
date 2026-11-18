@@ -319,10 +319,9 @@ impl ObjectImpl for SemEditor {
                     .param_types([String::static_type()])
                     .build(),
                 // A click, in a read-only text (a chat answer), on a link to
-                // a place of the paper (`paper:` and a phrase copied from
-                // it). Param: the phrase.
+                // a block of the paper (`block:` and its id). Param: the id.
                 Signal::builder("follow-place")
-                    .param_types([String::static_type()])
+                    .param_types([u64::static_type()])
                     .build(),
                 // A heading's outline entry was rendered. Param: its id.
                 Signal::builder("outline-rendered")
@@ -595,17 +594,18 @@ impl SemEditor {
     }
 
     /// Put the caret at the start of top-level block `id` and show it.
-    pub(crate) fn go_to_block(&self, id: NodeId) {
+    pub(crate) fn go_to_block(&self, id: NodeId) -> bool {
         {
             let mut ed = self.editor.borrow_mut();
-            let Some(block) = ed.doc().blocks.iter().find(|b| b.id == id) else {
-                return;
+            let Some(block) = ed.doc().block(id) else {
+                return false;
             };
             let caret = ed.doc().start_of(block);
             ed.set_caret(caret);
         }
         self.goal_x.set(None);
         self.after_jump();
+        true
     }
 
     /// Select remark `id`'s text (or go to its block) and show it.
