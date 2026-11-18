@@ -363,7 +363,7 @@ impl SemEditor {
             }
         }
         drop(ed);
-        self.after_key();
+        self.after_command(true);
     }
 
     /// Ask the app to open the caret's raw/diagram block, or the code atom

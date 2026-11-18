@@ -183,13 +183,6 @@ Learned the hard way (blurry text that Typesetter did not have):
   position at a time (whitespace runs as one space, any non-text position a
   break), so the phrase must be plain text: Claude is told so. The first match
   wins. Add looks the place up again (the paper may have changed since).
-- **Keys coalesce their slow work per frame** (`after_key`): finding stale blocks
-  (`submit_blocks`) builds every block's source, ~10 ms on the sample in a debug
-  build and more on a long paper. Done once per key, a held arrow's auto-repeat
-  outran it, key events (priority DEFAULT) always beat the redraw (HIGH_IDLE + 20),
-  and the caret only showed on key up. Now the views sync and the caret shows at
-  once; compiling and `caret-moved` run in one idle at HIGH_IDLE + 10, before the
-  next frame.
 - **No widget-tree changes inside a focus handler**: removing the widget that is
   losing the focus (an empty remark card deleted on leave) makes GTK loop for ever
   on `gtk_widget_get_parent` criticals (frozen window). Defer with
