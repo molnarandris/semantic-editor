@@ -15,7 +15,8 @@ Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
 
 From the user's list of 2026-11-15, one group at a time:
 
-1. Chat: Claude can add remarks (clickable references done, above).
+1. Chat: Claude can add remarks, with places given by block ids (spec.md, App,
+   "Places for Claude"; awaiting the user's agreement).
 2. Sidebar buttons look bad (postponed by the user, not important).
 
 Then the planned features:

@@ -164,10 +164,22 @@ structure as soon as it is unambiguous.
   goes when left) and Chat with Claude (through the user's own Claude Code, `claude -p`;
   answers typeset by Typst; `@label` in an answer shows as a reference in the paper
   does, with its number, and a click goes there; a part without a label is linked
-  by a phrase copied from it, and a click goes to the block holding it (as the
+  by its block's id, and a click goes to that block (as the
   outline goes to a heading); not saved; a question is about the
   selection the user
   made, not the one a remark's card or a new remark leaves in the paper).
+- **Places for Claude**: the paper goes to Claude as Typst (not `document.json`:
+  that is about 4.5 times longer, its formulas are node trees and its points are
+  character offsets Claude cannot count), with each block's saved id in a comment
+  before it, `/* block 17 */`, nested blocks (an environment's body) included. A
+  place is a block id, and for a range also a phrase copied exactly from that
+  block, found only there; the app turns the phrase into the range.
+  - A link to a place: `#link("block:17")[the second lemma]`.
+  - A remark from Claude: `#remark(block: 17, at: "for every compact")[…]` in an
+    answer (`at` left out: the whole block). The app adds it to the Remarks tab
+    as an ordinary remark (no author, editable, deleted as any other) and the
+    answer shows in its place a link to the new card. A place not found adds
+    nothing and says so in the answer.
 - Problems: Next Problem visits blocks that fail, broken references and duplicate
   labels.
 - Dialogs edit the header, code, diagrams, the bibliography and the title fields,
