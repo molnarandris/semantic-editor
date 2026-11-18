@@ -4,38 +4,6 @@ Where the work stands. Delete items when done (git keeps the history). Bugs belo
 in GitHub issues; the ones below were found before that and are to be moved there.
 Items that are Claude's own ideas, not the user's requests, are marked *(idea)*.
 
-## Waiting for the user's test
-
-- Remark text edited in its card by the paper's editor (formulas, markup, the
-  paper's own functions), kept as Typst; cards stay cream with dark text in a dark
-  theme (the quotation is black, as on the paper).
-- A click in a card's text edits it (it needed a double click).
-- "I want to reference sections, equations etc of the original doc from within the
-  remark": `@` in a card offers the paper's labels and shows the paper's numbers;
-  Ctrl+click on one goes there in the paper.
-- The completion list (references, names in formulas) is a real pop-up, no longer
-  cut to a remark's card ("The reference completion pop-up is not visible on the
-  remark card as it gets truncated"); typing, ↑/↓, Enter/Tab and clicking a row
-  should work as before, in the paper too.
-
-- A card's quotation at the size of the card's text, whatever the window, the zoom
-  or the screen; shrunk only when the paper's lines are wider than the card ("If I
-  make the window larger, the size of the font seems to shrink").
-- The remarked range shaded in its card's quotation, as in the paper ("when it is
-  short and lines above and below were included in the quote, I want the highlight
-  to show up in the remark card as well").
-
-- Chat: "clickable references to the paper's parts": Claude writes `@label` for
-  labelled parts; the answer shows it as the paper does, with its number, and a
-  click goes there. Answers are now shown by a read-only editor (selectable,
-  re-flowing with the sidebar).
-- Chat: "un-labeled sections/theorems are not clickable … I just want to quickly
-  check the place what AI mentions": Claude links a mention of an unlabelled part
-  to a phrase copied from it; a click goes to the paragraph holding the phrase
-  (a toast if it is not found).
-- The chat no longer quotes the selection a remark leaves in the paper ("my last
-  remark's highlight is passed to the chat").
-
 ## Known limits
 
 - A card's quotation still shrinks in a wide window: it is as wide as the paper's
