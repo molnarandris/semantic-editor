@@ -176,10 +176,11 @@ structure as soon as it is unambiguous.
   block, found only there; the app turns the phrase into the range.
   - A link to a place: `#link("block:17")[the second lemma]`.
   - A remark from Claude: `#remark(block: 17, at: "for every compact")[…]` in an
-    answer (`at` left out: the whole block). The app adds it to the Remarks tab
-    as an ordinary remark (no author, editable, deleted as any other) and the
-    answer shows in its place a link to the new card. A place not found adds
-    nothing and says so in the answer.
+    answer (`at` left out: the whole block) is a proposal: the answer shows in
+    its place the remark's text, a link to its place and an Add button. Add
+    makes it an ordinary remark in the Remarks tab (no author, editable, deleted
+    as any other); the button then becomes a link to the card. Nothing is added
+    without Add. A place not found shows no button and says so.
 - Problems: Next Problem visits blocks that fail, broken references and duplicate
   labels.
 - Dialogs edit the header, code, diagrams, the bibliography and the title fields,
