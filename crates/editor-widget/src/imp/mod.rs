@@ -219,6 +219,9 @@ pub struct SemEditor {
     /// The caret jumped (to a heading, a reference's target, back): the
     /// next reveal puts it a third down the view.
     reveal_third: Cell<bool>,
+    /// Compiling and `caret-moved` are waiting for the next frame (see
+    /// `after_key`).
+    after_key_pending: Cell<bool>,
     /// The completion list while a reference is typed: the chosen entry,
     /// the label typed when it was chosen (a new one starts at the top),
     /// and the pop-up showing the list (see `popup.rs`).
@@ -531,6 +534,39 @@ impl SemEditor {
         self.update_completions();
         self.restart_blink();
         self.obj().emit_by_name::<()>("caret-moved", &[]);
+    }
+
+    /// As `after_command`, for a key: the caret shows at once, but finding
+    /// the blocks to compile (every block's source, slow in a long paper)
+    /// and `caret-moved` wait until just before the next frame, once for
+    /// all keys pressed since. Otherwise a held arrow key (auto-repeat
+    /// faster than that work) keeps GTK from drawing until it is let go.
+    pub(crate) fn after_key(&self) {
+        self.sync_views();
+        self.obj().queue_resize();
+        self.reveal.set(true);
+        self.reveal_caret();
+        self.update_im_location();
+        self.update_completions();
+        self.restart_blink();
+        if self.after_key_pending.replace(true) {
+            return;
+        }
+        let weak = self.obj().downgrade();
+        // Before the redraw (`GDK_PRIORITY_REDRAW` is HIGH_IDLE + 20), after
+        // the pending key events.
+        glib::idle_add_local_full(
+            glib::Priority::from(glib::ffi::G_PRIORITY_HIGH_IDLE + 10),
+            move || {
+                if let Some(obj) = weak.upgrade() {
+                    let imp = obj.imp();
+                    imp.after_key_pending.set(false);
+                    imp.submit_blocks(false);
+                    obj.emit_by_name::<()>("caret-moved", &[]);
+                }
+                glib::ControlFlow::Break
+            },
+        );
     }
 
     /// After the caret jumped somewhere: as `after_command`, with the caret
