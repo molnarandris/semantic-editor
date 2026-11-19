@@ -68,6 +68,9 @@ struct BlockView {
     targets: Vec<LabelTarget>,
     /// Generation of the last submitted job.
     submitted: u64,
+    /// The document's definitions when it was submitted (what a failure
+    /// in it is blamed under, see `jobs::definitions`).
+    definitions: Arc<str>,
     /// Generation of the result currently shown.
     shown: u64,
     texture: Option<gdk::Texture>,
@@ -86,6 +89,8 @@ struct Failed {
     block: NodeId,
     /// Its source when it failed.
     source: String,
+    /// The document's definitions then (see `jobs::definitions`).
+    definitions: Arc<str>,
     /// The error.
     message: String,
 }
@@ -101,6 +106,7 @@ impl BlockView {
             end: None,
             targets: vec![],
             submitted: 0,
+            definitions: Arc::from(""),
             shown: 0,
             texture: None,
             texture_ppp: 1.0,

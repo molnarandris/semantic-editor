@@ -36,10 +36,15 @@ impl SemEditor {
                 view.snippet.clear();
             }
         }
-        // Pieces edited since they failed are tried again.
+        let definitions: Arc<str> = jobs::definitions(ed.doc()).into();
+        // Pieces edited since they failed are tried again, and all of them
+        // when the definitions changed (the header defines what they call).
         let failed: Vec<NodeId> = {
             let mut failed = self.failed.borrow_mut();
-            failed.retain(|&id, f| jobs::failing_source(ed.doc(), id).as_ref() == Some(&f.source));
+            failed.retain(|&id, f| {
+                *f.definitions == *definitions
+                    && jobs::failing_source(ed.doc(), id).as_ref() == Some(&f.source)
+            });
             failed.keys().copied().collect()
         };
         let jobs = {
@@ -78,6 +83,7 @@ impl SemEditor {
             view.start = job.start;
             view.end = None;
             view.submitted = generation;
+            view.definitions = definitions.clone();
             // The block changed; its stops follow the new tree right away
             // (against the old layout until the new one arrives).
             view.stops = OnceCell::new();
@@ -528,6 +534,7 @@ impl SemEditor {
                 Failed {
                     block: view.id,
                     source,
+                    definitions: view.definitions.clone(),
                     message: message.clone(),
                 },
             );

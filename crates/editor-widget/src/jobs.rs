@@ -392,6 +392,16 @@ pub fn resolvable(
         .collect()
 }
 
+/// The definitions in force in the document: the header and every code
+/// block, in order. A piece that failed is tried again when they change
+/// (a function it calls defined at last).
+pub fn definitions(doc: &model::Document) -> String {
+    doc.blocks
+        .iter()
+        .filter_map(code_of)
+        .fold(doc.header.clone(), |all, c| all + c)
+}
+
 /// The source of node `id` that a compile error is blamed on, if it can
 /// show its source when it fails: a code piece (in text or a formula), or
 /// the name and arguments of a call (inline or a block). A failed one is
@@ -876,6 +886,23 @@ mod tests {
         }
         let got: Vec<&str> = views.iter().map(|v| v.snippet.as_str()).collect();
         assert_eq!(got, ["1. a", "2. b", "text", "1. c", "- d"]);
+    }
+
+    /// The definitions a failure is remembered under change with the
+    /// header and with any code block, not with text.
+    #[test]
+    fn definitions_follow_header_and_code() {
+        let mut d = Document::empty();
+        let t = d.text("Text");
+        d.blocks = vec![d.raw("#let a = 1"), d.paragraph(vec![t])];
+        d.header = "H\n".into();
+        let before = definitions(&d);
+        assert!(before.starts_with("H\n") && before.contains("#let a = 1"));
+        let t = d.text("Other");
+        d.blocks[1] = d.paragraph(vec![t]);
+        assert_eq!(definitions(&d), before, "text is not a definition");
+        d.header = "#import \"x\": *\n".into();
+        assert_ne!(definitions(&d), before);
     }
 
     #[test]

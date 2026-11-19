@@ -192,6 +192,11 @@ Learned the hard way (blurry text that Typesetter did not have):
   `display`), so the prompt names the version. Environments import as blocks
   only with the body on lines of their own (`#definition[` newline …), so the
   prompt asks for that.
+- **A failed piece is retried when the definitions change**: a call or code piece
+  that fails is shown as its source until it changes; it is also tried again when
+  the header or any code block changes (`jobs::definitions`, taken when the block
+  was submitted, so an edit during the compile is not missed). Before, moving
+  `theorem` into the header (ctheorems) left `#theorem` shown as failed code.
 - **A fitted editor's minimum height is its content height**: a `ScrolledWindow`
   around a plain `gtk::Box` sizes it by its children's minimum (measured under
   Broadway: pictures with min 0, natural 100 px got 17 px each). With min 0, chat
