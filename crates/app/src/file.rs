@@ -23,14 +23,11 @@ pub const FORMAT_VERSION: u32 = 1;
 const DOCUMENT: &str = "document.json";
 const MAIN: &str = "main.typ";
 const REMARKS: &str = "remarks.json";
-/// Written by a few builds of 2026-11-14 (the chat, now not kept); skipped.
-const CHAT: &str = "chat.json";
 
 /// A remark in `remarks.json`: on block `block`, or on the range between
 /// two caret positions, `start` in it and `end` in `end_block` (if given,
 /// else in it too; paths from the block; the inner nodes' ids are not
-/// saved). Files written before 2026-11-17 also have an author, a date
-/// and replies: ignored.
+/// saved).
 #[derive(Serialize, Deserialize)]
 struct RemarkFile {
     id: u64,
@@ -142,7 +139,6 @@ struct SemFileIn {
     version: u32,
     #[allow(dead_code)]
     typst: String,
-    #[serde(default)]
     header: String,
     blocks: Vec<BlockNode>,
 }
@@ -323,7 +319,7 @@ pub fn from_zip(bytes: &[u8]) -> Result<(Document, History), String> {
         match name.as_str() {
             DOCUMENT => json = Some(bytes),
             REMARKS => remarks = Some(bytes),
-            MAIN | CHAT => {}
+            MAIN => {}
             _ if name.ends_with('/') => {}
             _ if !safe_path(&name) => return Err(format!("not a valid .sem file: entry {name}")),
             _ => match name.strip_prefix(GIT_DIR) {
@@ -460,29 +456,6 @@ mod tests {
         assert_eq!(raw(&opened), raw(&doc), "{raws:#?}");
     }
 
-    /// A `chat.json` written by an earlier build is skipped: not a
-    /// project file, and gone at the next save.
-    #[test]
-    fn old_chats_are_dropped() {
-        let doc = sample::document();
-        let zip = to_zip(&doc, None).unwrap();
-        let mut writer = zip::ZipWriter::new_append(Cursor::new(zip)).unwrap();
-        writer
-            .start_file(CHAT, SimpleFileOptions::default())
-            .unwrap();
-        writer.write_all(b"{\"messages\": []}").unwrap();
-        let zip = writer.finish().unwrap().into_inner();
-        let (back, _) = from_zip(&zip).unwrap();
-        assert!(back.files.get(CHAT).is_none(), "not a project file");
-        let again = to_zip(&back, None).unwrap();
-        let names: Vec<String> = zip::ZipArchive::new(Cursor::new(again))
-            .unwrap()
-            .file_names()
-            .map(|n| n.unwrap().into_owned())
-            .collect();
-        assert!(!names.iter().any(|n| n == CHAT));
-    }
-
     /// A project zip holds the document, its Typst and its files, and
     /// reads back as the same document with the same files.
     #[test]
@@ -575,11 +548,12 @@ mod tests {
     fn bad_files_are_rejected() {
         assert!(from_json("{").is_err());
         assert!(from_json(r#"{"version": 99, "typst": "x", "blocks": []}"#).is_err());
-        // An empty document gets its one paragraph back; version 1 has no
-        // header.
-        let doc = from_json(r#"{"version": 1, "typst": "0.15.1", "blocks": []}"#).unwrap();
+        // Without a header: not this format.
+        assert!(from_json(r#"{"version": 1, "typst": "0.15.1", "blocks": []}"#).is_err());
+        // An empty document gets its one paragraph back.
+        let doc =
+            from_json(r#"{"version": 1, "typst": "0.15.1", "header": "", "blocks": []}"#).unwrap();
         assert_eq!(doc.blocks.len(), 1);
-        assert_eq!(doc.header, "");
     }
 
     /// Remarks are saved beside the document: a range keeps its text, a

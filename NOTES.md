@@ -144,6 +144,9 @@ Learned the hard way (blurry text that Typesetter did not have):
 - **Bibliography** written as `refs.bib` in exports and the project, but embedded in
   the editor's own renders; the block keeps its source for undo.
 - **One-way import**: a `.typ` is never written back.
+- **No reading of older `.sem` formats** (the user, 2026-11-19: there is one real
+  document, its history was dropped): `document.json` needs a header and every
+  block's id; a change of format is made with `FORMAT_VERSION`, not with defaults.
 - **History in git inside the zip** (libgit2 bundled): one pack, packed refs; author
   is the account's real name with the placeholder email `none`.
 - **Chat runs the user's Claude Code** (`claude -p`, stream JSON, no tools, no

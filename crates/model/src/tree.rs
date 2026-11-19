@@ -21,8 +21,7 @@ impl NodeId {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BlockNode {
-    /// Saved (see [`Document::restore_ids`]); missing in older files.
-    #[serde(default, skip_serializing_if = "NodeId::is_unset")]
+    /// Saved (see [`Document::restore_ids`]).
     pub id: NodeId,
     #[serde(flatten)]
     pub kind: Block,
@@ -992,9 +991,10 @@ impl Document {
         self.normalize();
     }
 
-    /// After loading: blocks keep their saved ids (a repeated one only the
-    /// first time); every other node, and a block without one, gets a fresh
-    /// id above them. Restores the structural invariants.
+    /// After loading: blocks keep their saved ids (a repeated one, in a
+    /// hand-edited file, only the first time); every other node, and a
+    /// repeat, gets a fresh id above them. Restores the structural
+    /// invariants.
     pub fn restore_ids(&mut self) {
         fn keep(blocks: &mut [BlockNode], seen: &mut std::collections::HashSet<NodeId>) {
             for block in blocks {
@@ -1822,14 +1822,9 @@ beta-2:
         let fresh = back.fresh_id();
         assert!(ids(&back).iter().all(|id| *id < fresh));
 
-        // A file from before ids were saved: fresh ids.
-        let mut old: Document =
-            serde_json::from_str(&json.replace(&format!("\"id\":{},", doc.blocks[0].id.0), ""))
-                .unwrap();
-        old.restore_ids();
-        old.check_invariants().unwrap();
-        assert_eq!(old.blocks[1].id, doc.blocks[1].id);
-        assert!(!old.blocks[0].id.is_unset());
+        // A block without an id is not read.
+        let without = json.replace(&format!("\"id\":{},", doc.blocks[0].id.0), "");
+        assert!(serde_json::from_str::<Document>(&without).is_err());
         // A repeated id (a hand-edited file) is kept only once.
         let mut twice = back.clone();
         twice.blocks[1].id = twice.blocks[0].id;
