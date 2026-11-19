@@ -168,6 +168,11 @@ structure as soon as it is unambiguous.
   outline goes to a heading); not saved; a question is about the
   selection the user
   made, not the one a remark's card or a new remark leaves in the paper).
+- **Selection pop-up**: once a selection (mouse or keyboard) has stayed the same for
+  half a second, two icon buttons show above its first visible line: Add Remark and
+  Ask Claude. This is their only way in (no menu entries, no shortcut). The pop-up
+  never takes the focus, so copy, cut, paste and typing go on in the paper; any
+  change of the selection, a scroll or leaving the paper hides it.
 - **Places for Claude**: the paper goes to Claude as Typst (not `document.json`:
   that is about 4.5 times longer, its formulas are node trees and its points are
   character offsets Claude cannot count), with each block's saved id in a comment

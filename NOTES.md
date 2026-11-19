@@ -183,6 +183,15 @@ Learned the hard way (blurry text that Typesetter did not have):
   position at a time (whitespace runs as one space, any non-text position a
   break), so the phrase must be plain text: Claude is told so. The first match
   wins. Add looks the place up again (the paper may have changed since).
+- **Selection pop-up** (the user's choice: above the selection, Foliate-like, for
+  any selection after a 500 ms pause, replacing the Add Remark/Ask Claude menu
+  entries and Ctrl+Alt+M). A focusless `gtk::Popover` like the completion list, its
+  buttons `can_focus(false)`, `focus_on_click(false)` and plain action names, so
+  the editor keeps the keys. `update_selection_popup` runs at the end of both
+  `after_command` and `after_move` (Shift+arrows take the cheap path) and on every
+  scroll; it restarts the wait only when (anchor, caret) changed, so re-renders do
+  not make it flicker. Read-only editors (chat answers, quotes) set no actions and
+  get no pop-up.
 - **Claude's changes replace a whole block** (the user's choice over phrase-level
   edits: reliable matching, math never cut in half). `#change(block: N)[…]` is cut
   out like a remark; `/* block N */` comments Claude copied are dropped (they would

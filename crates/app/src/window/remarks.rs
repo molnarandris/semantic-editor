@@ -79,7 +79,7 @@ impl RemarksPane {
             .margin_bottom(4)
             .build();
         let empty = gtk::Label::builder()
-            .label("No remarks.\nSelect text and press Ctrl+Alt+M\nto add one.")
+            .label("No remarks.\nSelect text, then click the remark\nbutton that shows above it.")
             .css_classes(["dim-label"])
             .justify(gtk::Justification::Center)
             .margin_top(24)

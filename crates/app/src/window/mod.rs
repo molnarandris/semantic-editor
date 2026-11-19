@@ -113,6 +113,10 @@ impl Window {
         header.pack_end(&show_remarks);
 
         let editor = SemEditor::new();
+        editor.set_selection_actions(&[
+            ("document-edit-symbolic", "Add Remark", "win.add-remark"),
+            ("chat-message-new-symbolic", "Ask Claude", "win.ask-claude"),
+        ]);
         let scroller = gtk::ScrolledWindow::builder()
             .hscrollbar_policy(gtk::PolicyType::Never)
             .vexpand(true)
@@ -839,10 +843,6 @@ fn main_menu() -> gio::Menu {
         Some("win.insert-bibliography"),
     );
     menu.append_section(None, &insert);
-    let remarks = gio::Menu::new();
-    remarks.append(Some("Add _Remark"), Some("win.add-remark"));
-    remarks.append(Some("Ask _Claude…"), Some("win.ask-claude"));
-    menu.append_section(None, &remarks);
     let other = gio::Menu::new();
     other.append(Some("Open S_ample Document"), Some("win.open-sample"));
     menu.append_section(None, &other);

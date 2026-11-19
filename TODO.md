@@ -20,7 +20,9 @@ From the user's list of 2026-11-15, one group at a time:
 2. Chat: Claude proposes changes of whole blocks (`#change(block: N)[…]`), a card
    with Apply (one undoable edit) and the current version folded: done, awaiting
    the user's test. (idea) Next: word differences marked (with D), Apply All.
-3. Sidebar buttons look bad (postponed by the user, not important).
+3. Selection pop-up with Add Remark and Ask Claude icons; menu entries and
+   Ctrl+Alt+M removed: done, awaiting the user's test.
+4. Sidebar buttons look bad (postponed by the user, not important).
 
 Then the planned features:
 

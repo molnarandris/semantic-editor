@@ -7,6 +7,7 @@ mod draw;
 mod input;
 mod popup;
 mod quote;
+mod selection_popup;
 
 use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
@@ -225,6 +226,11 @@ pub struct SemEditor {
     completion: Cell<usize>,
     completion_typed: RefCell<String>,
     popup: OnceCell<(gtk::Popover, gtk::ListBox)>,
+    /// The selection pop-up (see `selection_popup.rs`), the selection it
+    /// is for (anchor, caret) and the wait before it shows.
+    sel_popup: RefCell<Option<gtk::Popover>>,
+    sel_key: RefCell<Option<(CursorPath, CursorPath)>>,
+    sel_timer: RefCell<Option<glib::SourceId>>,
 
     hadjustment: RefCell<Option<gtk::Adjustment>>,
     vadjustment: RefCell<Option<gtk::Adjustment>>,
@@ -384,6 +390,10 @@ impl ObjectImpl for SemEditor {
         if let Some((popup, _)) = self.popup.get() {
             popup.unparent();
         }
+        self.hide_selection_popup();
+        if let Some(popup) = self.sel_popup.take() {
+            popup.unparent();
+        }
     }
 }
 
@@ -421,6 +431,9 @@ impl WidgetImpl for SemEditor {
         }
         self.configure_adjustments(width as f64, height as f64);
         if let Some((popup, _)) = self.popup.get() {
+            popup.present();
+        }
+        if let Some(popup) = self.sel_popup.borrow().as_ref() {
             popup.present();
         }
     }
@@ -529,6 +542,7 @@ impl SemEditor {
         self.update_im_location();
         self.update_completions();
         self.restart_blink();
+        self.update_selection_popup(false);
         self.obj().emit_by_name::<()>("caret-moved", &[]);
     }
 
@@ -546,6 +560,7 @@ impl SemEditor {
         self.update_im_location();
         self.update_completions();
         self.restart_blink();
+        self.update_selection_popup(false);
         self.obj().emit_by_name::<()>("caret-moved", &[]);
     }
 
@@ -998,6 +1013,7 @@ impl SemEditor {
             adj.connect_value_changed(move |_| {
                 if let Some(obj) = obj.upgrade() {
                     obj.queue_draw();
+                    obj.imp().update_selection_popup(true);
                 }
             });
         }

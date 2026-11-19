@@ -321,6 +321,12 @@ impl SemEditor {
         }
     }
 
+    /// Icon buttons shown above a selection once it rests: (icon, tooltip,
+    /// action name) each, e.g. `win.add-remark`. They never take the focus.
+    pub fn set_selection_actions(&self, actions: &[(&str, &str, &str)]) {
+        self.imp().set_selection_actions(actions);
+    }
+
     /// Replace block `block` by `blocks` (a change from Claude, see
     /// [`model::Editor::replace_block`]) and show it.
     pub fn replace_block(&self, block: NodeId, blocks: Vec<model::BlockNode>) -> bool {

@@ -276,7 +276,7 @@ impl SemEditor {
     /// The rectangles, line by line, covering every caret position from
     /// `first` to `last` (in one block, or from one to a later one), in
     /// widget coordinates.
-    fn range_rects(
+    pub(super) fn range_rects(
         &self,
         first: &CursorPath,
         last: &CursorPath,

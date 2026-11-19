@@ -118,6 +118,7 @@ impl SemEditor {
                 if let Some((popup, _)) = imp.popup.get() {
                     popup.popdown();
                 }
+                imp.hide_selection_popup();
                 obj.queue_draw();
             }
         });
