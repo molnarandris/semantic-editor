@@ -39,8 +39,10 @@ type FindPlace = dyn Fn(u64, Option<&str>) -> bool;
 /// Add a remark (place, text): its id.
 type AddRemark = dyn Fn(u64, Option<&str>, &str) -> Option<u64>;
 
-/// Replace a block by Typst: whether it was.
-type ApplyChange = dyn Fn(u64, &str) -> bool;
+/// The Typst of blocks (first, last if more than one) now.
+type CurrentBlocks = dyn Fn(u64, Option<u64>) -> Option<String>;
+/// Replace blocks (first, last if more than one) by Typst: whether they were.
+type ApplyChange = dyn Fn(u64, Option<u64>, &str) -> bool;
 
 /// What the chat asks of the paper for a remark Claude proposes.
 pub struct RemarkHooks {
@@ -54,10 +56,15 @@ pub struct RemarkHooks {
 
 /// What the chat asks of the paper for a change Claude proposes.
 pub struct ChangeHooks {
-    /// The block's Typst now, `None` if it is not in the paper.
-    pub current: Box<dyn Fn(u64) -> Option<String>>,
-    /// Replace the block by this Typst: whether it was.
+    /// The blocks' Typst now, `None` if they are not in the paper (or not
+    /// in one list, in order).
+    pub current: Box<CurrentBlocks>,
+    /// Replace the blocks by this Typst: whether they were.
     pub apply: Box<ApplyChange>,
+    /// The paper's header now.
+    pub header: Box<dyn Fn() -> String>,
+    /// Replace the header: whether it was.
+    pub set_header: Box<dyn Fn(&str) -> bool>,
 }
 
 /// A place of the paper an answer points at.
@@ -534,14 +541,34 @@ impl ChatPane {
     /// Claude proposes as a card in its place; Copy below.
     fn answer_view(&self, text: &str) -> gtk::Box {
         let view = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        for part in chat::parts(text) {
+        let parts = chat::parts(text);
+        // A header Claude proposes is in force in the rest of its answer,
+        // so what needs it is shown as it will be.
+        let proposed = parts.iter().find_map(|p| match p {
+            chat::Part::Header { text } => Some(text.clone()),
+            _ => None,
+        });
+        let header = proposed.and_then(|new| {
+            let hooks = self.change_hooks.borrow().clone()?;
+            let full = self.context.borrow().as_ref()?().0;
+            let old = (hooks.header)();
+            Some(match full.contains(&old) && !old.is_empty() {
+                true => full.replacen(&old, &new, 1),
+                false => format!("{new}\n{full}"),
+            })
+        });
+        let header = header.as_deref();
+        for part in parts {
             match part {
                 chat::Part::Text(t) if t.trim().is_empty() => {}
-                chat::Part::Text(t) => view.append(&self.answer_editor(&t, None)),
+                chat::Part::Text(t) => view.append(&self.answer_editor(&t, None, header)),
                 chat::Part::Remark { block, at, text } => {
-                    view.append(&self.proposal(block, at, &text))
+                    view.append(&self.proposal(block, at, &text, header))
                 }
-                chat::Part::Change { block, text } => view.append(&self.change(block, &text)),
+                chat::Part::Change { block, to, text } => {
+                    view.append(&self.change(block, to, &text, header))
+                }
+                chat::Part::Header { text } => view.append(&self.header_change(&text)),
             }
         }
         let copy = gtk::Button::builder()
@@ -559,13 +586,19 @@ impl ChatPane {
     /// A remark Claude proposes, as a card like the Remarks tab's: its
     /// text, a link to its place and Add, which then becomes Show Remark.
     /// A place not in the paper has no Add and says so.
-    fn proposal(&self, block: u64, at: Option<String>, text: &str) -> gtk::Box {
+    fn proposal(
+        &self,
+        block: u64,
+        at: Option<String>,
+        text: &str,
+        header: Option<&str>,
+    ) -> gtk::Box {
         let card = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .spacing(4)
             .css_classes(["remark-card"])
             .build();
-        card.append(&self.answer_editor(text, Some(REMARK_TEXT)));
+        card.append(&self.answer_editor(text, Some(REMARK_TEXT), header));
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         let go = gtk::Button::builder()
             .label("Go There")
@@ -622,10 +655,11 @@ impl ChatPane {
         card
     }
 
-    /// A change Claude proposes, as a card: the new version, Go There and
+    /// A change Claude proposes (of blocks `block` to `to`), as a card: the
+    /// new version (with `header` if the answer proposes one), Go There and
     /// Apply (which then says Applied), the current version folded below.
-    /// A block not in the paper has no Apply and says so.
-    fn change(&self, block: u64, text: &str) -> gtk::Box {
+    /// Blocks not in the paper have no Apply and say so.
+    fn change(&self, block: u64, to: Option<u64>, text: &str, header: Option<&str>) -> gtk::Box {
         let card = gtk::Box::builder()
             .orientation(gtk::Orientation::Vertical)
             .css_classes(["card"])
@@ -639,11 +673,11 @@ impl ChatPane {
             .margin_bottom(4)
             .build();
         card.append(&inner);
-        inner.append(&self.answer_editor(text, None));
+        inner.append(&self.answer_editor(text, None, header));
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         let go = gtk::Button::builder()
             .label("Go There")
-            .tooltip_text("Show the Block in the Paper")
+            .tooltip_text("Show the Place in the Paper")
             .css_classes(["flat", "caption"])
             .build();
         let follow = self.follow.clone();
@@ -657,14 +691,18 @@ impl ChatPane {
         let Some(hooks) = self.change_hooks.borrow().clone() else {
             return card;
         };
-        let Some(current) = (hooks.current)(block) else {
-            go.set_visible(false);
-            row.append(&note("Its block is not in the paper."));
+        let Some(current) = (hooks.current)(block, to) else {
+            go.set_visible((hooks.current)(block, None).is_some());
+            row.append(&note("Its place is not in the paper."));
             return card;
         };
+        if text.trim().is_empty() {
+            row.append(&note("An empty change: nothing to apply."));
+            return card;
+        }
         let apply = gtk::Button::builder()
             .label("Apply")
-            .tooltip_text("Replace the Block in the Paper")
+            .tooltip_text("Replace in the Paper")
             .hexpand(true)
             .halign(gtk::Align::End)
             .css_classes(["caption"])
@@ -675,34 +713,100 @@ impl ChatPane {
                 return;
             };
             row.remove(apply);
-            let done = match (hooks.apply)(block, &text) {
+            let done = match (hooks.apply)(block, to, &text) {
                 true => "Applied (Undo takes it back).",
-                false => "Not applied: its block is gone, or this is an old version.",
+                false => "Not applied: its place is gone, or this is an old version.",
             };
-            let done = note(done);
-            done.set_xalign(1.0);
-            row.append(&done);
+            applied(&row, done);
         });
         row.append(&apply);
         let expander = gtk::Expander::builder()
             .label("Current Version")
             .css_classes(["caption"])
-            .child(&self.answer_editor(&current, None))
+            .child(&self.answer_editor(&current, None, None))
             .build();
         inner.append(&expander);
         card
     }
 
+    /// A new header Claude proposes, as a card: the lines it changes
+    /// (removed ones struck out, added ones marked, a line around each
+    /// change) and Apply.
+    fn header_change(&self, text: &str) -> gtk::Box {
+        let card = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .css_classes(["card"])
+            .build();
+        let inner = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(4)
+            .margin_start(8)
+            .margin_end(8)
+            .margin_top(8)
+            .margin_bottom(4)
+            .build();
+        card.append(&inner);
+        let title = gtk::Label::builder()
+            .label("Header")
+            .xalign(0.0)
+            .css_classes(["caption-heading"])
+            .build();
+        inner.append(&title);
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        let Some(hooks) = self.change_hooks.borrow().clone() else {
+            return card;
+        };
+        let old = (hooks.header)();
+        let lines = gtk::Label::builder()
+            .use_markup(true)
+            .label(diff_markup(&old, text))
+            .xalign(0.0)
+            .wrap(true)
+            .wrap_mode(gtk::pango::WrapMode::WordChar)
+            .selectable(true)
+            .css_classes(["monospace", "caption"])
+            .build();
+        inner.append(&lines);
+        inner.append(&row);
+        if old == text {
+            row.append(&note("No change: the header is already this."));
+            return card;
+        }
+        let apply = gtk::Button::builder()
+            .label("Apply")
+            .tooltip_text("Replace the Header")
+            .hexpand(true)
+            .halign(gtk::Align::End)
+            .css_classes(["caption"])
+            .build();
+        let text = text.to_string();
+        apply.connect_clicked(move |apply| {
+            let Some(row) = apply.parent().and_downcast::<gtk::Box>() else {
+                return;
+            };
+            row.remove(apply);
+            let done = match (hooks.set_header)(&text) {
+                true => "Applied (Undo takes it back).",
+                false => "Not applied: this is an old version.",
+            };
+            applied(&row, done);
+        });
+        row.append(&apply);
+        card
+    }
+
     /// A read-only editor showing an answer's Typst with the paper's
-    /// header and labels, in the chat's text colour or `color` (the chat's
-    /// text rule: 11pt, not justified, wide formulas scaled down).
-    fn answer_editor(&self, text: &str, color: Option<&str>) -> SemEditor {
-        let (header, labels) = self
+    /// header (or `header`, one the answer proposes) and labels, in the
+    /// chat's text colour or `color` (the chat's text rule: 11pt, not
+    /// justified, wide formulas scaled down).
+    fn answer_editor(&self, text: &str, color: Option<&str>, header: Option<&str>) -> SemEditor {
+        let (paper_header, labels) = self
             .context
             .borrow()
             .as_ref()
             .map(|f| f())
             .unwrap_or_default();
+        let header = header.unwrap_or(&paper_header);
         let c = self.widget.color();
         let hex = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
         let color = color.map(|c| format!("rgb(\"{c}\")")).unwrap_or_else(|| {
@@ -768,6 +872,49 @@ impl ChatPane {
             self.clear();
         }
     }
+}
+
+/// A proposal's row after Apply: what came of it, on the right.
+fn applied(row: &gtk::Box, text: &str) {
+    let done = note(text);
+    done.set_xalign(1.0);
+    row.append(&done);
+}
+
+/// The lines a new header changes, as Pango markup: removed ones struck
+/// out in red, added ones in green, one kept line around each change, `…`
+/// for kept lines left out.
+fn diff_markup(old: &str, new: &str) -> String {
+    use chat::Diff;
+    let lines = chat::line_diff(old, new);
+    let near_change = |i: usize| {
+        let lo = i.saturating_sub(1);
+        let hi = (i + 1).min(lines.len() - 1);
+        (lo..=hi).any(|k| lines[k].0 != Diff::Same)
+    };
+    let mut out = vec![];
+    let mut skipped = false;
+    for (i, &(diff, line)) in lines.iter().enumerate() {
+        let line = glib::markup_escape_text(line);
+        match diff {
+            Diff::Same if !near_change(i) => {
+                if !skipped {
+                    out.push("<span alpha=\"50%\">…</span>".to_string());
+                }
+                skipped = true;
+                continue;
+            }
+            Diff::Same => out.push(format!("<span alpha=\"60%\">  {line}</span>")),
+            Diff::Added => out.push(format!(
+                "<span foreground=\"#26a269\" weight=\"bold\">+ {line}</span>"
+            )),
+            Diff::Removed => out.push(format!(
+                "<span foreground=\"#c01c28\" strikethrough=\"true\">− {line}</span>"
+            )),
+        }
+        skipped = false;
+    }
+    out.join("\n")
 }
 
 /// A short dim note in a proposal's row.

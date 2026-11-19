@@ -183,6 +183,15 @@ Learned the hard way (blurry text that Typesetter did not have):
   position at a time (whitespace runs as one space, any non-text position a
   break), so the phrase must be plain text: Claude is told so. The first match
   wins. Add looks the place up again (the paper may have changed since).
+- **Header and block-range changes from Claude**: wrapping a passage (paragraph,
+  formula, paragraph) into a definition is one edit of several sibling blocks;
+  with single-block changes only, Claude split it into one change and empty ones
+  (deletions, shown as nothing). `#change(block:, to:)` replaces the range by one
+  `Replace` op. The header card shows an LCS line diff (headers are short). Typst
+  0.15.1 compiles ctheorems 1.1.3 (references too); 1.1.2 fails (`state` has no
+  `display`), so the prompt names the version. Environments import as blocks
+  only with the body on lines of their own (`#definition[` newline …), so the
+  prompt asks for that.
 - **Selection pop-up** (the user's choice: above the selection, Foliate-like, for
   any selection after a 500 ms pause, replacing the Add Remark/Ask Claude menu
   entries and Ctrl+Alt+M). A focusless `gtk::Popover` like the completion list, its

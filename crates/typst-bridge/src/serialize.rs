@@ -1501,7 +1501,8 @@ pub fn serialize_document_mapped(doc: &Document) -> (String, SpanMap) {
 
 /// The document as Claude reads it in the chat: the export's Typst with each
 /// block's id in a comment on the line before it, `/* block 17 */`, nested
-/// blocks included. Not meant to be compiled.
+/// blocks included, and the header between `/* header */` and
+/// `/* end of header */`. Not meant to be compiled.
 pub fn serialize_document_with_ids(doc: &Document) -> String {
     document(doc, true).0
 }
@@ -1513,9 +1514,16 @@ fn document(doc: &Document, ids: bool) -> (String, SpanMap) {
         out.push_str(&document_metadata(&fields));
         out.push('\n');
     }
+    // Claude may propose a new header: it is marked.
+    if ids {
+        out.push_str("/* header */\n");
+    }
     out.push_str(&doc.header);
     if !out.ends_with('\n') {
         out.push('\n');
+    }
+    if ids {
+        out.push_str("/* end of header */\n");
     }
     if doc.blocks.iter().any(|b| uses_cetz(b, true)) {
         out.push_str(CETZ_IMPORT);
@@ -1570,6 +1578,10 @@ mod tests {
         );
         assert!(at(&format!("/* block {inner_id} */")) < at("Let X be"));
         assert!(!serialize_document(&d).contains("/* block"));
+        d.header = "#let a = 1\n".into();
+        let marked = serialize_document_with_ids(&d);
+        assert!(marked.contains("/* header */\n#let a = 1\n/* end of header */\n"));
+        assert!(!serialize_document(&d).contains("/* header"));
     }
 
     #[test]

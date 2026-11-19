@@ -334,10 +334,15 @@ impl SemEditor {
         self.imp().set_selection_actions(actions);
     }
 
-    /// Replace block `block` by `blocks` (a change from Claude, see
-    /// [`model::Editor::replace_block`]) and show it.
-    pub fn replace_block(&self, block: NodeId, blocks: Vec<model::BlockNode>) -> bool {
-        self.imp().replace_block(block, blocks)
+    /// Replace blocks `block` to `last` by `blocks` (a change from Claude,
+    /// see [`model::Editor::replace_blocks`]) and show it.
+    pub fn replace_blocks(
+        &self,
+        block: NodeId,
+        last: NodeId,
+        blocks: Vec<model::BlockNode>,
+    ) -> bool {
+        self.imp().replace_blocks(block, last, blocks)
     }
 
     /// Keep a render of `target` at `pixel_per_pt` device pixels per point,

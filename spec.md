@@ -195,7 +195,15 @@ structure as soon as it is unambiguous.
     one's id, and its label if the new one has none; a remark on a range
     inside it falls back to the whole block. Apply then becomes "Applied".
     Nothing changes without Apply. A block not in the paper shows no Apply
-    and says so.
+    and says so. `#change(block: 17, to: 19)[…]` replaces consecutive blocks
+    (one list, in order) as one change, e.g. wrapping them into a definition;
+    remarks on the later ones move to the first.
+  - The header is marked for Claude (`/* header */ … /* end of header */`); a
+    change of it, `#change(header: true)[the whole new header]`, shows as a card
+    with the lines it removes (struck out) and adds, and Apply (undoable). The
+    rest of that answer is shown with the proposed header in force. Claude is
+    told to put definitions and imports there, and to prefer ctheorems 1.1.3
+    for theorem-like environments the paper does not define its own way.
 - Problems: Next Problem visits blocks that fail, broken references and duplicate
   labels.
 - Dialogs edit the header, code, diagrams, the bibliography and the title fields,

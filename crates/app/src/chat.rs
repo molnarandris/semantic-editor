@@ -54,7 +54,21 @@ leave `at` out for the whole block. The author decides whether to add it. \
 To propose a change of the paper, write, on a line of its own, \
 #change(block: 17)[the block's new Typst]: it replaces that whole block (a \
 paragraph, a formula, a theorem with its body), so write all of it, with the \
-block's label if it has one; it may become several blocks. Propose a change \
+block's label if it has one; it may become several blocks. To change several \
+consecutive blocks at once (e.g. to wrap them into a definition), write \
+#change(block: 17, to: 19)[…]: it replaces blocks 17 to 19, which must be in \
+the same list (not one inside an environment and one outside), as one change; \
+never use two changes for one edit, and never an empty one. The paper's \
+header (its imports, definitions and rules) is between /* header */ and /* \
+end of header */; to change it, write #change(header: true)[the whole new \
+header], before the changes that need it. Definitions and imports go in the \
+header, never in a block. For theorem-like environments (definition, lemma, \
+…) the paper does not have yet, prefer the ctheorems package (exactly \
+#import \"@preview/ctheorems:1.1.3\": *, older versions fail; then #show: \
+thmrules and e.g. #let definition = thmbox(\"definition\", \"Definition\")) unless the paper already \
+defines such environments its own way; then follow that. Write an \
+environment with its body on lines of its own, #definition[ newline … \
+newline ], as the paper does. Propose a change \
 only when asked to or when it is clearly wanted; the author decides whether \
 to apply it. Never write <labels> or /* block */ comments of your own. You \
 cannot change the paper or any file yourself.";
@@ -70,10 +84,15 @@ pub enum Part {
         /// Its text, Typst.
         text: String,
     },
-    /// Replace block `block` by `text` (Typst, `/* block N */` comments
-    /// left out).
+    /// Replace blocks `block` to `to` (just `block` if `None`) by `text`
+    /// (Typst, `/* block N */` comments left out).
     Change {
         block: u64,
+        to: Option<u64>,
+        text: String,
+    },
+    /// Replace the header by `text`.
+    Header {
         text: String,
     },
 }
@@ -107,6 +126,9 @@ pub fn parts(answer: &str) -> Vec<Part> {
 
 /// Add `text` to the last text part, or as a new one.
 fn push_text(out: &mut Vec<Part>, text: &str) {
+    if text.is_empty() {
+        return;
+    }
     match out.last_mut() {
         Some(Part::Text(t)) => t.push_str(text),
         _ => out.push(Part::Text(text.to_string())),
@@ -136,12 +158,62 @@ fn remark_call(s: &str) -> Option<(Part, usize)> {
 /// read.
 fn change_call(s: &str) -> Option<(Part, usize)> {
     let (args, text, len) = call(s)?;
-    let block = match args[..] {
-        [("block", value)] => value.parse::<u64>().ok()?,
+    let id = |v: &str| v.parse::<u64>().ok();
+    let part = match args[..] {
+        [("header", "true")] => Part::Header {
+            text: format!("{text}\n"),
+        },
+        [("block", block)] => Part::Change {
+            block: id(block)?,
+            to: None,
+            text: without_block_comments(&text),
+        },
+        [("block", block), ("to", to)] => Part::Change {
+            block: id(block)?,
+            to: Some(id(to)?),
+            text: without_block_comments(&text),
+        },
         _ => return None,
     };
-    let text = without_block_comments(&text);
-    Some((Part::Change { block, text }, len))
+    Some((part, len))
+}
+
+/// How a line of a new text compares to the old one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Diff {
+    Same,
+    Added,
+    Removed,
+}
+
+/// The lines of `old` and `new` in order, each kept, added or removed (the
+/// longest common subsequence kept; removed lines before added ones).
+pub fn line_diff<'a>(old: &'a str, new: &'a str) -> Vec<(Diff, &'a str)> {
+    let (a, b): (Vec<&str>, Vec<&str>) = (old.lines().collect(), new.lines().collect());
+    // lcs[i][j]: the longest common subsequence of a[i..] and b[j..].
+    let mut lcs = vec![vec![0usize; b.len() + 1]; a.len() + 1];
+    for i in (0..a.len()).rev() {
+        for j in (0..b.len()).rev() {
+            lcs[i][j] = match a[i] == b[j] {
+                true => lcs[i + 1][j + 1] + 1,
+                false => lcs[i + 1][j].max(lcs[i][j + 1]),
+            };
+        }
+    }
+    let (mut i, mut j, mut out) = (0, 0, vec![]);
+    while i < a.len() || j < b.len() {
+        if i < a.len() && j < b.len() && a[i] == b[j] {
+            out.push((Diff::Same, a[i]));
+            (i, j) = (i + 1, j + 1);
+        } else if i < a.len() && (j == b.len() || lcs[i + 1][j] >= lcs[i][j + 1]) {
+            out.push((Diff::Removed, a[i]));
+            i += 1;
+        } else {
+            out.push((Diff::Added, b[j]));
+            j += 1;
+        }
+    }
+    out
 }
 
 /// A call's named arguments (name, value as written), its trimmed body
@@ -461,6 +533,7 @@ mod tests {
                 Part::Text("Better:\n".into()),
                 Part::Change {
                     block: 4,
+                    to: None,
                     text: "#lemma[\nLet $x[1]$.\n]".into(),
                 },
                 Part::Text("\n".into()),
@@ -476,5 +549,38 @@ mod tests {
             without_block_comments("a /* block x */ b"),
             "a /* block x */ b"
         );
+        let answer =
+            "#change(header: true)[\n#import \"x\": *\n]\n#change(block: 5, to: 7)[#definition[T]]";
+        assert_eq!(
+            parts(answer),
+            [
+                Part::Header {
+                    text: "#import \"x\": *\n".into(),
+                },
+                Part::Text("\n".into()),
+                Part::Change {
+                    block: 5,
+                    to: Some(7),
+                    text: "#definition[T]".into(),
+                },
+            ]
+        );
+    }
+
+    /// A header's lines compared: kept, removed and added, in order.
+    #[test]
+    fn header_lines_compared() {
+        use Diff::*;
+        assert_eq!(
+            line_diff("a\nb\nc\n", "a\nx\nc\nd\n"),
+            [
+                (Same, "a"),
+                (Removed, "b"),
+                (Added, "x"),
+                (Same, "c"),
+                (Added, "d")
+            ]
+        );
+        assert_eq!(line_diff("", "a"), [(Added, "a")]);
     }
 }

@@ -629,17 +629,33 @@ impl Editor {
         self.commit(vec![op], after, Last::Source(block))
     }
 
-    /// Replace block `block` by `blocks` (from another document: a change
-    /// Claude proposes) in one undo step. The first new block keeps the old
-    /// one's id, and its label if it has none; the caret goes to its start.
-    pub fn replace_block(&mut self, block: NodeId, blocks: Vec<BlockNode>) -> bool {
+    /// Replace blocks `block` to `last` (siblings, in order; the same for
+    /// one block) by `blocks` (from another document: a change Claude
+    /// proposes) in one undo step. The first new block keeps the first old
+    /// one's id, and its label if it has none; remarks on the other old
+    /// blocks move to it (not part of undo). The caret goes to its start.
+    pub fn replace_blocks(&mut self, block: NodeId, last: NodeId, blocks: Vec<BlockNode>) -> bool {
         if self.read_only || blocks.is_empty() {
             return false;
         }
-        let (Some(place), Some(old)) = (self.doc.place(block), self.doc.block(block)) else {
+        let (Some(place), Some(end), Some(old)) = (
+            self.doc.place(block),
+            self.doc.place(last),
+            self.doc.block(block),
+        ) else {
             return false;
         };
+        if end.parent != place.parent || end.index < place.index {
+            return false;
+        }
         let label = old.label.clone();
+        let anchored: Vec<u64> = self
+            .doc
+            .remarks
+            .iter()
+            .filter(|r| self.doc.block(r.anchor.block()).is_some())
+            .map(|r| r.id)
+            .collect();
         let mut fragment = Fragment::Blocks(blocks);
         self.doc.adopt(&mut fragment);
         let Fragment::Blocks(mut blocks) = fragment else {
@@ -653,12 +669,21 @@ impl Editor {
         let op = Op::Replace {
             seq: place.seq(),
             index: place.index,
-            count: 1,
+            count: end.index - place.index + 1,
             items: Items::Blocks(blocks),
         };
         self.anchor = None;
         self.selected = None;
-        self.commit(vec![op], after, Last::Other)
+        if !self.commit(vec![op], after, Last::Other) {
+            return false;
+        }
+        for i in 0..self.doc.remarks.len() {
+            let r = &self.doc.remarks[i];
+            if anchored.contains(&r.id) && self.doc.block(r.anchor.block()).is_none() {
+                self.doc.remarks[i].anchor = Anchor::Block(block);
+            }
+        }
+        true
     }
 
     /// Replace the document header. Consecutive edits are one undo step;

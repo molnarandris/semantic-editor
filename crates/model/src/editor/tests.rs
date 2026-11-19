@@ -2646,8 +2646,8 @@ fn change_from_claude() {
     let first = other.paragraph(vec![t]);
     let t = other.text("And more.");
     let second = other.paragraph(vec![t]);
-    assert!(!e.replace_block(NodeId(9999), vec![first.clone()]));
-    assert!(e.replace_block(p, vec![first, second]));
+    assert!(!e.replace_blocks(NodeId(9999), NodeId(9999), vec![first.clone()]));
+    assert!(e.replace_blocks(p, p, vec![first, second]));
     let blocks = &e.doc().blocks;
     assert_eq!(blocks.len(), 2);
     assert_eq!((blocks[0].id, blocks[0].label.as_str()), (p, "intro"));
@@ -2656,6 +2656,36 @@ fn change_from_claude() {
     assert_eq!(e.caret().block, p);
     assert!(e.undo());
     assert_eq!(e.doc().blocks, before.blocks);
+}
+
+/// A change of several blocks (wrapping them into a definition) replaces
+/// them all in one step; a remark on a later one moves to the first id;
+/// a range out of order is refused.
+#[test]
+fn change_of_blocks_from_claude() {
+    let mut doc = Document::empty();
+    let para = |d: &mut Document, s: &str| {
+        let t = d.text(s);
+        d.paragraph(vec![t])
+    };
+    doc.blocks = vec![
+        para(&mut doc, "a"),
+        para(&mut doc, "b"),
+        para(&mut doc, "c"),
+        para(&mut doc, "d"),
+    ];
+    let ids: Vec<NodeId> = doc.blocks.iter().map(|b| b.id).collect();
+    let mut e = Editor::new(doc);
+    e.add_remark_at(Anchor::Block(ids[2]), "On c.").unwrap();
+    let mut other = Document::empty();
+    let new = para(&mut other, "abc");
+    assert!(!e.replace_blocks(ids[2], ids[0], vec![new.clone()]));
+    assert!(e.replace_blocks(ids[0], ids[2], vec![new]));
+    let now: Vec<NodeId> = e.doc().blocks.iter().map(|b| b.id).collect();
+    assert_eq!(now, [ids[0], ids[3]]);
+    assert_eq!(e.doc().remarks[0].anchor, Anchor::Block(ids[0]));
+    assert!(e.undo());
+    assert_eq!(e.doc().blocks.len(), 4);
 }
 
 /// "For every\n compact set _space_ we have $x$ ok."

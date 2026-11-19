@@ -639,8 +639,13 @@ impl SemEditor {
         true
     }
 
-    pub(crate) fn replace_block(&self, block: NodeId, blocks: Vec<model::BlockNode>) -> bool {
-        if !self.editor.borrow_mut().replace_block(block, blocks) {
+    pub(crate) fn replace_blocks(
+        &self,
+        block: NodeId,
+        last: NodeId,
+        blocks: Vec<model::BlockNode>,
+    ) -> bool {
+        if !self.editor.borrow_mut().replace_blocks(block, last, blocks) {
             return false;
         }
         self.goal_x.set(None);

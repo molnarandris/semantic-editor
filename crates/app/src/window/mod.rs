@@ -312,23 +312,48 @@ impl Window {
             }),
         });
         let (current, apply) = (Rc::downgrade(self), Rc::downgrade(self));
+        let (header, set_header) = (Rc::downgrade(self), Rc::downgrade(self));
         self.chat.connect_changes(chat::ChangeHooks {
-            current: Box::new(move |block| {
+            current: Box::new(move |block, to| {
                 let this = current.upgrade()?;
                 let doc = this.editor.document();
-                let block = doc.block(model::NodeId(block))?;
-                Some(typst_bridge::serialize_block(block).0.trim().to_string())
+                let (first, last) = (model::NodeId(block), model::NodeId(to.unwrap_or(block)));
+                let (a, b) = (doc.place(first)?, doc.place(last)?);
+                if a.parent != b.parent || b.index < a.index {
+                    return None;
+                }
+                let blocks = &doc.siblings(a.parent)?[a.index..=b.index];
+                let sources: Vec<String> = blocks
+                    .iter()
+                    .map(|b| typst_bridge::serialize_block(b).0.trim().to_string())
+                    .collect();
+                Some(sources.join("\n\n"))
             }),
-            apply: Box::new(move |block, text| {
+            apply: Box::new(move |block, to, text| {
                 let Some(this) = apply.upgrade() else {
                     return false;
                 };
                 let blocks = typst_bridge::parse_blocks(text);
-                let applied = this.editor.replace_block(model::NodeId(block), blocks);
+                let (first, last) = (model::NodeId(block), model::NodeId(to.unwrap_or(block)));
+                let applied = this.editor.replace_blocks(first, last, blocks);
                 if applied {
                     this.update_remarks();
                 }
                 applied
+            }),
+            header: Box::new(move || {
+                header
+                    .upgrade()
+                    .map(|this| this.editor.header())
+                    .unwrap_or_default()
+            }),
+            set_header: Box::new(move |text| {
+                let Some(this) = set_header.upgrade() else {
+                    return false;
+                };
+                this.apply_block_edit();
+                this.editor.set_header(text);
+                this.editor.header() == text
             }),
         });
         let weak = Rc::downgrade(self);
