@@ -192,6 +192,11 @@ Learned the hard way (blurry text that Typesetter did not have):
   `display`), so the prompt names the version. Environments import as blocks
   only with the body on lines of their own (`#definition[` newline …), so the
   prompt asks for that.
+- **A fitted editor's minimum height is its content height**: a `ScrolledWindow`
+  around a plain `gtk::Box` sizes it by its children's minimum (measured under
+  Broadway: pictures with min 0, natural 100 px got 17 px each). With min 0, chat
+  answers were squeezed once the conversation scrolled, and with overflow visible
+  their text showed behind the next card.
 - **Selection pop-up** (the user's choice: above the selection, Foliate-like, for
   any selection after a 500 ms pause, replacing the Add Remark/Ask Claude menu
   entries and Ctrl+Alt+M). A focusless `gtk::Popover` like the completion list, its

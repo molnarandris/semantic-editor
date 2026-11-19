@@ -410,6 +410,13 @@ impl WidgetImpl for SemEditor {
                 let nat = MAX_PAGE_WIDTH_PT * zoom + 2.0 * (SIDE_MARGIN_PX + PAPER_PAD_PT * zoom);
                 (min as i32, nat as i32, -1, -1)
             }
+            // Fitted (a chat answer, a remark's text): as tall as its
+            // content at least, or a scrolled list that sizes its children
+            // by their minimum lets the next one cover it.
+            _ if self.fit.get() => {
+                let h = self.content_height().ceil() as i32;
+                (h, h, -1, -1)
+            }
             _ => (0, self.content_height() as i32, -1, -1),
         }
     }
