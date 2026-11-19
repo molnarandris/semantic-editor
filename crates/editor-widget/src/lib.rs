@@ -207,6 +207,13 @@ impl SemEditor {
         self.imp().remark_quote(id)
     }
 
+    /// The selection's quotation, as a remark's (see
+    /// [`Self::remark_quote`]): `None` without a selection or before its
+    /// blocks are rendered.
+    pub fn selection_quote(&self) -> Option<(gtk::gdk::Texture, f64)> {
+        self.imp().selection_quote()
+    }
+
     /// The labels a remark's text may refer to, with their numbers as last
     /// rendered (see [`Self::set_outside_labels`]).
     pub fn outside_labels(&self) -> Vec<Outside> {

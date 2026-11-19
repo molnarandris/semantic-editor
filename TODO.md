@@ -22,7 +22,9 @@ From the user's list of 2026-11-15, one group at a time:
    the user's test. (idea) Next: word differences marked (with D), Apply All.
 3. Selection pop-up with Add Remark and Ask Claude icons; menu entries and
    Ctrl+Alt+M removed: done, awaiting the user's test.
-4. Sidebar buttons look bad (postponed by the user, not important).
+4. Chat quote only from Ask Claude, shown as the paper's render (as a remark
+   card's quotation): done, awaiting the user's test.
+5. Sidebar buttons look bad (postponed by the user, not important).
 
 Then the planned features:
 

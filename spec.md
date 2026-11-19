@@ -165,9 +165,10 @@ structure as soon as it is unambiguous.
   answers typeset by Typst; `@label` in an answer shows as a reference in the paper
   does, with its number, and a click goes there; a part without a label is linked
   by its block's id, and a click goes to that block (as the
-  outline goes to a heading); not saved; a question is about the
-  selection the user
-  made, not the one a remark's card or a new remark leaves in the paper).
+  outline goes to a heading); not saved; Ask Claude on a selection makes it what
+  the next question is about, shown above the input box as a remark's quotation
+  is, with a button to drop it; it goes with the question once asked, which keeps
+  the picture; selecting elsewhere does not change it).
 - **Selection pop-up**: once a selection (mouse or keyboard) has stayed the same for
   half a second, two icon buttons show above its first visible line: Add Remark and
   Ask Claude. This is their only way in (no menu entries, no shortcut). The pop-up

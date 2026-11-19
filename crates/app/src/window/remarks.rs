@@ -463,6 +463,15 @@ fn load_css() {
     );
 }
 
+/// A quotation of the paper (`texture` at `pixel_per_pt`) at the size of a
+/// card's text.
+pub(super) fn quote_paintable(
+    texture: gtk::gdk::Texture,
+    pixel_per_pt: f64,
+) -> gtk::gdk::Paintable {
+    scaled::Scaled::new(texture, pixel_per_pt, CARD_ZOOM).upcast()
+}
+
 mod scaled {
     //! A quotation's texture at the size of the card's text: its pixels
     //! (rendered at the paper's pixels per point) count as points at the

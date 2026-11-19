@@ -1,6 +1,8 @@
 //! The Chat pane on the right: the conversation with Claude about the paper
-//! (see [`crate::chat`]), an input box below. A question asked while text
-//! is selected quotes the selection. The answer streams in as it is
+//! (see [`crate::chat`]), an input box below. Ask Claude on a selection
+//! makes it what the next question is about: shown above the input box as
+//! a remark's quotation is (cut from the paper's render), kept with the
+//! question once asked; selecting elsewhere does not change it. The answer streams in as it is
 //! written; Stop ends it. If it fails before any answer, the question goes
 //! back into the input box. Answers are plain text while they stream in,
 //! then shown by a read-only editor like the paper's (its definitions in
@@ -74,13 +76,22 @@ pub struct ChatPane {
     labels: RefCell<Vec<Outside>>,
     scroller: gtk::ScrolledWindow,
     empty: gtk::Label,
+    /// What the next question is about, above the input box: the paper's
+    /// render of it, or its Typst before that is rendered.
+    quote_box: gtk::Box,
+    quote_picture: gtk::Picture,
     quote_label: gtk::Label,
     status: gtk::Label,
     input: gtk::TextView,
     send: gtk::Button,
     messages: RefCell<Vec<Message>>,
-    /// What the next question is about (the selection), if anything.
+    /// What the next question is about (the selection), if anything, and
+    /// its picture.
     quote: RefCell<Option<Quote>>,
+    quote_paintable: RefCell<Option<gtk::gdk::Paintable>>,
+    /// The picture of what the question being answered is about, to put
+    /// back with the question if no answer comes.
+    asked_paintable: RefCell<Option<gtk::gdk::Paintable>>,
     /// The running `claude`, while an answer is written.
     running: RefCell<Option<gio::Subprocess>>,
     /// Stop was pressed for the running answer.
@@ -117,7 +128,7 @@ impl ChatPane {
             .margin_bottom(12)
             .build();
         let empty = gtk::Label::builder()
-            .label("Ask Claude about the paper.\nSelect text first to ask about it.")
+            .label("Ask Claude about the paper.\nTo ask about a part, select it and\nclick Ask Claude above it.")
             .css_classes(["dim-label"])
             .justify(gtk::Justification::Center)
             .margin_top(24)
@@ -129,14 +140,44 @@ impl ChatPane {
             .child(&list)
             .build();
 
+        let quote_picture = gtk::Picture::builder()
+            .can_shrink(true)
+            .content_fit(gtk::ContentFit::ScaleDown)
+            .halign(gtk::Align::Start)
+            .build();
         let quote_label = gtk::Label::builder()
             .xalign(0.0)
+            .wrap(true)
+            .wrap_mode(gtk::pango::WrapMode::WordChar)
+            .lines(3)
             .ellipsize(gtk::pango::EllipsizeMode::End)
-            .css_classes(["caption", "dim-label"])
+            .css_classes(["caption", "monospace"])
+            .build();
+        let quote_content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        quote_content.append(&quote_picture);
+        quote_content.append(&quote_label);
+        let quote_scroller = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .propagate_natural_height(true)
+            .max_content_height(200)
+            .hexpand(true)
+            .child(&quote_content)
+            .build();
+        let quote_close = gtk::Button::builder()
+            .icon_name("window-close-symbolic")
+            .tooltip_text("Do Not Ask About This")
+            .valign(gtk::Align::Start)
+            .css_classes(["flat", "circular"])
+            .build();
+        let quote_box = gtk::Box::builder()
+            .spacing(4)
+            .css_classes(["remark-card"])
             .margin_start(12)
             .margin_end(12)
             .visible(false)
             .build();
+        quote_box.append(&quote_scroller);
+        quote_box.append(&quote_close);
         let input = gtk::TextView::builder()
             .wrap_mode(gtk::WrapMode::WordChar)
             .accepts_tab(false)
@@ -181,7 +222,7 @@ impl ChatPane {
         let widget = gtk::Box::new(gtk::Orientation::Vertical, 4);
         widget.append(&top);
         widget.append(&scroller);
-        widget.append(&quote_label);
+        widget.append(&quote_box);
         widget.append(&row);
         widget.append(&status);
 
@@ -192,12 +233,16 @@ impl ChatPane {
             labels: RefCell::default(),
             scroller,
             empty,
+            quote_box,
+            quote_picture,
             quote_label,
             status,
             input,
             send,
             messages: RefCell::default(),
             quote: RefCell::default(),
+            quote_paintable: RefCell::default(),
+            asked_paintable: RefCell::default(),
             running: RefCell::default(),
             stopped: Cell::new(false),
             paper: RefCell::default(),
@@ -232,6 +277,12 @@ impl ChatPane {
             glib::Propagation::Stop
         });
         this.input.add_controller(keys);
+        let weak = Rc::downgrade(&this);
+        quote_close.connect_clicked(move |_| {
+            if let Some(this) = weak.upgrade() {
+                this.set_quote(None, None);
+            }
+        });
         let weak = Rc::downgrade(&this);
         clear.connect_clicked(move |_| {
             if let Some(this) = weak.upgrade() {
@@ -299,19 +350,21 @@ impl ChatPane {
     }
 
     /// What the next question is about (the selection), shown above the
-    /// input box.
-    pub fn set_quote(&self, quote: Option<Quote>) {
-        match &quote {
-            Some(q) => {
-                let first = q.source.lines().next().unwrap_or_default();
-                self.quote_label
-                    .set_label(&format!("About the selection: {first}"));
-                self.quote_label.set_tooltip_text(Some(&q.source));
-            }
-            None => self.quote_label.set_tooltip_text(None),
-        }
-        self.quote_label.set_visible(quote.is_some());
+    /// input box: `picture`, its render, or else its Typst.
+    pub fn set_quote(&self, quote: Option<Quote>, picture: Option<gtk::gdk::Paintable>) {
+        let picture = picture.filter(|_| quote.is_some());
+        self.quote_picture.set_paintable(picture.as_ref());
+        self.quote_picture.set_visible(picture.is_some());
+        let source = quote
+            .as_ref()
+            .map(|q| q.source.as_str())
+            .unwrap_or_default();
+        self.quote_label.set_label(source);
+        self.quote_label
+            .set_visible(quote.is_some() && picture.is_none());
+        self.quote_box.set_visible(quote.is_some());
         *self.quote.borrow_mut() = quote;
+        *self.quote_paintable.borrow_mut() = picture;
     }
 
     pub fn focus_input(&self) {
@@ -336,6 +389,7 @@ impl ChatPane {
             text,
             quote: self.quote.borrow().clone(),
         };
+        let picture = self.quote_paintable.borrow().clone();
         let paper = self
             .paper
             .borrow()
@@ -344,7 +398,9 @@ impl ChatPane {
             .unwrap_or_default();
         let prompt = chat::prompt(&paper, &self.messages.borrow(), &question);
         buffer.set_text("");
-        self.append(&question);
+        self.set_quote(None, None);
+        self.append(&question, picture.as_ref());
+        *self.asked_paintable.borrow_mut() = picture;
         self.empty.set_visible(false);
         self.messages.borrow_mut().push(question);
         let answer = self.answer_label();
@@ -383,6 +439,8 @@ impl ChatPane {
                     self.list.remove(&last);
                 }
                 self.input.buffer().set_text(&question.text);
+                let picture = self.asked_paintable.take();
+                self.set_quote(question.quote, picture);
             }
             self.empty.set_visible(self.messages.borrow().is_empty());
         } else {
@@ -392,7 +450,7 @@ impl ChatPane {
                 text: text.trim().to_string(),
                 quote: None,
             };
-            self.append(&m);
+            self.append(&m, None);
             self.messages.borrow_mut().push(m);
         }
         if let Some(e) = &error {
@@ -419,8 +477,9 @@ impl ChatPane {
         }
     }
 
-    /// Show a message at the end of the conversation.
-    fn append(&self, m: &Message) {
+    /// Show a message at the end of the conversation; a question with the
+    /// picture of what it is about, if it has one.
+    fn append(&self, m: &Message, picture: Option<&gtk::gdk::Paintable>) {
         match m.author {
             Author::User => {
                 let card = gtk::Box::builder()
@@ -428,7 +487,19 @@ impl ChatPane {
                     .spacing(4)
                     .css_classes(["card"])
                     .build();
-                if let Some(q) = &m.quote {
+                if let Some(picture) = picture.filter(|_| m.quote.is_some()) {
+                    let quote = gtk::Picture::builder()
+                        .paintable(picture)
+                        .can_shrink(true)
+                        .content_fit(gtk::ContentFit::ScaleDown)
+                        .halign(gtk::Align::Start)
+                        .css_classes(["remark-card"])
+                        .margin_start(6)
+                        .margin_end(6)
+                        .margin_top(6)
+                        .build();
+                    card.append(&quote);
+                } else if let Some(q) = &m.quote {
                     let quote = gtk::Label::builder()
                         .label(&q.source)
                         .xalign(0.0)

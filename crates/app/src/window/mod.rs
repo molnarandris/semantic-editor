@@ -259,7 +259,6 @@ impl Window {
                 this.outline.update(&this.editor);
                 this.update_scratch();
                 this.update_remarks();
-                this.chat.set_quote(this.selection_quote());
             }
         });
         let weak = Rc::downgrade(self);
@@ -308,7 +307,6 @@ impl Window {
                     this.split_remarks.set_show_sidebar(true);
                     this.right_pages.set_visible_child_name("remarks");
                     this.editor.select_remark(id);
-                    this.chat.set_quote(None);
                     this.update_remarks();
                 }
             }),
@@ -339,17 +337,11 @@ impl Window {
                 return;
             };
             match action {
-                // Showing a remark selects its range in the paper; that is
-                // not a selection to ask the chat about.
                 RemarkAction::Select(id) => {
                     this.editor.select_remark(id);
-                    this.chat.set_quote(None);
                     this.editor.grab_focus();
                 }
-                RemarkAction::Show(id) => {
-                    this.editor.select_remark(id);
-                    this.chat.set_quote(None);
-                }
+                RemarkAction::Show(id) => this.editor.select_remark(id),
                 RemarkAction::SetText(id, text) => this.editor.set_remark_text(id, &text),
                 RemarkAction::Resolve(id, resolved) => {
                     this.editor.set_remark_resolved(id, resolved)
@@ -588,8 +580,15 @@ impl Window {
         Some(crate::chat::Quote { place, source })
     }
 
-    /// Ask Claude: the chat on the right, the input box focused.
+    /// Ask Claude about the selection: it becomes what the next question
+    /// is about (shown as in the paper), the chat on the right, the input
+    /// box focused.
     fn ask_claude(&self) {
+        let picture = self
+            .editor
+            .selection_quote()
+            .map(|(texture, ppp)| remarks::quote_paintable(texture, ppp));
+        self.chat.set_quote(self.selection_quote(), picture);
         self.split_remarks.set_show_sidebar(true);
         self.right_pages.set_visible_child_name("chat");
         self.chat.focus_input();
@@ -700,8 +699,6 @@ impl Window {
         self.right_pages.set_visible_child_name("remarks");
         self.update_remarks();
         self.remarks.edit(id);
-        // The selection now belongs to the remark, not to the chat.
-        self.chat.set_quote(None);
     }
 
     /// Ask for a version's name ("arXiv submission").

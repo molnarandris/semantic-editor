@@ -1,7 +1,8 @@
-//! A remark's quotation for its card in the sidebar: the lines its range
-//! covers with one line above and one below (a whole block's remark: the
-//! block), cut from the blocks' renders, so it reads as in the paper; the
-//! remarked range shaded as in the paper.
+//! A quotation of the paper, for a remark's card in the sidebar and for a
+//! question to Claude about a selection: the lines a range covers with one
+//! line above and one below (a whole block's remark, selected blocks: the
+//! blocks), cut from the blocks' renders, so it reads as in the paper; the
+//! range shaded as a remark's is in the paper.
 
 use super::draw::REMARK_SHADE;
 use super::*;
@@ -15,21 +16,44 @@ struct Span {
     bottom: f64,
 }
 
+/// What a quotation shows.
+enum Quoted {
+    /// A range from one caret position to another.
+    Range(CursorPath, CursorPath),
+    /// Top-level blocks, first to last, whole.
+    Blocks(usize, usize),
+}
+
 /// Space kept around the lines cut out, pt.
 const QUOTE_PAD_PT: f64 = 2.0;
 
 impl SemEditor {
-    /// What remark `id`'s quotation shows: its pieces, top to bottom.
-    fn quote_spans(&self, id: u64) -> Option<Vec<Span>> {
-        let (range, block) = {
-            let ed = self.editor.borrow();
-            let doc = ed.doc();
-            let remark = doc.remarks.iter().find(|r| r.id == id)?;
-            (
-                doc.remark_range(remark),
-                doc.top_index(remark.anchor.block())?,
-            )
-        };
+    /// What remark `id`'s quotation shows.
+    fn remark_quoted(&self, id: u64) -> Option<Quoted> {
+        let ed = self.editor.borrow();
+        let doc = ed.doc();
+        let remark = doc.remarks.iter().find(|r| r.id == id)?;
+        Some(match doc.remark_range(remark) {
+            Some((first, last)) => Quoted::Range(first, last),
+            None => {
+                let block = doc.top_index(remark.anchor.block())?;
+                Quoted::Blocks(block, block)
+            }
+        })
+    }
+
+    /// What the selection's quotation shows.
+    fn selection_quoted(&self) -> Option<Quoted> {
+        let ed = self.editor.borrow();
+        if let model::SelRange::Blocks { start, end } = ed.selection()? {
+            return Some(Quoted::Blocks(start, end.checked_sub(1)?));
+        }
+        let (first, last) = ed.selection_bounds()?;
+        Some(Quoted::Range(first, last))
+    }
+
+    /// What a quotation shows: its pieces, top to bottom.
+    fn quote_spans(&self, quoted: &Quoted) -> Option<Vec<Span>> {
         let whole = |index: usize| {
             let views = self.views.borrow();
             let view = views.get(index)?;
@@ -39,16 +63,17 @@ impl SemEditor {
                 bottom: view.height_pt(),
             })
         };
-        let Some((first, last)) = range else {
-            return Some(vec![whole(block)?]);
+        let (first, last) = match quoted {
+            Quoted::Range(first, last) => (first, last),
+            &Quoted::Blocks(i, j) => return (i..=j).map(whole).collect(),
         };
         let (i, j) = {
             let ed = self.editor.borrow();
             let doc = ed.doc();
             (doc.top_index(first.block)?, doc.top_index(last.block)?)
         };
-        let (top, _) = self.context_lines(i, &first)?;
-        let (_, bottom) = self.context_lines(j, &last)?;
+        let (top, _) = self.context_lines(i, first)?;
+        let (_, bottom) = self.context_lines(j, last)?;
         let mut spans: Vec<Span> = (i..=j).filter_map(whole).collect();
         if let Some(s) = spans.first_mut() {
             s.top = top;
@@ -77,19 +102,11 @@ impl SemEditor {
         Some((top, bottom))
     }
 
-    /// The shading of remark `id`'s range in its quotation: for each piece
-    /// (by its place in `spans`), rectangles (x, y, width, height) in pt of
-    /// its block. None for a remark on a whole block.
-    fn quote_marks(&self, id: u64, spans: &[Span]) -> Vec<(usize, [f64; 4])> {
-        let range = {
-            let ed = self.editor.borrow();
-            let doc = ed.doc();
-            doc.remarks
-                .iter()
-                .find(|r| r.id == id)
-                .and_then(|r| doc.remark_range(r))
-        };
-        let Some((first, last)) = range else {
+    /// The shading of a quoted range: for each piece (by its place in
+    /// `spans`), rectangles (x, y, width, height) in pt of its block. None
+    /// for whole blocks.
+    fn quote_marks(&self, quoted: &Quoted, spans: &[Span]) -> Vec<(usize, [f64; 4])> {
+        let Quoted::Range(first, last) = quoted else {
             return vec![];
         };
         let zoom = self.zoom.get();
@@ -99,8 +116,8 @@ impl SemEditor {
             let Some(&top) = tops.get(s.index) else {
                 continue;
             };
-            let from = (k == 0).then_some(&first);
-            let to = (k == spans.len() - 1).then_some(&last);
+            let from = (k == 0).then_some(first);
+            let to = (k == spans.len() - 1).then_some(last);
             for r in self.block_range_rects(s.index, from, to, 0.0, 0.0) {
                 marks.push((
                     k,
@@ -119,9 +136,10 @@ impl SemEditor {
     /// What remark `id`'s quotation depends on (its pieces, their renders
     /// and its shading), to redo it only when this changes.
     pub(crate) fn remark_quote_key(&self, id: u64) -> Option<Vec<u64>> {
-        let spans = self.quote_spans(id)?;
+        let quoted = self.remark_quoted(id)?;
+        let spans = self.quote_spans(&quoted)?;
         let mut key: Vec<u64> = self
-            .quote_marks(id, &spans)
+            .quote_marks(&quoted, &spans)
             .iter()
             .flat_map(|(k, r)| [*k as u64].into_iter().chain(r.map(|v| (v * 100.0) as u64)))
             .collect();
@@ -138,12 +156,22 @@ impl SemEditor {
         Some(key)
     }
 
-    /// Remark `id`'s quotation: its pieces cut from the renders and stacked
-    /// (the blocks' spacing between them), and its device pixels per pt.
-    /// `None` before the blocks are rendered.
+    /// Remark `id`'s quotation (see `quote`).
     pub(crate) fn remark_quote(&self, id: u64) -> Option<(gdk::Texture, f64)> {
-        let spans = self.quote_spans(id)?;
-        let marks = self.quote_marks(id, &spans);
+        self.quote(&self.remark_quoted(id)?)
+    }
+
+    /// The selection's quotation (see `quote`).
+    pub(crate) fn selection_quote(&self) -> Option<(gdk::Texture, f64)> {
+        self.quote(&self.selection_quoted()?)
+    }
+
+    /// A quotation: its pieces cut from the renders and stacked (the
+    /// blocks' spacing between them), and its device pixels per pt. `None`
+    /// before the blocks are rendered.
+    fn quote(&self, quoted: &Quoted) -> Option<(gdk::Texture, f64)> {
+        let spans = self.quote_spans(quoted)?;
+        let marks = self.quote_marks(quoted, &spans);
         let views = self.views.borrow();
         let pad = typst_bridge::BLOCK_PAD_PT;
         let mut pieces = vec![];
