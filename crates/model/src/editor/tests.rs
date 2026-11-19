@@ -2628,6 +2628,36 @@ fn remarks_from_claude() {
     assert_eq!(e.doc().remarks[0].id, id);
 }
 
+/// A change from Claude replaces a block in one undo step: the first new
+/// block keeps its id and label, a range remark in it falls back to the
+/// block, and undo brings back the old block.
+#[test]
+fn change_from_claude() {
+    let mut doc = typst_free_doc();
+    doc.blocks[0].label = "intro".into();
+    let mut e = Editor::new(doc);
+    let p = e.doc().blocks[0].id;
+    let anchor = e.doc().phrase_anchor(p, Some("every compact")).unwrap();
+    e.add_remark_at(anchor, "Why?").unwrap();
+    let before = e.doc().clone();
+    // From another document: its ids may clash with this one's.
+    let mut other = Document::empty();
+    let t = other.text("New text.");
+    let first = other.paragraph(vec![t]);
+    let t = other.text("And more.");
+    let second = other.paragraph(vec![t]);
+    assert!(!e.replace_block(NodeId(9999), vec![first.clone()]));
+    assert!(e.replace_block(p, vec![first, second]));
+    let blocks = &e.doc().blocks;
+    assert_eq!(blocks.len(), 2);
+    assert_eq!((blocks[0].id, blocks[0].label.as_str()), (p, "intro"));
+    assert_ne!(blocks[1].id, p);
+    assert_eq!(e.doc().remarks[0].anchor, Anchor::Block(p));
+    assert_eq!(e.caret().block, p);
+    assert!(e.undo());
+    assert_eq!(e.doc().blocks, before.blocks);
+}
+
 /// "For every\n compact set _space_ we have $x$ ok."
 fn typst_free_doc() -> Document {
     let mut d = Document::empty();

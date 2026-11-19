@@ -51,10 +51,15 @@ step) write, on a line of its own, #remark(block: 17, at: \"for every \
 compact\")[the remark's text, in Typst]: `at` is a few words of plain text \
 (no formula, no markup) copied exactly from that block, found only there; \
 leave `at` out for the whole block. The author decides whether to add it. \
-Never write <labels> or /* block */ comments of your own. You cannot change \
-the paper or any file.";
+To propose a change of the paper, write, on a line of its own, \
+#change(block: 17)[the block's new Typst]: it replaces that whole block (a \
+paragraph, a formula, a theorem with its body), so write all of it, with the \
+block's label if it has one; it may become several blocks. Propose a change \
+only when asked to or when it is clearly wanted; the author decides whether \
+to apply it. Never write <labels> or /* block */ comments of your own. You \
+cannot change the paper or any file yourself.";
 
-/// A part of an answer: Typst, or a remark Claude proposes.
+/// A part of an answer: Typst, or a remark or change Claude proposes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Part {
     Text(String),
@@ -65,24 +70,36 @@ pub enum Part {
         /// Its text, Typst.
         text: String,
     },
+    /// Replace block `block` by `text` (Typst, `/* block N */` comments
+    /// left out).
+    Change {
+        block: u64,
+        text: String,
+    },
 }
 
-/// An answer cut at its `#remark(block: N, at: "…")[…]` calls. A call
-/// that cannot be read stays in the text.
+/// An answer cut at its `#remark(block: N, at: "…")[…]` and
+/// `#change(block: N)[…]` calls. A call that cannot be read stays in the
+/// text.
 pub fn parts(answer: &str) -> Vec<Part> {
+    const CALLS: [&str; 2] = ["#remark(", "#change("];
     let mut out = vec![];
     let mut rest = answer;
-    while let Some(i) = rest.find("#remark(") {
-        let Some((block, at, text, len)) = remark_call(&rest[i + "#remark(".len()..]) else {
+    while let Some((i, name)) = CALLS.iter().filter_map(|c| Some((rest.find(c)?, *c))).min() {
+        let after = i + name.len();
+        let call = match name {
+            "#remark(" => remark_call(&rest[after..]),
+            _ => change_call(&rest[after..]),
+        };
+        let Some((part, len)) = call else {
             // Not readable: keep it as text and look further.
-            let next = i + "#remark(".len();
-            push_text(&mut out, &rest[..next]);
-            rest = &rest[next..];
+            push_text(&mut out, &rest[..after]);
+            rest = &rest[after..];
             continue;
         };
         push_text(&mut out, &rest[..i]);
-        out.push(Part::Remark { block, at, text });
-        rest = &rest[i + "#remark(".len() + len..];
+        out.push(part);
+        rest = &rest[after + len..];
     }
     push_text(&mut out, rest);
     out
@@ -96,15 +113,13 @@ fn push_text(out: &mut Vec<Part>, text: &str) {
     }
 }
 
-/// The arguments and body of a `#remark(` call, from just after the `(`:
-/// block, phrase, text and the length read.
-fn remark_call(s: &str) -> Option<(u64, Option<String>, String, usize)> {
-    let close = matching(s, '(', ')')?;
+/// A `#remark(` call, from just after the `(`: the part and the length
+/// read.
+fn remark_call(s: &str) -> Option<(Part, usize)> {
+    let (args, text, len) = call(s)?;
     let (mut block, mut at) = (None, None);
-    for arg in split_args(&s[..close]) {
-        let (name, value) = arg.split_once(':')?;
-        let value = value.trim();
-        match name.trim() {
+    for (name, value) in args {
+        match name {
             "block" => block = Some(value.parse::<u64>().ok()?),
             "at" => {
                 let inner = value.strip_prefix('"')?.strip_suffix('"')?;
@@ -113,11 +128,60 @@ fn remark_call(s: &str) -> Option<(u64, Option<String>, String, usize)> {
             _ => return None,
         }
     }
-    let after = &s[close + 1..];
-    let body = after.strip_prefix('[')?;
+    let block = block?;
+    Some((Part::Remark { block, at, text }, len))
+}
+
+/// A `#change(` call, from just after the `(`: the part and the length
+/// read.
+fn change_call(s: &str) -> Option<(Part, usize)> {
+    let (args, text, len) = call(s)?;
+    let block = match args[..] {
+        [("block", value)] => value.parse::<u64>().ok()?,
+        _ => return None,
+    };
+    let text = without_block_comments(&text);
+    Some((Part::Change { block, text }, len))
+}
+
+/// A call's named arguments (name, value as written), its trimmed body
+/// and the length read.
+type Call<'a> = (Vec<(&'a str, &'a str)>, String, usize);
+
+/// A call read from just after its `(`.
+fn call(s: &str) -> Option<Call<'_>> {
+    let close = matching(s, '(', ')')?;
+    let args = split_args(&s[..close])
+        .into_iter()
+        .map(|arg| {
+            let (name, value) = arg.split_once(':')?;
+            Some((name.trim(), value.trim()))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let body = s[close + 1..].strip_prefix('[')?;
     let end = matching(body, '[', ']')?;
     let len = close + 1 + 1 + end + 1;
-    Some((block?, at, body[..end].trim().to_string(), len))
+    Some((args, body[..end].trim().to_string(), len))
+}
+
+/// `text` without the `/* block 17 */` comments (and their line breaks)
+/// copied from the paper.
+fn without_block_comments(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest = text;
+    while let Some(i) = rest.find("/* block ") {
+        let tail = &rest[i + "/* block ".len()..];
+        let digits = tail.len() - tail.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+        let Some(after) = tail[digits..].strip_prefix(" */").filter(|_| digits > 0) else {
+            out.push_str(&rest[..i + 1]);
+            rest = &rest[i + 1..];
+            continue;
+        };
+        out.push_str(&rest[..i]);
+        rest = after.strip_prefix('\n').unwrap_or(after);
+    }
+    out.push_str(rest);
+    out.trim().to_string()
 }
 
 /// The index of the `close` that ends what starts just after an `open`
@@ -382,5 +446,35 @@ mod tests {
             ]
         );
         assert_eq!(parts("No remarks."), [Part::Text("No remarks.".into())]);
+    }
+
+    /// Change calls are cut out with their block and new Typst, block
+    /// comments copied from the paper left out; with other arguments one
+    /// stays text.
+    #[test]
+    fn answer_changes() {
+        let answer = "Better:\n#change(block: 4)[\n#lemma[\n/* block 5 */\nLet $x[1]$.\n]\n]\n\
+            #remark(block: 4)[Old.] #change(block: 4, at: \"x\")[no]";
+        assert_eq!(
+            parts(answer),
+            [
+                Part::Text("Better:\n".into()),
+                Part::Change {
+                    block: 4,
+                    text: "#lemma[\nLet $x[1]$.\n]".into(),
+                },
+                Part::Text("\n".into()),
+                Part::Remark {
+                    block: 4,
+                    at: None,
+                    text: "Old.".into(),
+                },
+                Part::Text(" #change(block: 4, at: \"x\")[no]".into()),
+            ]
+        );
+        assert_eq!(
+            without_block_comments("a /* block x */ b"),
+            "a /* block x */ b"
+        );
     }
 }

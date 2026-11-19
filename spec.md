@@ -181,6 +181,15 @@ structure as soon as it is unambiguous.
     makes it an ordinary remark in the Remarks tab (no author, editable, deleted
     as any other); the button then becomes a link to the card. Nothing is added
     without Add. A place not found shows no button and says so.
+  - A change from Claude: `#change(block: 17)[the block's new Typst]` in an
+    answer is a proposal to replace that whole block (one block or several).
+    The answer shows in its place a card with the new version typeset, the
+    current one below it (folded), Go There and Apply. Apply replaces the
+    block in one ordinary, undoable edit: the first new block keeps the old
+    one's id, and its label if the new one has none; a remark on a range
+    inside it falls back to the whole block. Apply then becomes "Applied".
+    Nothing changes without Apply. A block not in the paper shows no Apply
+    and says so.
 - Problems: Next Problem visits blocks that fail, broken references and duplicate
   labels.
 - Dialogs edit the header, code, diagrams, the bibliography and the title fields,

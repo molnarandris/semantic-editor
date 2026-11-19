@@ -321,6 +321,12 @@ impl SemEditor {
         }
     }
 
+    /// Replace block `block` by `blocks` (a change from Claude, see
+    /// [`model::Editor::replace_block`]) and show it.
+    pub fn replace_block(&self, block: NodeId, blocks: Vec<model::BlockNode>) -> bool {
+        self.imp().replace_block(block, blocks)
+    }
+
     /// Keep a render of `target` at `pixel_per_pt` device pixels per point,
     /// cropped to its ink, up to date for a preview (`None` stops it). Read
     /// it with [`Self::preview_texture`] and [`Self::preview_error`] on

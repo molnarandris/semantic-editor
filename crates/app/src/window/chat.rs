@@ -6,7 +6,9 @@
 //! then shown by a read-only editor like the paper's (its definitions in
 //! force): `@label` shows the paper's number, and a click on it goes there
 //! in the paper. A remark Claude proposes (`#remark(block: N, at: "…")[…]`)
-//! shows as a card with Go There and Add; nothing is added without Add.
+//! shows as a card with Go There and Add; nothing is added without Add. A
+//! change (`#change(block: N)[…]`) shows as a card with Go There and Apply;
+//! nothing changes without Apply.
 //! Copy puts an answer's Typst on the clipboard. The
 //! conversation is not kept: it ends with the window or the document.
 
@@ -35,6 +37,9 @@ type FindPlace = dyn Fn(u64, Option<&str>) -> bool;
 /// Add a remark (place, text): its id.
 type AddRemark = dyn Fn(u64, Option<&str>, &str) -> Option<u64>;
 
+/// Replace a block by Typst: whether it was.
+type ApplyChange = dyn Fn(u64, &str) -> bool;
+
 /// What the chat asks of the paper for a remark Claude proposes.
 pub struct RemarkHooks {
     /// Whether its place (block id, phrase) is in the paper.
@@ -43,6 +48,14 @@ pub struct RemarkHooks {
     pub add: Box<AddRemark>,
     /// Show the remark's card.
     pub show: Box<dyn Fn(u64)>,
+}
+
+/// What the chat asks of the paper for a change Claude proposes.
+pub struct ChangeHooks {
+    /// The block's Typst now, `None` if it is not in the paper.
+    pub current: Box<dyn Fn(u64) -> Option<String>>,
+    /// Replace the block by this Typst: whether it was.
+    pub apply: Box<ApplyChange>,
 }
 
 /// A place of the paper an answer points at.
@@ -79,6 +92,7 @@ pub struct ChatPane {
     /// answer).
     follow: Rc<RefCell<Option<Follow>>>,
     remark_hooks: RefCell<Option<Rc<RemarkHooks>>>,
+    change_hooks: RefCell<Option<Rc<ChangeHooks>>>,
 }
 
 impl ChatPane {
@@ -190,6 +204,7 @@ impl ChatPane {
             context: RefCell::default(),
             follow: Rc::default(),
             remark_hooks: RefCell::default(),
+            change_hooks: RefCell::default(),
         });
 
         let weak = Rc::downgrade(&this);
@@ -244,6 +259,11 @@ impl ChatPane {
     /// How remarks Claude proposes are found, added and shown.
     pub fn connect_remarks(&self, hooks: RemarkHooks) {
         *self.remark_hooks.borrow_mut() = Some(Rc::new(hooks));
+    }
+
+    /// How changes Claude proposes are read and applied.
+    pub fn connect_changes(&self, hooks: ChangeHooks) {
+        *self.change_hooks.borrow_mut() = Some(Rc::new(hooks));
     }
 
     /// Let the answers' references show the paper's labels as now
@@ -450,6 +470,7 @@ impl ChatPane {
                 chat::Part::Remark { block, at, text } => {
                     view.append(&self.proposal(block, at, &text))
                 }
+                chat::Part::Change { block, text } => view.append(&self.change(block, &text)),
             }
         }
         let copy = gtk::Button::builder()
@@ -527,6 +548,77 @@ impl ChatPane {
             }
         });
         row.append(&add);
+        card
+    }
+
+    /// A change Claude proposes, as a card: the new version, Go There and
+    /// Apply (which then says Applied), the current version folded below.
+    /// A block not in the paper has no Apply and says so.
+    fn change(&self, block: u64, text: &str) -> gtk::Box {
+        let card = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .css_classes(["card"])
+            .build();
+        let inner = gtk::Box::builder()
+            .orientation(gtk::Orientation::Vertical)
+            .spacing(4)
+            .margin_start(8)
+            .margin_end(8)
+            .margin_top(8)
+            .margin_bottom(4)
+            .build();
+        card.append(&inner);
+        inner.append(&self.answer_editor(text, None));
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        let go = gtk::Button::builder()
+            .label("Go There")
+            .tooltip_text("Show the Block in the Paper")
+            .css_classes(["flat", "caption"])
+            .build();
+        let follow = self.follow.clone();
+        go.connect_clicked(move |_| {
+            if let Some(f) = follow.borrow().as_ref() {
+                f(Place::Block(model::NodeId(block)));
+            }
+        });
+        row.append(&go);
+        inner.append(&row);
+        let Some(hooks) = self.change_hooks.borrow().clone() else {
+            return card;
+        };
+        let Some(current) = (hooks.current)(block) else {
+            go.set_visible(false);
+            row.append(&note("Its block is not in the paper."));
+            return card;
+        };
+        let apply = gtk::Button::builder()
+            .label("Apply")
+            .tooltip_text("Replace the Block in the Paper")
+            .hexpand(true)
+            .halign(gtk::Align::End)
+            .css_classes(["caption"])
+            .build();
+        let text = text.to_string();
+        apply.connect_clicked(move |apply| {
+            let Some(row) = apply.parent().and_downcast::<gtk::Box>() else {
+                return;
+            };
+            row.remove(apply);
+            let done = match (hooks.apply)(block, &text) {
+                true => "Applied (Undo takes it back).",
+                false => "Not applied: its block is gone, or this is an old version.",
+            };
+            let done = note(done);
+            done.set_xalign(1.0);
+            row.append(&done);
+        });
+        row.append(&apply);
+        let expander = gtk::Expander::builder()
+            .label("Current Version")
+            .css_classes(["caption"])
+            .child(&self.answer_editor(&current, None))
+            .build();
+        inner.append(&expander);
         card
     }
 

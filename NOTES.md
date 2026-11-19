@@ -183,6 +183,15 @@ Learned the hard way (blurry text that Typesetter did not have):
   position at a time (whitespace runs as one space, any non-text position a
   break), so the phrase must be plain text: Claude is told so. The first match
   wins. Add looks the place up again (the paper may have changed since).
+- **Claude's changes replace a whole block** (the user's choice over phrase-level
+  edits: reliable matching, math never cut in half). `#change(block: N)[…]` is cut
+  out like a remark; `/* block N */` comments Claude copied are dropped (they would
+  import as raw blocks). Apply parses with `parse_blocks` (as paste does) and
+  `Editor::replace_block`: one `Replace` op, fresh ids by `adopt`, the first block
+  keeps the old id (remarks stay attached) and the old label if it has none (in
+  the tree only headings, formulas and environments carry labels). A range remark
+  inside falls back to the block, and undo does not restore the range: remarks are
+  outside undo, as for any edit.
 - **A caret move skips the search for blocks to compile** (`after_move`, `Moved`
   in `input.rs`): that search builds every block's source (~10 ms on the sample in
   a debug build, more in a long paper), and a held arrow key's auto-repeat outran

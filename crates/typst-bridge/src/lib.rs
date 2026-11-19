@@ -24,7 +24,7 @@ pub use counters::{
     CounterState, LabelTarget, chain_code, initial_state, label_report, missing_ref, ref_stub,
     stand_in, tracked_counters,
 };
-pub use deserialize::{import_project, import_typ, local_files, parse_fragment};
+pub use deserialize::{import_project, import_typ, local_files, parse_blocks, parse_fragment};
 pub use layout::{BlockLayout, GlyphBox, RawLayout, Rect, raw_layout};
 pub use serialize::{
     CETZ_IMPORT, CETZ_VERSION, DEFAULT_HEADER, HEADER_SPECIMEN, PREAMBLE, SpanMap, Style,

@@ -309,6 +309,26 @@ impl Window {
                 }
             }),
         });
+        let (current, apply) = (Rc::downgrade(self), Rc::downgrade(self));
+        self.chat.connect_changes(chat::ChangeHooks {
+            current: Box::new(move |block| {
+                let this = current.upgrade()?;
+                let doc = this.editor.document();
+                let block = doc.block(model::NodeId(block))?;
+                Some(typst_bridge::serialize_block(block).0.trim().to_string())
+            }),
+            apply: Box::new(move |block, text| {
+                let Some(this) = apply.upgrade() else {
+                    return false;
+                };
+                let blocks = typst_bridge::parse_blocks(text);
+                let applied = this.editor.replace_block(model::NodeId(block), blocks);
+                if applied {
+                    this.update_remarks();
+                }
+                applied
+            }),
+        });
         let weak = Rc::downgrade(self);
         self.remarks.connect_action(move |action| {
             let Some(this) = weak.upgrade() else {

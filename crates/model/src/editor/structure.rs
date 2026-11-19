@@ -629,6 +629,38 @@ impl Editor {
         self.commit(vec![op], after, Last::Source(block))
     }
 
+    /// Replace block `block` by `blocks` (from another document: a change
+    /// Claude proposes) in one undo step. The first new block keeps the old
+    /// one's id, and its label if it has none; the caret goes to its start.
+    pub fn replace_block(&mut self, block: NodeId, blocks: Vec<BlockNode>) -> bool {
+        if self.read_only || blocks.is_empty() {
+            return false;
+        }
+        let (Some(place), Some(old)) = (self.doc.place(block), self.doc.block(block)) else {
+            return false;
+        };
+        let label = old.label.clone();
+        let mut fragment = Fragment::Blocks(blocks);
+        self.doc.adopt(&mut fragment);
+        let Fragment::Blocks(mut blocks) = fragment else {
+            return false;
+        };
+        blocks[0].id = block;
+        if blocks[0].label.is_empty() {
+            blocks[0].label = label;
+        }
+        let after = self.doc.start_of(&blocks[0]);
+        let op = Op::Replace {
+            seq: place.seq(),
+            index: place.index,
+            count: 1,
+            items: Items::Blocks(blocks),
+        };
+        self.anchor = None;
+        self.selected = None;
+        self.commit(vec![op], after, Last::Other)
+    }
+
     /// Replace the document header. Consecutive edits are one undo step;
     /// the caret stays where it is.
     pub fn set_header(&mut self, header: &str) -> bool {

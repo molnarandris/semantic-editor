@@ -624,6 +624,15 @@ impl SemEditor {
         true
     }
 
+    pub(crate) fn replace_block(&self, block: NodeId, blocks: Vec<model::BlockNode>) -> bool {
+        if !self.editor.borrow_mut().replace_block(block, blocks) {
+            return false;
+        }
+        self.goal_x.set(None);
+        self.after_jump();
+        true
+    }
+
     /// Select remark `id`'s text (or go to its block) and show it.
     pub(crate) fn select_remark(&self, id: u64) {
         if self.editor.borrow_mut().select_remark(id) {

@@ -1183,10 +1183,7 @@ pub fn parse_fragment(text: &str, in_math: bool) -> Fragment {
         }
         return Fragment::Plain(text.to_string());
     }
-    let mut blocks = import_typ(&format!("x\n\n{text}")).blocks;
-    if !blocks.is_empty() {
-        blocks.remove(0);
-    }
+    let blocks = parse_blocks(text);
     match &blocks[..] {
         [block] if block.label.is_empty() => match &block.kind {
             Block::Paragraph(inlines) => Fragment::Inlines(inlines.clone()),
@@ -1194,6 +1191,17 @@ pub fn parse_fragment(text: &str, in_math: bool) -> Fragment {
         },
         _ => Fragment::Blocks(blocks),
     }
+}
+
+/// Typst read as a document's content (a change Claude proposes, a
+/// paste): after a first paragraph, so leading rules and definitions are
+/// content, not a header.
+pub fn parse_blocks(text: &str) -> Vec<BlockNode> {
+    let mut blocks = import_typ(&format!("x\n\n{text}")).blocks;
+    if !blocks.is_empty() {
+        blocks.remove(0);
+    }
+    blocks
 }
 
 /// Whether `nodes[i]` is the `#` of a call that stands on lines of its own
@@ -1599,6 +1607,30 @@ $ f(x) &= cases(1 "if" x > 0, 0) \
             panic!("math");
         };
         assert_eq!(nodes.len(), 3);
+    }
+
+    /// A block Claude rewrites: one heading or paragraph is one block, a
+    /// label kept; a lemma and a paragraph are two.
+    #[test]
+    fn blocks_of_a_change() {
+        let blocks = parse_blocks("= Results <res>");
+        assert_eq!(blocks.len(), 1);
+        assert!(
+            matches!(blocks[0].kind, Block::Heading { .. }),
+            "{blocks:?}"
+        );
+        assert_eq!(blocks[0].label, "res");
+        let blocks = parse_blocks("Let $x > 0$.");
+        assert!(matches!(
+            blocks[..],
+            [BlockNode {
+                kind: Block::Paragraph(_),
+                ..
+            }]
+        ));
+        let blocks = parse_blocks("#lemma[\nLet $x$.\n]\n\nSo.");
+        assert_eq!(blocks.len(), 2, "{blocks:?}");
+        assert!(matches!(blocks[0].kind, Block::Env { .. }), "{blocks:?}");
     }
 
     /// Named arguments of math calls are kept as code (`opts`), written

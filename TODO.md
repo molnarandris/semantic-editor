@@ -17,7 +17,10 @@ From the user's list of 2026-11-15, one group at a time:
 
 1. Chat: Claude proposes remarks, the user adds them (spec.md, App, "Places for
    Claude"): done, awaiting the user's test.
-2. Sidebar buttons look bad (postponed by the user, not important).
+2. Chat: Claude proposes changes of whole blocks (`#change(block: N)[…]`), a card
+   with Apply (one undoable edit) and the current version folded: done, awaiting
+   the user's test. (idea) Next: word differences marked (with D), Apply All.
+3. Sidebar buttons look bad (postponed by the user, not important).
 
 Then the planned features:
 
